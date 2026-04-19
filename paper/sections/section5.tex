@@ -1,0 +1,547 @@
+%% =====================================================================
+%% Section 5: A Formal Trade-off Framework for Representation
+%%            Selection (RQ3)
+%% =====================================================================
+\section{A Formal Trade-off Framework for Representation Selection}
+\label{sec:tradeoff}
+
+\noindent\textit{``The choice of context representation is not an
+implementation detail—it is the primary design decision that caps
+a system's quality ceiling.''} --- derived from the SWE-bench analysis
+of Yang et al.~\cite{yang2024sweagent}
+
+\medskip
+
+Sections~\ref{sec:taxonomy} and~\ref{sec:results} established \emph{what}
+the seven PAR paradigms do and \emph{how well} they perform in controlled
+benchmarks.  Section~\ref{sec:tradeoff} addresses the practitioner's
+question: \emph{given a deployment context, which paradigm should I
+choose?}  We answer this by constructing a \textbf{formal trade-off
+framework} grounded in five operationally measurable dimensions, deriving
+a scored comparison matrix, and stating explicitly when and why a
+practitioner should prefer PAR-$X$ over PAR-$Y$.
+
+% ----------------------------------------------------------------
+\subsection{Motivation: Why One Dimension Is Never Enough}
+\label{subsec:tradeoff:motivation}
+% ----------------------------------------------------------------
+
+Prior surveys present performance tables organised by benchmark
+score~\cite{hou2024llmse_slr,husein2025llmcompletion_slr,tao2026ragsurvey}.
+While informative, this single-axis ranking conflates fundamentally
+different cost categories.  Consider two contrasting failure modes:
+
+\begin{itemize}
+  \item \textbf{Repoformer}~\cite{wu2024repoformer} achieves high
+        token efficiency by selectively skipping retrieval for
+        in-file-sufficient queries, but its static retrieval policy
+        cannot adapt when a freshly pushed commit invalidates the
+        indexed embedding space.
+
+  \item \textbf{SWE-agent}~\cite{yang2024sweagent} dynamically
+        discovers context by navigating the live repository, achieving
+        near-perfect freshness, but issues 30--60 tool calls per task,
+        incurring latency of 2--10 minutes on SWE-bench instances.
+\end{itemize}
+
+\noindent These failure modes are orthogonal: a system can be fast yet
+stale, or fresh yet slow.  A practitioner deploying a CI/CD copilot
+(\textit{e.g.}\  sub-second inline completion) faces entirely different
+constraints than one deploying a nightly issue-resolution agent
+(\textit{e.g.}\  SWE-bench-style).  The framework we introduce makes
+these constraints explicit.
+
+% ----------------------------------------------------------------
+\subsection{The Five Operational Dimensions}
+\label{subsec:tradeoff:dimensions}
+% ----------------------------------------------------------------
+
+We define five operational dimensions $\mathcal{D}_1$--$\mathcal{D}_5$
+that jointly determine the cost--quality surface of a repository
+representation paradigm.  Each dimension is assigned a score from
+1 (worst) to 5 (best) based on evidence from primary studies.
+
+\subsubsection*{$\mathcal{D}_1$: Semantic Precision}
+
+\emph{Definition}: The fraction of task-relevant context that the
+paradigm includes in the assembled prompt, excluding irrelevant noise.
+Formally, let $R$ be the set of code elements causally required to solve
+a task, and let $A$ be the set assembled by the paradigm.  Semantic
+precision is $|R \cap A| / |A|$ (precision) and $|R \cap A| / |R|$
+(recall); the harmonic mean $F_1$ serves as our proxy.
+
+\emph{Evidence}: Graph-based systems (PAR-3) achieve the highest
+$F_1$ on cross-file completion because dependency edges encode precise
+causal links~\cite{liu2024graphcoder,cheng2024dataflow}.
+GraphCoder's coarse-to-fine retrieval over code-context graphs
+raises cross-file $F_1$ by $+$7.3 pp over BM25-based
+RAG~\cite{liu2024graphcoder}.  PAR-2 systems with BM25 or dense
+retrieval suffer precision degradation at scale: Gu et
+al.~\cite{gu2025whatretrieve} show that \textit{what} is retrieved
+matters more than \textit{how much}, and that token-budget saturation
+(> 80\% of context filled with irrelevant chunks) cuts downstream
+performance by 18\%.  PAR-7 agentic systems achieve high recall
+by design (they can issue unlimited tool calls) but at the cost of
+precision: the agent may navigate several red-herring files before
+finding the root cause~\cite{yang2024sweagent,ma2025lingmaagent}.
+PAR-6 compression introduces precision loss when the summariser
+discards semantically thin but syntactically critical tokens
+(\textit{e.g.}\  type annotations, exception signatures), a deficiency
+documented by LongCodeZip~\cite{shi2025longcodezip} and quantified
+by SWE-Pruner~\cite{wang2026swepruner}: over-aggressive pruning
+incurs a $-$11\% task-completion regression on SWE-bench.
+
+\subsubsection*{$\mathcal{D}_2$: Token Efficiency}
+
+\emph{Definition}: The ratio of semantically informative tokens to
+total tokens consumed, averaged over a task batch.  A higher ratio
+implies more information per dollar of LLM API cost.
+
+\emph{Evidence}: PAR-6 compression maximises token efficiency almost by
+definition: LongCodeZip~\cite{shi2025longcodezip} achieves a 4$\times$
+compression ratio (i.e.,  1{,}000 effective tokens from a 4{,}000-token
+context) with $<$3\% downstream quality loss on code completion
+benchmarks.  Repoformer~\cite{wu2024repoformer} selectively skips
+retrieval on 35--55\% of queries that do not benefit from cross-file
+context, saving one retrieval call and associated tokens per skipped
+query with no quality regression.  PAR-3 graph systems incur a token
+overhead because graph-serialisation formats (adjacency lists, Cypher
+queries~\cite{liu2025codexgraph}) are verbose; CodexGraph's Cypher
+interface reduces raw token usage vs.\  full-graph serialisation but
+still costs 20--40\% more tokens than a pure BM25 RAG pipeline
+for the same recall level.  PAR-7 agentic systems are worst: each tool
+call consumes a full model forward pass plus the tool's output, and
+multi-step navigation inflates total tokens by $3$--$8\times$ relative
+to a single-shot PAR-2 retrieval~\cite{wang2025openhands}.  HumanEvo
+\cite{zheng2025humanevo} further shows that token-budget waste in PAR-7
+systems grows super-linearly with repository size, because agents explore
+an increasing number of irrelevant file paths.
+
+\subsubsection*{$\mathcal{D}_3$: Construction Latency}
+
+\emph{Definition}: Wall-clock time to produce the context that is
+submitted to the LLM, measured in a \emph{cold-start} scenario
+(first query on a previously unseen repository).
+
+\emph{Evidence}: PAR-1/PAR-2 systems with offline-indexed embeddings
+achieve $<$100 ms retrieval latency after indexing, making them
+suitable for interactive (sub-200 ms) code completion.  Repoformer
+\cite{wu2024repoformer} adds a negligible classification overhead
+($<$5 ms) to decide whether retrieval is needed at all.  PAR-3
+systems incur indexing latency proportional to repository size:
+building a project-level call graph for a 50K-LOC Java repository
+takes 8--45 seconds depending on the tool
+chain~\cite{liu2024graphcoder,ouyang2025repograph}.  At query time,
+graph traversal is fast ($<$50 ms) for bounded-hop queries; however,
+whole-graph operations for CodexGraph-style Cypher
+queries~\cite{liu2025codexgraph} can reach 300--800 ms.  PAR-4
+execution-trace systems depend on runtime: triggering a test suite
+to obtain a stack trace takes 10s of seconds to minutes.
+PAR-6 compression adds an amortisable one-time cost to
+summarise repository files ($\sim$30--120 s for a 10K-LOC
+codebase~\cite{shi2025longcodezip}), but the compressed representation
+then serves any subsequent query instantly.  PAR-7 agentic navigation
+is the highest-latency paradigm: median first-response time on
+SWE-bench is 180--450 seconds for competitive
+agents~\cite{yang2024sweagent,ma2025lingmaagent}.
+
+\subsubsection*{$\mathcal{D}_4$: Update Cost}
+
+\emph{Definition}: Incremental time and compute required to keep the
+representation consistent after a single commit modifies a subset of
+the repository.
+
+\emph{Evidence}: PAR-2 RAG systems with chunk-level indices support
+cheap \emph{incremental} updates: only modified file chunks need
+re-embedding.  Repoformer~\cite{wu2024repoformer} tracks file
+modification timestamps and re-indexes only changed chunks, keeping
+update latency $O(\Delta)$ (proportional to diff size).  PAR-3
+graph systems face a more expensive update: a commit that renames a
+public API function invalidates all call-graph edges to that function,
+potentially requiring whole-graph re-computation for languages without
+incremental static-analysis
+tooling~\cite{ouyang2025repograph,liu2024graphcoder}.  HumanEvo
+\cite{zheng2025humanevo} stress-tests this by simulating repository
+evolution across 12 months of real commit history; PAR-3 systems
+degrade 14--22\% more than PAR-2 systems in the absence of
+incremental graph updates.  CodeMEM~\cite{wang2026codemem} mitigates
+update cost by representing repository state as a mutable in-context
+memory tree that patches locally (AST node replacement) rather than
+globally; update cost is $O(\text{diff lines})$.  PAR-7 agentic
+systems have the lowest update cost: because they hold no persistent
+index, they always read the live filesystem and are inherently
+up-to-date, albeit at the cost of re-navigating from scratch on every
+invocation~\cite{yang2024sweagent}.  PAR-6 compression systems must
+re-summarise changed files; intelligent change-propagation strategies
+are largely absent from the current literature (a gap noted in
+\S\ref{subsec:tradeoff:gaps}).
+
+\subsubsection*{$\mathcal{D}_5$: Scalability}
+
+\emph{Definition}: Degradation in $\mathcal{D}_1$--$\mathcal{D}_4$
+as repository size grows from 1K to 10K+ files.
+
+\emph{Evidence}: PAR-1 dense-embedding indices scale
+\emph{sub-linearly} in retrieval time thanks to ANNS (approximate
+nearest-neighbour search) data structures, but their semantic coverage
+degrades at scale because a fixed embedding dimension cannot
+distinguish functionally similar modules~\cite{gu2025secret}.
+SECRET~\cite{gu2025secret} addresses this with segmented deep hashing
+and demonstrates $+$8\% retrieval quality at the 10K-file scale vs.\
+standard FAISS indexing.  PAR-3 graph systems face $O(N^2)$ edge
+growth for densely interconnected repositories; RepoHyper
+\cite{phan2025repohyper} prunes the hypergraph to $k$-nearest
+structural neighbours, maintaining $O(N \log N)$ index size.
+PAR-7 agentic systems show the starkest scalability challenge:
+Prometheus~\cite{pan2026prometheus} documents that agent trajectory
+length grows linearly with codebase size, hitting context-window
+limits ($\sim$200K tokens for GPT-4o) on repositories exceeding
+$\sim$15K files.  Luo et al.'s RPG-Encoder~\cite{luo2026rpgencoder}
+proposes universal repository embeddings trained to be robust across
+scales, reporting stable performance from 500 to 50K files.
+PAR-6 compression systems exhibit the best scalability profile
+because the compressed representation is bounded by a fixed output
+token count regardless of repository size~\cite{shi2025longcodezip}.
+
+% ----------------------------------------------------------------
+\subsection{Trade-off Matrix}
+\label{subsec:tradeoff:matrix}
+% ----------------------------------------------------------------
+
+Table~\ref{tab:tradeoff} summarises the five-dimensional scoring for
+each PAR paradigm.  Scores range from 1 (poor) to 5 (excellent)
+and are assigned based on the evidence reviewed in
+\S\ref{subsec:tradeoff:dimensions}.  An $\oplus$ marker indicates a
+hybrid system that transcends its primary category.
+
+\begin{table*}[t]
+\caption{Trade-off Matrix: PAR Paradigms on Five Operational
+Dimensions. Scores 1--5 (5~=~best). \textbf{Bold} indicates the
+highest score per column. $\downarrow$ indicates lower is better for
+$\mathcal{D}_3$ and $\mathcal{D}_4$ (we invert for display so 5 =
+lowest latency / lowest update cost).}
+\label{tab:tradeoff}
+\small
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}
+    p{2.8cm}   % Paradigm
+    >{\centering}p{1.7cm}  % D1
+    >{\centering}p{1.7cm}  % D2
+    >{\centering}p{1.7cm}  % D3
+    >{\centering}p{1.7cm}  % D4
+    >{\centering\arraybackslash}p{1.7cm}  % D5
+  }
+\toprule
+\textbf{Paradigm} &
+\textbf{$\mathcal{D}_1$}  &
+\textbf{$\mathcal{D}_2$}  &
+\textbf{$\mathcal{D}_3$}  &
+\textbf{$\mathcal{D}_4$}  &
+\textbf{$\mathcal{D}_5$}  \\
+& \textit{Semantic} & \textit{Token} & \textit{Construct.} & \textit{Update} & \textit{Scala-} \\
+& \textit{Precision} & \textit{Efficiency} & \textit{Latency}$^{\downarrow}$ & \textit{Cost}$^{\downarrow}$ & \textit{bility} \\
+\midrule
+PAR-1: Dense Embedding
+  & 3 & 3 & \textbf{5} & 4 & 3 \\
+\addlinespace[2pt]
+PAR-2: RAG Cross-File
+  & 3 & 4 & \textbf{5} & \textbf{5} & 4 \\
+\addlinespace[2pt]
+PAR-3: Graph-Based
+  & \textbf{5} & 2 & 3 & 2 & 3 \\
+\addlinespace[2pt]
+PAR-4: Execution-Trace
+  & 4 & 3 & 2 & \textbf{5} & 3 \\
+\addlinespace[2pt]
+PAR-5: Memory-Augmented
+  & 4 & 3 & 4 & 4 & 3 \\
+\addlinespace[2pt]
+PAR-6: Compression
+  & 2 & \textbf{5} & 4 & 3 & \textbf{5} \\
+\addlinespace[2pt]
+PAR-7: Agentic Navigation
+  & 4 & 1 & 1 & \textbf{5} & 2 \\
+\bottomrule
+\end{tabular*}
+\vspace{2pt}
+\begin{minipage}{\textwidth}
+\footnotesize
+\textit{Evidence base}: $\mathcal{D}_1$: \cite{liu2024graphcoder,gu2025whatretrieve,wang2026swepruner};
+$\mathcal{D}_2$: \cite{shi2025longcodezip,wu2024repoformer,liu2025codexgraph,wang2025openhands};
+$\mathcal{D}_3$: \cite{wu2024repoformer,liu2024graphcoder,yang2024sweagent,shi2025longcodezip,ma2025lingmaagent};
+$\mathcal{D}_4$: \cite{wu2024repoformer,zheng2025humanevo,wang2026codemem,yang2024sweagent};
+$\mathcal{D}_5$: \cite{gu2025secret,phan2025repohyper,pan2026prometheus,shi2025longcodezip,luo2026rpgencoder}.
+\end{minipage}
+\end{table*}
+
+Several patterns emerge from Table~\ref{tab:tradeoff}:
+
+\begin{itemize}
+
+  \item \textbf{No paradigm dominates.}  Each paradigm leads on at
+        most two dimensions and trails on at least one.  The closest
+        to an all-rounder is PAR-2, which scores $\geq 3$ on all
+        dimensions—but it never leads on precision or scalability.
+
+  \item \textbf{Precision and token efficiency are anti-correlated.}
+        PAR-3 achieves the highest semantic precision (5) at the
+        cost of the second-lowest token efficiency (2).  PAR-6
+        achieves the highest token efficiency (5) at the cost of the
+        lowest precision (2).  The fundamental tension is that rich
+        structural information is verbose, and compression discards
+        structural nuance.
+
+  \item \textbf{Latency and update cost are positively correlated
+        with precision for structural paradigms.}  PAR-3's high
+        precision comes from expensive offline indexing (latency 3)
+        and fragile incremental update (cost 2).  PAR-7's
+        on-demand navigation achieves high freshness (update cost 5)
+        at the price of catastrophic construction latency (1).
+
+  \item \textbf{Scalability is an Achilles' heel for agentic
+        systems.}  PAR-7 scores only 2 on scalability, the joint
+        worst alongside PAR-3 (when graph size is unbounded).
+        This is a critical constraint for industrial deployment.
+
+\end{itemize}
+
+% ----------------------------------------------------------------
+\subsection{Practitioner Selection Guidelines}
+\label{subsec:tradeoff:guidelines}
+% ----------------------------------------------------------------
+
+We now operationalise the matrix into concrete \emph{decision rules}
+for system designers.  We frame each guideline as a conditional
+statement on the deployment context.
+
+\subsubsection{Guideline~G1: Choose PAR-2 when latency and update
+freshness are hard constraints.}
+
+Interactive tools such as IDE autocompletion have a perceptual latency
+budget of $\leq$200~ms~\cite{wu2024repoformer}.  PAR-2 with offline
+chunk-level indexing is the only paradigm that consistently satisfies
+this budget after the cold-start indexing phase.  Its incremental
+update model (re-embed only changed chunks) sustains freshness across
+rapid commit cycles.  Repoformer's selective-retrieval
+optimisation~\cite{wu2024repoformer} further reduces token waste for
+in-file-sufficient queries.  \textbf{Practical implication}: a
+production code-completion copilot should default to PAR-2; the
+selective-retrieval gate of Repoformer should be treated as a
+mandatory engineering best practice rather than an optional add-on.
+
+\paragraph{Why not PAR-1?}  PAR-1 shares PAR-2's latency advantage
+but lacks query-conditioned retrieval; it assembles context based on
+the query embedding, missing cross-file dependencies that lie in
+semantically distant but structurally adjacent files.
+GraphCodeBERT~\cite{guo2021graphcodebert} partially bridges this gap
+via DFG pre-training, but it remains a retrieval encoder, not a
+context assembler.  \textbf{Verdict}: prefer PAR-2 over PAR-1 for
+any completion task requiring cross-file context.
+
+\subsubsection{Guideline~G2: Choose PAR-3 when downstream task quality
+is the primary objective and repository churn is low.}
+
+When token budget is generous, commit rate is low (\textit{e.g.}\  
+a released library rather than an active development branch), and
+task quality is paramount (\textit{e.g.}\  a production code-review
+assistant), PAR-3 graph-based representation offers the highest
+semantic precision.  GraphCoder~\cite{liu2024graphcoder}'s
+coarse-to-fine retrieval over code-context graphs consistently
+outperforms PAR-2 baselines by 5--9 pp on RepoBench's cross-file
+completion categories.  RepoHyper~\cite{phan2025repohyper}'s
+graph-pruning strategy limits memory growth on large repositories,
+making PAR-3 feasible at moderate scale.
+
+\paragraph{Why not PAR-3 for high-churn repositories?}
+HumanEvo~\cite{zheng2025humanevo} quantifies the staleness penalty:
+a PAR-3 system evaluated on 6-month-evolved repositories (without
+graph refresh) degrades by 14--22\% relative to a contemporaneously
+evaluated PAR-2 system.  Since call-graph refresh after a significant
+API refactor is a non-trivial engineering operation, PAR-3 becomes
+risky in rapid-release contexts.  \textbf{Verdict}: prefer PAR-3 for
+static or slow-moving codebases; fall back to PAR-2 otherwise.
+
+\subsubsection{Guideline~G3: Choose PAR-6 when operating under extreme
+token budget constraints or serving very large repositories as a
+single prompt.}
+
+Large-context LLMs (128K--1M token windows) create a temptation to
+simply concatenate all repository files.  In practice, input-length
+degradation (``lost in the middle'' effects) and inference cost make
+raw concatenation infeasible above $\sim$10K files.  PAR-6
+compression provides a principled solution: LongCodeZip
+\cite{shi2025longcodezip} achieves a 4$\times$ compression factor
+with $<$3\% quality loss, enabling a 10K-LOC repository to fit in a
+32K-token window.  Hierarchical summarisation
+\cite{dhulshette2025hiersum} further adapts compression depth by
+directory tier.
+
+\paragraph{Why not PAR-6 for tasks requiring structural precision?}
+LongCodeZip's training objective minimises cross-entropy on code
+tokens, which biases compression toward \emph{frequent} patterns.
+Rare but critical patterns—custom exception hierarchies, obscure
+type constraints, deprecated-but-still-called APIs—are
+disproportionately likely to be elided~\cite{wang2026swepruner}.
+SWE-Pruner documents a $-$11\% regression on SWE-bench when
+aggressive compression removes issue-relevant type
+annotations~\cite{wang2026swepruner}.  \textbf{Verdict}: use PAR-6
+when summarisation-robust tasks (documentation generation, high-level
+planning) dominate; combine PAR-2 with PAR-6 for a hybrid that
+retrieves precisely then compresses aggressively.
+
+\subsubsection{Guideline~G4: Choose PAR-7 when the task requires
+open-ended exploration and latency is not a constraint.}
+
+SWE-bench~\cite{jimenez2024swebench} represents the class of tasks
+where neither the relevant file set nor the root-cause code locus is
+known in advance.  PAR-7 agentic systems are the only paradigm that
+systematically outperforms all others on this task class, achieving
+35--50\% resolution rates versus $<$18\% for PAR-2
+\cite{ma2025lingmaagent,yang2024sweagent}.  The key insight is that
+\emph{exploration is semantically necessary}: the agent must determine
+which file to read before a meaningful context can be assembled.
+No offline index can replicate this capability for arbitrary, unseen
+issues.
+
+\paragraph{Why not PAR-7 for large repositories?}
+Prometheus~\cite{pan2026prometheus} identifies a \emph{horizon
+collapse} failure mode: agentic trajectories for issues in
+repositories with $>$15K files frequently exhaust the LLM's context
+window on navigation scaffolding before reaching the root-cause file.
+LingmaAgent~\cite{ma2025lingmaagent} mitigates this via a two-stage
+coarse-to-fine localization; however, even this system degrades by
+18\% on the largest SWE-bench repositories.  \textbf{Verdict}: use
+PAR-7 unconditionally for complex issue-resolution tasks on
+repositories up to $\sim$10K files; deploy PAR-7 with a
+coarse-localisation pre-filter (PAR-3 or PAR-2) for larger
+repositories.
+
+\subsubsection{Guideline~G5: Prefer PAR-5 for iterative tasks where
+context must accumulate across multiple LLM invocations.}
+
+Tasks such as incremental feature development~\cite{wang2026codemem},
+multi-turn refactoring, or long-horizon test generation
+require the representation to \emph{grow} as the agent produces
+and observes code changes.  PAR-5 memory systems maintain a
+mutable, task-scoped representation that absorbs each edit
+delta without discarding prior context.  CodeMEM
+\cite{wang2026codemem} demonstrates a $+$9.1\% improvement over
+PAR-2 on multi-turn code generation by preserving AST-node-level
+change history in memory.  \textbf{Verdict}: for single-turn
+tasks PAR-5 offers no advantage over PAR-2; activate PAR-5
+only when inter-turn dependency is structurally necessary.
+
+% ----------------------------------------------------------------
+\subsection{Hybrid and Compositional Strategies}
+\label{subsec:tradeoff:hybrid}
+% ----------------------------------------------------------------
+
+Real-world deployments increasingly combine paradigms rather than
+applying a single one.  We identify three architecturally motivated
+hybrid strategies:
+
+\begin{description}
+  \item[H1: PAR-2 $+$ PAR-3 (precision-guided retrieval).]
+        Use a lightweight BM25/dense retriever (PAR-2) as a first
+        stage to identify candidate files, then rerank and augment
+        via structural graph traversal (PAR-3).  GraphCoder
+        \cite{liu2024graphcoder} and RepoHyper
+        \cite{phan2025repohyper} instantiate this strategy; both
+        outperform pure PAR-2 and pure PAR-3 at the same token
+        budget.
+
+  \item[H2: PAR-7 $+$ PAR-3 (agent-guided structural navigation).]
+        An agentic system (PAR-7) uses graph-structured indices
+        (PAR-3) as a high-bandwidth navigation oracle rather than
+        raw file reads.  LocAgent~\cite{chen2025sweexp} implements a
+        PAR-7 outer loop that issues Cypher queries against a
+        CodexGraph~\cite{liu2025codexgraph} database, reducing
+        median tool calls from 48 to 21 on SWE-bench (a $-$56\%
+        latency reduction) while retaining resolution quality.
+
+  \item[H3: PAR-2 $+$ PAR-6 (efficient large-context retrieval).]
+        Retrieve the top-$k$ chunks via PAR-2, then compress the
+        assembled context via PAR-6 before submitting to the LLM.
+        This strategy is applicable when token budget is tight but
+        quality must exceed PAR-6 alone.  LongCodeZip
+        \cite{shi2025longcodezip} can be applied in this post-hoc
+        compression role without modification; the 4$\times$
+        compression rate is largely preserved even on
+        RAG-assembled contexts.
+\end{description}
+
+% ----------------------------------------------------------------
+\subsection{Open Problems and Research Gaps}
+\label{subsec:tradeoff:gaps}
+% ----------------------------------------------------------------
+
+The trade-off framework exposes several open problems that the
+current literature does not adequately address:
+
+\begin{enumerate}
+
+  \item \textbf{Incremental PAR-3 graph maintenance.}
+        No existing PAR-3 system provides a production-grade
+        incremental graph-update protocol that is robust to API
+        renames, file moves, and dependency removals.  HumanEvo
+        \cite{zheng2025humanevo} quantifies the staleness penalty
+        but does not provide a remedy.  A formal change-propagation
+        algorithm for code-context graphs—analogous to incremental
+        compilers in language tooling—is an open engineering problem.
+
+  \item \textbf{Precision-preserving compression for PAR-6.}
+        Current compression models~\cite{shi2025longcodezip} are
+        trained to minimise generation loss, which is a poor proxy
+        for task-relevant information retention.  A compression
+        objective that explicitly penalises the elision of
+        structurally critical tokens (type annotations, exception
+        signatures, API contracts) is absent from the literature.
+
+  \item \textbf{Scalable PAR-7 trajectory control.}
+        Prometheus~\cite{pan2026prometheus} documents horizon
+        collapse but does not solve it.  A principled algorithm for
+        \emph{adaptive trajectory truncation}—terminating navigation
+        when information gain per tool call falls below a threshold—
+        would substantially improve PAR-7 scalability.
+
+  \item \textbf{Multi-project and cross-repository representation.}
+        All seven PAR paradigms assume a single-repository context.
+        Microservice architectures~\cite{jiang2026surveycodegen} and
+        monorepos with loosely coupled sub-packages violate this
+        assumption.  The interaction between inter-repository
+        dependency graphs and intra-repository context representation
+        is unexplored.
+
+  \item \textbf{Unified evaluation protocol across dimensions.}
+        Benchmark suites including SWE-bench~\cite{jimenez2024swebench},
+        RepoBench~\cite{liu2024repobench}, and HumanEvo
+        \cite{zheng2025humanevo} each capture one or two of the five
+        dimensions (primarily $\mathcal{D}_1$) but none jointly
+        measures all five.  A community-standard benchmark that
+        reports latency, update cost, and scalability alongside
+        task quality would substantially accelerate comparative
+        research.
+
+\end{enumerate}
+
+% ----------------------------------------------------------------
+\subsection{Summary of RQ3}
+\label{subsec:tradeoff:summary}
+% ----------------------------------------------------------------
+
+\begin{formal}
+\noindent\textbf{Answer to RQ3.}
+No single repository representation paradigm is optimal across all
+five operational dimensions.  PAR-2 (RAG cross-file) provides the
+best all-round baseline, particularly for latency-constrained
+interactive tools.  PAR-3 (graph-based) maximises semantic precision
+for stable repositories but is fragile under high commit rates.  PAR-6
+(compression) is the most token-efficient and scalable paradigm but
+sacrifices structural precision.  PAR-7 (agentic navigation) is the
+only paradigm that reliably resolves open-ended repository issues, but
+its latency and scalability limitations restrict its applicability to
+batch or asynchronous deployment contexts.  Practitioners operating
+near the Pareto frontier of the cost--quality surface should adopt
+hybrid strategy H1 (PAR-2 $+$ PAR-3) for structured completion tasks
+and H2 (PAR-7 $+$ PAR-3) for issue-resolution tasks, reserving
+pure PAR-6 for large-repository summarisation pipelines.
+\end{formal}
