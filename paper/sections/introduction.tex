@@ -1,0 +1,252 @@
+%% =============================================================================
+%% Section 1 — Introduction
+%% "How Do LLM-Based Agents Represent Code Repositories?"
+%% ACM Transactions on Software Engineering and Methodology (TOSEM)
+%% =============================================================================
+
+\section{Introduction}
+\label{sec:introduction}
+
+Modern software development is intrinsically a \emph{repository-level} activity.
+A single developer task — fixing a bug, completing a function, resolving a GitHub
+issue — requires reasoning across dozens of interdependent files, import graphs,
+call chains, and test suites.
+Yet the majority of research on applying Large Language Models (LLMs) to Software
+Engineering (SE) treats code as an isolated snippet: feed a function to the model,
+obtain a prediction.
+This design choice is not a minor simplification.
+It is a fundamental representational mismatch between the problems practitioners
+face and the problems researchers solve.
+
+The central question this paper addresses is therefore deceptively simple but
+remarkably unexplored:
+\begin{quote}
+\emph{How do LLM-based systems actually represent a code repository when they need
+to reason about it as a whole?}
+\end{quote}
+
+We answer this question through a rigorous Systematic Literature Review (SLR)
+spanning 159 primary studies (2020--2026), producing a novel seven-paradigm
+taxonomy of the \emph{Repository Representation Problem} (RRP) — the challenge
+of selecting, encoding, and injecting the right subset of a large codebase into a
+finite LLM context window — and mapping each paradigm against seven canonical SE
+objectives: code completion, code generation, program repair, fault localization,
+code search, code translation, and test generation.
+
+\subsection{The Repository Representation Problem}
+\label{subsec:rrp}
+
+We formally define the RRP as follows.
+Let $\mathcal{R}$ denote a repository consisting of $N$ source files
+$\{f_1, \ldots, f_N\}$.
+Given a natural-language or code query $q$, a \emph{repository representation
+function} $\mathcal{F}$ maps $(\mathcal{R}, q)$ to a context $C$:
+\[
+  C = \mathcal{F}(\mathcal{R},\, q,\, \tau),
+  \quad |C| \leq \tau,
+\]
+where $\tau$ is the LLM context-window budget (in tokens).
+The function $\mathcal{F}$ must simultaneously optimise \emph{relevance}
+(high signal-to-noise ratio), \emph{completeness} (capture all cross-file
+dependencies), \emph{freshness} (reflect the current repository state), and
+\emph{efficiency} (fit within $\tau$ at acceptable computational cost).
+These four objectives are in tension; no existing approach optimises all four
+simultaneously, which is precisely why seven distinct representation paradigms
+have emerged in the literature.
+
+\subsection{Motivation and Research Gap}
+\label{subsec:motivation}
+
+The last three years have seen an explosion of work at the intersection of LLMs
+and software repositories.
+Tools such as SWE-agent~\cite{yang2024sweagent}, AutoCodeRover
+\cite{zhang2024autocoderover}, RepoCoder~\cite{zhang2023repocoder}, and
+CodePlan~\cite{bairi2024codeplan} have demonstrated impressive capabilities on
+repository-level benchmarks~\cite{jimenez2024swebench,liu2024repobench,
+ding2023crosscodeeval}.
+However, a unifying conceptual framework that explains \emph{why} these systems
+make different design choices — and what the trade-offs are — has been
+conspicuously absent.
+Existing secondary studies, while valuable, do not fill this gap:
+
+\begin{itemize}
+  \item \textbf{Hou et al.}~\cite{hou2024llmse_slr} conduct a landmark SLR
+        across \emph{all} LLM4SE tasks (395 papers, 2017--2024).
+        Their breadth is a strength and a limitation: repository representation
+        is one among dozens of topics, receiving no dedicated taxonomic
+        treatment.
+        The survey categorises \emph{what} LLMs do (code generation, repair,
+        testing, \ldots) but not \emph{how} they ingest a repository to do so.
+
+  \item \textbf{Husein et al.}~\cite{husein2025llmcompletion_slr} focus
+        specifically on LLM-based code completion, a direct antecedent of our
+        work.
+        Their scope, however, is \emph{function-level} and
+        \emph{file-level} completion; cross-file and repository-level
+        representation strategies are outside their inclusion criteria.
+        Their study predates the agentic paradigm and the RAG revolution in
+        software engineering.
+
+  \item \textbf{Jiang et al.}~\cite{jiang2026surveycodegen} survey LLMs for
+        code generation with admirable depth (published in ACM TOSEM).
+        Their taxonomy organises papers by \emph{generation target} (NL-to-code,
+        code-to-code, test generation).
+        The fundamental question of how a repository is \emph{represented} as
+        context — the input side of the generation pipeline — remains a
+        black box in their framework.
+
+  \item \textbf{Tao et al.}~\cite{tao2026ragsurvey} provide the survey most
+        thematically adjacent to ours: a focused review of
+        \emph{Retrieval-Augmented Code Generation} (RACG) with emphasis on
+        repository-level approaches.
+        Yet their scope is \emph{one} paradigm (retrieval-augmented generation)
+        out of the seven we identify.
+        Paradigms based on dense embeddings (PAR-1), structural graphs (PAR-3),
+        execution traces (PAR-4), memory augmentation (PAR-5), compression
+        (PAR-6), and agentic exploration (PAR-7) fall outside their review
+        boundary, leaving the landscape fragmented.
+
+  \item \textbf{Zhang et al.}~\cite{zhang2026surveyse} offer a recent
+        comprehensive survey of LLMs for SE in \emph{Science China Information
+        Sciences}.
+        Their coverage is broad (analogous to Hou et al.) and organised around
+        SE tasks and LLM architectures.
+        Like Hou et al., the problem of \emph{how} repository context is
+        constructed, selected, and compressed receives no dedicated treatment.
+\end{itemize}
+
+Table~\ref{tab:survey-comparison} crystallises the positioning of our work
+relative to these five surveys across eight analytical dimensions.
+
+\begin{table*}[t]
+  \caption{Positioning of this SLR against five closely related surveys.
+           \ding{51}~= covered as primary focus; \textbf{(\ding{51})}~=
+           partially covered; \ding{55}~= out of scope.}
+  \label{tab:survey-comparison}
+  \small
+  \begin{tabular}{lcccccc}
+    \toprule
+    \textbf{Dimension} &
+    \textbf{Hou 2024}~\cite{hou2024llmse_slr} &
+    \textbf{Husein 2025}~\cite{husein2025llmcompletion_slr} &
+    \textbf{Jiang 2026}~\cite{jiang2026surveycodegen} &
+    \textbf{Tao 2026}~\cite{tao2026ragsurvey} &
+    \textbf{Zhang 2026}~\cite{zhang2026surveyse} &
+    \textbf{This SLR} \\
+    \midrule
+    Repository-level scope          & \textbf{(\ding{51})} & \ding{55} & \textbf{(\ding{51})} & \ding{51} & \textbf{(\ding{51})} & \ding{51} \\
+    Context representation taxonomy & \ding{55} & \ding{55} & \ding{55} & \textbf{(\ding{51})} & \ding{55} & \ding{51} \\
+    7-paradigm RRP taxonomy         & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{51} \\
+    RAG paradigm coverage           & \textbf{(\ding{51})} & \textbf{(\ding{51})} & \textbf{(\ding{51})} & \ding{51} & \textbf{(\ding{51})} & \ding{51} \\
+    Agentic paradigm coverage       & \textbf{(\ding{51})} & \ding{55} & \textbf{(\ding{51})} & \textbf{(\ding{51})} & \textbf{(\ding{51})} & \ding{51} \\
+    Cross-SE-task mapping (7 tasks) & \ding{51} & \ding{55} & \textbf{(\ding{51})} & \ding{55} & \ding{51} & \ding{51} \\
+    10-dimension paradigm analysis  & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{51} \\
+    5-pillar SLR methodology        & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{55} & \ding{51} \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Contributions}
+\label{subsec:contributions}
+
+This paper makes the following original contributions:
+
+\begin{enumerate}
+  \item \textbf{A unified taxonomy of seven repository representation
+        paradigms.}
+        We identify, define, and validate seven distinct strategies by which
+        LLM-based systems construct repository context:
+        (PAR-1) dense code embeddings~\cite{feng2020codebert,guo2022unixcoder},
+        (PAR-2) retrieval-augmented context~\cite{lu2022reacc,zhang2023repocoder},
+        (PAR-3) graph-based structural representations
+        \cite{guo2021graphcodebert,liu2024graphcoder},
+        (PAR-4) execution and dynamic representations~\cite{parasaram2023rete,
+        wang2023rapgen},
+        (PAR-5) memory-augmented context~\cite{wang2026codemem,pan2026prometheus},
+        (PAR-6) compression and summarization
+        \cite{zan2025codes,shi2025longcodezip},
+        and (PAR-7) agentic and iterative exploration
+        \cite{yang2024sweagent,bairi2024codeplan,hong2024metagpt}.
+        The taxonomy is grounded in 159 primary studies and validated against
+        a comprehensive 10-dimension analytical framework covering context
+        representation type, granularity, construction pipeline, computational
+        complexity, token budget, context freshness, semantic precision,
+        scalability, cross-file dependency support, and training dependency.
+
+  \item \textbf{A cross-task mapping of paradigms against 7 SE objectives.}
+        We systematically map each of the seven paradigms against seven SE
+        tasks: code completion, code generation from natural language,
+        automated program repair, fault/bug localization, code search,
+        code translation, and test generation.
+        This dual-axis analysis (paradigm $\times$ SE task) reveals which
+        paradigms dominate which tasks, which paradigms are systematically
+        absent from certain tasks, and what open research opportunities exist.
+
+  \item \textbf{A rigorous 5-pillar SLR methodology.}
+        The review protocol integrates five complementary standards:
+        Kitchenham's SLR guidelines~\cite{kitchenham2007guidelines},
+        Wohlin's snowballing procedure~\cite{wohlin2014snowballing},
+        PRISMA~2020 reporting standards~\cite{page2021prisma},
+        Cruzes and Dyb{\aa}'s thematic synthesis
+        methodology~\cite{cruzes2011recommended}, and the
+        ACM SIGSOFT Empirical Standards~\cite{acmsigsoft2020standards}.
+        This combination ensures \emph{reproducibility}, \emph{transparency},
+        and \emph{rigour} at a level not matched by any of the five surveys
+        above.
+        A full PRISMA 2020 flow diagram and a completed PRISMA checklist
+        (Online Supplement) document every stage of the search, screening,
+        eligibility assessment, and inclusion process.
+
+  \item \textbf{Empirical evidence of benchmark validity threats.}
+        We synthesise evidence that the dominant static-repository assumption
+        embedded in PAR-1, PAR-3, and PAR-6 introduces a systematic
+        evaluation bias of 10--61\% in benchmark performance estimates
+        \cite{zheng2025humanevo}, a threat that all five prior surveys omit.
+
+  \item \textbf{A structured research agenda.}
+        We distil 11 open challenges — spanning the temporal freshness problem,
+        token-budget optimisation, multi-modal repository representations,
+        and evaluation methodology — into a prioritised research agenda for
+        the field.
+\end{enumerate}
+
+\subsection{Why This Paper, Why Now}
+\label{subsec:whynow}
+
+The timing of this review is deliberate.
+Between 2024 and early 2026, the repository-level paradigm underwent three
+simultaneous transitions:
+(i) \emph{agentic systems} (PAR-7) surpassed retrieval-augmented systems
+(PAR-2) as the dominant approach on SWE-bench~\cite{jimenez2024swebench,
+zhang2025swebenchlive}, with resolution rates climbing from 12\% to over 50\%;
+(ii) the \emph{memory} paradigm (PAR-5) emerged as a distinct research thread
+\cite{wang2026codemem,chen2025sweexp}, separating persistent cross-session
+knowledge from transient in-context retrieval;
+and (iii) benchmark construction methodologies matured to expose previously
+hidden biases~\cite{zheng2025humanevo,liu2024repobench}, fundamentally
+questioning results obtained with earlier evaluation setups.
+A survey that predates 2025 — including three of the five surveys reviewed
+above — necessarily misses these transitions.
+A survey scoped to a single paradigm (Tao et al.) or to a single SE task
+(Husein et al.) cannot expose the cross-paradigm trade-offs that practitioners
+need to make informed design decisions.
+\emph{This SLR is designed to fill precisely that gap.}
+
+\subsection{Paper Organisation}
+\label{subsec:organisation}
+
+The remainder of this paper is organised as follows.
+Section~\ref{sec:methodology} describes our five-pillar SLR protocol, including
+the PRISMA 2020 flow diagram, inclusion/exclusion criteria, quality assessment
+procedure, and thematic synthesis method.
+Section~\ref{sec:taxonomy} presents the seven-paradigm taxonomy, defines each
+paradigm formally, and analyses each paradigm across 10 structural dimensions.
+Section~\ref{sec:semapping} maps paradigms against seven SE objectives and
+reports cross-paradigm coverage statistics.
+Section~\ref{sec:findings} presents the synthesis findings: performance trends,
+benchmark threats, open challenges, and emerging hybrid approaches.
+Section~\ref{sec:relatedwork} positions this work in detail against existing
+surveys.
+Section~\ref{sec:threats} discusses threats to validity, limitations of the
+review, and implications for researchers and practitioners.
+Section~\ref{sec:conclusion} concludes with a structured research agenda.
