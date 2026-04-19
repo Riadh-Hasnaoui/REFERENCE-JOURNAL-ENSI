@@ -1,0 +1,198 @@
+% =============================================================================
+% SECTION 1: INTRODUCTION
+% =============================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+The emergence of Large Language Models (LLMs) as core components of software engineering
+toolchains represents one of the most significant shifts in how software is designed, written,
+maintained, and evolved. Systems such as GitHub Copilot, Amazon CodeWhisperer, Cursor, and a
+growing ecosystem of research prototypes now assist developers with tasks ranging from
+single-line autocomplete to full-feature implementation, test generation, bug localization, and
+automated issue resolution. Yet beneath these impressive capabilities lies a deceptively hard
+sub-problem: \emph{how should an LLM-based agent represent an entire software repository?}
+
+A modern software repository is far more than a flat collection of source files. It encompasses
+tens of thousands of functions distributed across hundreds of modules, intricate dependency
+hierarchies, documented interfaces, test suites, configuration files, commit histories, issue
+trackers, and implicit architectural conventions accumulated over years of collaborative
+development. The informational content of a non-trivial open-source project routinely exceeds
+ten million tokens---orders of magnitude beyond the context windows offered by even the most
+capable contemporary LLMs. Representing this richness faithfully, efficiently, and in a form
+that an LLM can exploit is the foundational challenge that all repository-aware AI systems must
+address.
+
+\subsection{Motivation and Problem Statement}
+
+The importance of repository representation becomes immediately apparent when one examines the
+failure modes of naive approaches. Early experiments with LLM-based code completion revealed
+that models trained solely on individual files or functions failed catastrophically on
+cross-file dependencies: they could not locate imported symbols, could not infer the contract
+of a called function defined elsewhere in the repository, and could not respect project-specific
+naming conventions that differ from open-source norms~\cite{ding2023crosscodeeval,
+liu2024repobench}. The fundamental issue is one of context: the information needed to complete
+a code fragment correctly is often not in the immediate vicinity of the cursor, but distributed
+across the repository.
+
+This observation has motivated a rapidly expanding body of research on repository-level software
+engineering with LLMs. Researchers have proposed techniques ranging from static retrieval of
+relevant snippets~\cite{zhang2023repocoder, lu2022reacc} to rich graph-based representations
+of code structure~\cite{guo2021graphcodebert, liu2024graphcoder}, from hierarchical
+summarization~\cite{dhulshette2025hierarchical, makharev2025code} to multi-step agentic
+frameworks that dynamically navigate repository structure~\cite{yang2024sweagent,
+zhang2024autocoderover, jimenez2024swebench}. This body of work has grown to encompass hundreds
+of primary studies published in premier venues including ICSE, FSE, ASE, TOSEM, ACL, EMNLP,
+ICLR, NeurIPS, and ICML.
+
+Despite this explosion of work, the field lacks a principled taxonomy of \emph{repository
+representation paradigms}. Existing surveys of LLM-based software engineering~\cite{hou2024llmse,
+zhang2026survey, jiang2026survey} provide broad coverage of tasks and models but do not
+systematically examine the representation dimension. Reviews of code
+completion~\cite{husein2025codecompletion} focus on a single task and a single paradigm.
+Reviews of retrieval-augmented generation for code~\cite{tao2026ragsurvey} treat retrieval as
+the \emph{only} representation strategy, overlooking graph-based, embedding-based, agentic, and
+summarization-based alternatives. This fragmented picture makes it difficult for both
+researchers designing new systems and practitioners choosing deployment strategies to reason
+about the design space in a principled way.
+
+\subsection{The Repository Representation Problem}
+
+We define \emph{repository representation} as the process by which an LLM-based agent
+constructs and maintains a structured or unstructured encoding of the information contained in
+a software repository, and makes that encoding available---directly or indirectly---to the
+LLM's inference process. This definition is deliberately broad because the literature has
+produced a diverse menagerie of strategies, each making different trade-offs among context
+coverage, computational cost, inference latency, scalability, and task-specific performance.
+
+The core challenge can be decomposed into three sub-problems. First, there is the
+\emph{indexing problem}: given a repository of $N$ files containing $T$ tokens in total, how
+does one construct a data structure that admits efficient queries of the form ``given the
+current editing context $c$, find the $k$ most relevant fragments''? The answer depends
+critically on what ``relevant'' means, which is itself task-dependent. For code completion, the
+most relevant fragments are those most likely to contain symbols, types, or patterns needed
+at the cursor. For bug localization, relevance is defined by causal proximity to the reported
+failure. For code translation, relevance includes type definitions, library bindings, and
+idiomatic patterns in the target language.
+
+Second, there is the \emph{selection problem}: given an index of relevant fragments, how does
+one select and rank a subset that fits within the LLM's context window? The context window is
+simultaneously the most precious and most constrained resource in LLM-based software
+engineering. Overfilling it with irrelevant context degrades generation quality and increases
+inference cost; underfilling it wastes representational capacity and omits crucial information.
+The selection problem is compounded by the well-documented phenomenon of ``lost in the middle'':
+LLMs disproportionately attend to tokens at the beginning and end of their context window,
+making the ordering of retrieved fragments non-trivially important~\cite{yusuf2025beyond}.
+
+Third, there is the \emph{grounding problem}: once a representation has been selected and
+placed in the LLM's context window, how does the model accurately interpret it? Different
+representations---raw source code, API documentation, call graph adjacency lists, compressed
+embeddings, natural language summaries---make different demands on the model's ability to
+extract and apply the encoded information. A representation that is maximally information-dense
+from an information-theoretic perspective may be opaque to a language model trained primarily
+on natural language and syntactically structured source code.
+
+\subsection{Research Questions}
+
+This systematic literature review is organized around five research questions that together
+cover the full scope of the repository representation problem:
+
+\begin{description}[leftmargin=2.5em, labelwidth=2.5em]
+
+\item[\textbf{\rqone}] \textit{What paradigms have been proposed for representing code
+  repositories in LLM-based software engineering systems?} This question drives the
+  construction of our seven-pillar taxonomy. We seek to enumerate and characterize the distinct
+  representational strategies that appear in the literature, identify their key design choices,
+  and trace their historical development from early dense embedding approaches through
+  contemporary multi-agent frameworks.
+
+\item[\textbf{\rqtwo}] \textit{How do repository representation paradigms map onto software
+  engineering tasks?} The appropriateness of a given paradigm is not universal; different tasks
+  impose different requirements on the representation. We investigate which paradigms are most
+  commonly applied to which tasks, and whether there are systematic associations between paradigm
+  choice and task characteristics such as locality, complexity, and interaction with the
+  execution environment.
+
+\item[\textbf{\rqthree}] \textit{What are the empirical performance characteristics of each
+  paradigm, and how do they compare across standardized benchmarks?} We synthesize quantitative
+  results from primary studies to characterize the performance envelope of each paradigm,
+  identify which benchmarks are most widely used and thus best-suited for cross-study
+  comparisons, and assess the degree to which benchmark results are reproducible and
+  generalizable.
+
+\item[\textbf{\rqfour}] \textit{What are the key trade-offs among repository representation
+  paradigms along dimensions of context coverage, retrieval latency, training cost,
+  scalability, and benchmark availability?} We go beyond raw performance to examine the
+  operational characteristics that determine the suitability of each paradigm for real-world
+  deployment, highlighting scenarios where each paradigm excels and where it fails.
+
+\item[\textbf{\rqfive}] \textit{What are the open research challenges and future directions
+  in repository representation for LLM-based software engineering?} We identify gaps in the
+  current literature, propose concrete research agendas, and discuss emerging trends such as
+  multi-paradigm hybridization, energy-aware evaluation, and adaptation to continuously evolving
+  repositories.
+
+\end{description}
+
+\subsection{Contributions}
+
+This paper makes the following primary contributions to the literature on LLM-based software
+engineering:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+
+\item \textbf{Seven-Pillar PAR Taxonomy.} We present the first systematic taxonomy of
+  repository representation paradigms (\parcmd{1}--\parcmd{7}), derived inductively from 160
+  primary studies using thematic synthesis~\cite{cruzes2011thematic}. Each paradigm is
+  characterized by its representational substrate, indexing mechanism, query interface,
+  context management strategy, and typical deployment pattern.
+
+\item \textbf{Bidirectional Task--Paradigm Mapping.} We construct a comprehensive mapping from
+  the seven SE tasks most commonly addressed in the literature to the PAR taxonomy, and
+  conversely from each PAR to the tasks it most effectively supports. This mapping exposes
+  systematic under-coverage (tasks with few paradigm options) and over-coverage (paradigms
+  applied uniformly to all tasks without empirical justification).
+
+\item \textbf{Multi-Dimensional Trade-Off Analysis.} We evaluate each PAR across five
+  operational dimensions---context coverage, retrieval latency, training cost, scalability,
+  and benchmark availability---providing a structured basis for paradigm selection.
+
+\item \textbf{Research Agenda.} We distill our findings into a prioritized set of seven open
+  research challenges, each supported by evidence from the reviewed literature, and propose
+  concrete research directions for each challenge.
+
+\item \textbf{Replication Package.} We provide a publicly available replication package
+  containing the full search protocol, screening decisions, data extraction spreadsheet, and
+  synthesis code.
+
+\end{enumerate}
+
+\subsection{Scope and Boundaries}
+
+This review focuses specifically on the \emph{representation} of code repositories, not on
+LLM-based software engineering in general. We include studies that (a) target one or more
+repository-level software engineering tasks, (b) use an LLM or a pre-trained code model as
+the core inference engine, and (c) make explicit design choices about how repository content
+is represented to the model. We exclude studies that focus exclusively on single-function or
+single-file tasks with no cross-file context, studies that use LLMs purely as classifiers or
+reviewers without generating or modifying code, and studies that focus on code understanding
+for purposes other than software engineering (e.g., code plagiarism detection, malware analysis).
+
+The temporal scope of this review is 2020--2026, capturing the period from the emergence of
+transformer-based code models (CodeBERT~\cite{feng2020codebert}) through the latest
+preprint literature available at the time of our search. This span encompasses both the
+``pre-LLM'' era of specialized code representation models and the contemporary era of general
+large language models such as GPT-4, Claude, and Llama.
+
+\subsection{Paper Structure}
+
+The remainder of this paper is organized as follows. Section~\ref{sec:methodology} describes
+the systematic review methodology, including the search protocol, inclusion/exclusion criteria,
+quality assessment, and data extraction procedures. Section~\ref{sec:taxonomy} presents the
+seven-pillar PAR taxonomy, with detailed descriptions of each paradigm and representative
+works. Section~\ref{sec:semapping} presents the bidirectional task--paradigm mapping and
+analyzes coverage patterns. Section~\ref{sec:findings} answers our five research questions
+with synthesized evidence from the primary studies. Section~\ref{sec:relatedwork} compares
+this review with related surveys. Section~\ref{sec:threats} discusses threats to validity.
+Section~\ref{sec:conclusion} concludes with a summary of key findings and the prioritized
+research agenda. Appendices provide the full data extraction tables, quality assessment
+results, and the complete list of primary studies.
