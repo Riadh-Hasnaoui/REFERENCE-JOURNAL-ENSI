@@ -1,0 +1,452 @@
+%% ============================================================
+%% Section 6: Gap Analysis & Research Agenda (RQ4)
+%% ACM TOSEM SLR — "How Do LLM-Based Systems Represent Code
+%%                  Repositories?"
+%% ============================================================
+
+\section{Gap Analysis \& Research Agenda (RQ4)}%
+\label{sec:gaps}
+
+\noindent
+This section addresses \textbf{RQ4}: \emph{What critical research gaps
+exist in the current landscape of LLM-based code repository
+representation, and what research directions would most effectively
+advance the field?}
+Drawing on the taxonomy of Section~\ref{sec:taxonomy} and the empirical
+findings of Sections~\ref{sec:rq1}--\ref{sec:rq3}, we systematically
+identify five research gaps (\xrg{1}--\xrg{5}) and derive a corresponding
+Research Agenda (\xra{1}--\xra{5}).
+Table~\ref{tab:gap_summary} provides a structured overview.
+
+%%─────────────────────────────────────────────────────────────────────────────
+\begin{table}[htbp]
+\caption{Summary of identified research gaps and research agenda items.
+         TRL = Technology Readiness Level; PAR = Paradigm class;
+         O\textit{x} = Task Objective.}
+\label{tab:gap_summary}
+\small
+\begin{tabular}{@{}lp{3.8cm}p{3.8cm}l@{}}
+\toprule
+\textbf{Gap} & \textbf{Core Problem} & \textbf{Agenda Item} & \textbf{Priority} \\
+\midrule
+\xrg{1} & Under-explored execution-based representation (\xpar{4}):
+         only $n{=}7$ studies, 43\% \xtrl{A}, 0\% \xtrl{B}/\xtrl{C}
+       & Standardised trace encoding \& \xtrl{B} benchmark
+       & High \\[3pt]
+\xrg{2} & Absence of formal cross-session memory persistence (\xpar{5}):
+         0\% \xtrl{C}
+       & Repository Memory Model (RMM) \& multi-session benchmark
+       & High \\[3pt]
+\xrg{3} & Under-coverage of \xobj{5} (Refactoring) \& \xobj{6} (Test
+         Generation): ${<}5\%$ of corpus each
+       & RefactorBench \& O6-Eval evaluation protocol
+       & Medium \\[3pt]
+\xrg{4} & Static repository evaluation bias (\xdim{6}): 10--61\%
+         performance overestimation~\cite{zheng2025humanevo}
+       & Temporal Leakage Score (TLS) \& evolution-aware benchmarking
+       & Critical \\[3pt]
+\xrg{5} & No study compares ${>}2$ paradigms on identical benchmarks
+         under controlled token budgets
+       & Cross-Paradigm Repository Benchmark (CPRB)
+       & High \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection[\xrg{1}: Under-Explored Execution-Based Representation]%
+           {\xrg{1} --- Under-Explored Execution-Based Repository Representation (\xpar{4})}
+\label{sec:rg1}
+
+%%── Gap Definition ──────────────────────────────────────────────────────────
+\begin{gapbox}
+\textbf{Gap Definition.}\;
+\xpar{4} (\emph{execution-based representation}) encompasses paradigms that
+construct repository context from \emph{runtime artefacts}---test execution
+traces, coverage reports, dynamic call sequences, and fault-triggering
+inputs.
+Despite the superior theoretical precision of runtime information for tasks
+such as fault localisation and automated program repair, our corpus reveals a
+\textbf{severe under-representation}: only $n{=}7$ studies employ execution
+traces as a primary context source, corresponding to \textbf{43\% at \xtrl{A}}
+(proof-of-concept only) and \textbf{0\% at \xtrl{B} or above}.
+\end{gapbox}
+
+\smallskip\noindent
+The disparity is stark when contrasted with \xpar{2} (Cross-File RAG,
+$n{=}52$ studies) and \xpar{3} (Graph-Based, $n{=}31$).
+Execution-aware approaches demonstrate that incorporating dynamic signals
+materially improves accuracy: Tu~et~al.~\cite{tu2025tracerepair} show that
+trace-guided repair reduces false patch generation by surfacing
+fault-discriminating runtime observations, while
+Bi~et~al.~\cite{bi2024iterativerefinement} demonstrate that a compiler
+feedback loop at the project level narrows candidate context by an average
+of 38\%.
+Yet the field has not converged on a shared infrastructure for harvesting
+and encoding runtime signals at repository scale.
+
+\paragraph{Root Causes.}
+Three structural barriers explain the gap.
+First, runtime traces require \emph{live, passing test suites}---a
+precondition absent in the majority of SWE-bench~\cite{jimenez2024swebench}
+snapshots.
+Second, execution data is \emph{language-specific} and
+\emph{environment-sensitive}, preventing straightforward reuse across
+benchmarks or repositories.
+Third, the token overhead of serialising full traces frequently exceeds
+current context windows~\cite{guo2023longcoder}, creating a practical
+affordability barrier for execution-dense representations.
+
+%%── Research Agenda ─────────────────────────────────────────────────────────
+\begin{agendabox}
+\textbf{\xra{1} --- Dynamic Trace Compression \& Standardised Encoding.}\;
+The community should develop:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item \emph{Standardised trace serialisation formats} encoding partial
+    execution traces (test inputs, coverage deltas, exception stacks, heap
+    snapshots) into compact, language-agnostic token sequences compatible
+    with existing RAG pipelines;
+  \item \emph{Selective trace-sampling strategies} that maximise
+    fault-discriminating information under a fixed token budget, leveraging
+    information-theoretic measures of trace entropy;
+  \item \emph{Execution-augmented benchmarks} that extend
+    SWE-bench~\cite{jimenez2024swebench} with mandatory test-execution
+    metadata (pass/fail vectors, coverage deltas per commit), enabling
+    fair cross-paradigm evaluation of \xpar{4} systems.
+\end{enumerate}
+Advancing \xpar{4} from \xtrl{A} to \xtrl{B} requires demonstrating
+deployment in a continuous-integration pipeline serving a non-trivial
+open-source project and reporting end-to-end latency under realistic
+time-to-feedback constraints.
+\end{agendabox}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection[\xrg{2}: Absence of Formal Memory Persistence]%
+           {\xrg{2} --- Absence of Formal Memory Persistence for Long-Horizon
+            Coding Tasks (\xpar{5})}
+\label{sec:rg2}
+
+%%── Gap Definition ──────────────────────────────────────────────────────────
+\begin{gapbox}
+\textbf{Gap Definition.}\;
+\xpar{5} (\emph{memory-augmented representation}) treats persistent
+cross-session memory \emph{as} the repository context, encoding prior
+coding decisions, resolved issues, and project conventions across
+development sessions.
+Our analysis reveals a categorical readiness vacuum:
+\textbf{0\% of \xpar{5} systems attain \xtrl{C}} (industrial deployment),
+versus 14\% for \xpar{2} and 9\% for \xpar{7}.
+No primary study in our corpus addresses \emph{cross-session} memory:
+the capacity of a coding system to recall, update, and prune its
+understanding of a repository across days or weeks of collaborative
+development.
+\end{gapbox}
+
+\smallskip\noindent
+Existing systems demonstrate partial but insufficient progress.
+CodeMEM~\cite{wang2026codemem} introduces AST-guided adaptive memory
+\emph{within} a single coding session, showing 6.1\% improvement on
+iterative generation tasks.
+Prometheus~\cite{pan2026prometheus} achieves long-horizon codebase
+\emph{navigation} for single-issue resolution, but neither system nor
+any other in our corpus persists project-level knowledge beyond a single
+interaction boundary.
+This limitation is consequential: long-horizon maintenance tasks such as
+incremental feature development, cross-sprint refactoring, and
+dependency migration require a system that accumulates and revisits
+repository-level knowledge across time.
+
+\paragraph{Root Causes.}
+Three intersecting challenges maintain the gap.
+First, there is \emph{no consensus formalism} for what constitutes a
+``memory entry'' at the repository level---whether it be a code chunk,
+an architectural decision record, an unresolved issue summary, or a
+violated coding convention.
+Second, existing work systematically conflates \xpar{5} (memory
+\emph{as} context) with \xpar{7} (memory \emph{as} an agent component),
+as disambiguated in Section~\ref{sec:taxonomy}; this conceptual blurring
+has prevented dedicated memory architectures from emerging.
+Third, industrial deployment of persistent repository memory raises
+non-trivial \emph{privacy and IP confidentiality} concerns---particularly
+for proprietary codebases---that the academic community has not yet
+addressed.
+
+%%── Research Agenda ─────────────────────────────────────────────────────────
+\begin{agendabox}
+\textbf{\xra{2} --- Cross-Session Repository Memory Architecture.}\;
+Future work should formalise a \emph{Repository Memory Model} (RMM)
+comprising:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item A \emph{taxonomy of memory entry types}---code artefact,
+    architectural decision, constraint, failure pattern, contributor
+    intent---with well-defined read/write/invalidation semantics;
+  \item \emph{CRUD-like memory operators} triggered by commit events,
+    code review actions, and CI/CD outcomes, enabling memory to evolve
+    consistently with the repository;
+  \item \emph{Retention policies} balancing information staleness against
+    token budget, implementing a recency-weighted relevance score
+    analogous to cache eviction policies in operating systems.
+\end{enumerate}
+Evaluation must employ \emph{multi-session benchmarks}---currently
+non-existent---in which a system is assessed over \textbf{sequential
+commits} rather than isolated instances.
+Such benchmarks should extend the temporal evaluation methodology of
+HumanEvo~\cite{zheng2025humanevo} to track memory \emph{retention
+quality} as repositories evolve.
+Attaining \xtrl{C} additionally requires a privacy-preserving memory
+backend (e.g., differential-privacy-aware encoding) and a demonstrated
+human-in-the-loop override mechanism for enterprise deployment.
+\end{agendabox}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection[\xrg{3}: Under-Coverage of O5 and O6]%
+           {\xrg{3} --- Under-Coverage of Software Maintenance Tasks:
+            \xobj{5}~(Refactoring) and \xobj{6}~(Test Generation)}
+\label{sec:rg3}
+
+%%── Gap Definition ──────────────────────────────────────────────────────────
+\begin{gapbox}
+\textbf{Gap Definition.}\;
+The task-objective distribution across our $N{=}163$ primary studies is
+heavily skewed: \xobj{1}~(Code Completion) and \xobj{4}~(Issue/Bug
+Resolution) together account for \textbf{74\% of all studies}, while
+\xobj{5}~(Refactoring) and \xobj{6}~(Test Generation) each represent
+\textbf{fewer than 5\%} of the corpus.
+This imbalance is consequential: refactoring and test generation are
+the two maintenance tasks with the highest economic impact in industrial
+practice~\cite{hou2024llmse_slr} and the highest \emph{structural
+complexity}---both require \emph{global repository reasoning}, not local
+context sufficiency.
+\end{gapbox}
+
+\smallskip\noindent
+The handful of dedicated systems illustrates what is missing at scale.
+RefAgent~\cite{oueslati2026refagent} frames refactoring as a multi-agent
+LLM orchestration problem over repository-level code graphs but evaluates
+on a narrow catalogue of refactoring types.
+CoverUp~\cite{altmayerpizzorno2025coverup} and
+CITYWALK~\cite{zhang2025citywalk} demonstrate progress for Python and C++
+unit test generation respectively, yet neither generalises across
+languages or evaluates the interplay between representation paradigm and
+test-generation effectiveness.
+ChatUniTest~\cite{chen2024chatunitest} provides a multi-language test
+generation framework but does not exploit cross-file repository context,
+limiting its applicability to isolated compilation units.
+
+\paragraph{Root Causes.}
+Benchmark availability is the proximate cause.
+SWE-bench~\cite{jimenez2024swebench} and its derivatives focus
+exclusively on issue resolution; RepoBench~\cite{liu2024repobench} targets
+completion.
+No widely adopted benchmark provides \emph{repository-level refactoring
+or test-suite extension} tasks with verifiable correctness oracles.
+A secondary cause is \emph{evaluation complexity}: measuring refactoring
+quality requires semantic equivalence verification, while measuring test
+generation requires mutation-score computation---both computationally
+expensive at repository scale.
+
+%%── Research Agenda ─────────────────────────────────────────────────────────
+\begin{agendabox}
+\textbf{\xra{3} --- Dedicated Benchmarks and Metrics for \xobj{5} and
+\xobj{6}.}\;
+The community should:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item Curate a \emph{RefactorBench} dataset of verified,
+    behaviour-preserving refactoring commits extracted from
+    high-quality open-source repositories, annotated with pre/post
+    ASTs, type graphs, and formal equivalence certificates;
+  \item Develop an \emph{O6-Eval} protocol combining line coverage,
+    mutation score, and test-smell metrics for LLM-generated test
+    suites, with a reproducible harness supporting multiple programming
+    languages and repository scales;
+  \item Conduct a systematic \emph{cross-paradigm ablation study}
+    evaluating PAR-1 through PAR-7 on both \xobj{5} and \xobj{6} tasks,
+    since our cross-tabulation suggests that graph-based representations
+    (\xpar{3}) are theoretically better-suited to refactoring due to
+    their explicit encoding of structural
+    dependencies~\cite{liu2024graphcoder,tao2025cgm}.
+\end{enumerate}
+\end{agendabox}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection[\xrg{4}: Static Evaluation Bias]%
+           {\xrg{4} --- Static Repository Evaluation Bias and the
+            Stale-Context Threat (\xdim{6})}
+\label{sec:rg4}
+
+%%── Gap Definition ──────────────────────────────────────────────────────────
+\begin{gapbox}
+\textbf{Gap Definition.}\;
+A foundational but rarely acknowledged methodological flaw pervades the
+literature: \textbf{119 of our 163 primary studies} (73\%) evaluate
+systems on \emph{fixed repository snapshots}, implicitly treating a
+repository as a static artefact (dimension \xdim{6} at level
+``Static'').
+This assumption produces a systematic \emph{evaluation inflation} bias
+whose magnitude has been formally quantified by
+Zheng~et~al.~\cite{zheng2025humanevo}, who demonstrate that
+static-snapshot evaluation \textbf{overestimates system performance by
+10--61\%} relative to evaluations conducted on temporally faithful
+repository states.
+\end{gapbox}
+
+\smallskip\noindent
+HumanEvo~\cite{zheng2025humanevo} is the first benchmark in our corpus
+that evaluates repository-level code generation against \emph{historically
+evolved} repositories, reconstructing the exact state of all files at
+each target commit.
+The root mechanism behind the bias is \emph{stale-context leakage}:
+static benchmarks permit models to retrieve---or were pre-trained
+on---code artefacts postdating the target commit, inflating apparent
+retrieval precision and generation accuracy.
+The effect is not uniform: it is most severe in long-context \xpar{2}
+systems that index the full repository without temporal gating, and
+least severe in \xpar{7} agentic systems that construct context on
+demand, where the inflation reaches up to 61\% and as low as 10\%
+respectively~\cite{zheng2025humanevo}.
+
+\paragraph{Root Causes.}
+Four contributing factors maintain the status quo.
+First, constructing temporally faithful benchmarks requires
+\emph{repository archaeology}---reconstructing exact dependency states
+at each target commit---which is orders of magnitude more expensive
+than static extraction.
+Second, the dominant benchmark SWE-bench~\cite{jimenez2024swebench},
+while based on real GitHub issues, does not control for training data
+contamination across temporal boundaries, making post-hoc decontamination
+infeasible.
+Third, most \xpar{2} retrieval pipelines use embedding models pre-trained
+on code corpora that overlap temporally with evaluation repositories,
+further inflating similarity scores.
+Fourth, the community lacks agreed \emph{temporal leakage metrics}
+analogous to data-contamination metrics established in NLP benchmarking.
+
+%%── Research Agenda ─────────────────────────────────────────────────────────
+\begin{agendabox}
+\textbf{\xra{4} --- Temporal-Faithful Evaluation Infrastructure.}\;
+Building on the HumanEvo~\cite{zheng2025humanevo} methodology, the
+community should:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item \emph{Extend temporal-snapshot benchmarking} across all six
+    task objectives (\xobj{1}--\xobj{6}) and multiple programming
+    languages, delivering a multi-task evolution-aware evaluation suite;
+  \item Standardise a \emph{Temporal Leakage Score} (TLS) metric
+    quantifying the fraction of retrieved context chunks post-dating the
+    target commit, providing a per-system contamination indicator that
+    should be reported alongside standard accuracy metrics;
+  \item \emph{Mandate TLS reporting} in benchmark submission guidelines,
+    analogous to the contamination disclosures now required by major NLP
+    benchmarks;
+  \item Develop retrieval pipelines enforcing \emph{temporal integrity
+    constraints}---refusing to index files modified after the query
+    timestamp---analogous to write-ahead logging in database systems,
+    thereby eliminating stale-context leakage at the architectural
+    level.
+\end{enumerate}
+\end{agendabox}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection[\xrg{5}: Absence of Cross-Paradigm Evaluation]%
+           {\xrg{5} --- Absence of Cross-Paradigm Standardised Evaluation}
+\label{sec:rg5}
+
+%%── Gap Definition ──────────────────────────────────────────────────────────
+\begin{gapbox}
+\textbf{Gap Definition.}\;
+The seven representation paradigms (\xpar{1}--\xpar{7}) have evolved in
+effectively isolated research silos.
+Our systematic analysis reveals that \textbf{no single primary study
+directly compares more than two paradigms} on identical benchmarks under
+controlled conditions.
+The absence of cross-paradigm evaluation prevents the community from
+answering the fundamental question: \emph{Under what repository
+characteristics, task objectives, and token budgets is each paradigm
+most effective?}
+\end{gapbox}
+
+\smallskip\noindent
+This gap is not merely academic.
+Practitioners and tool builders selecting a representation strategy for
+production systems---e.g., a RAG-based IDE plugin (\xpar{2}) versus a
+graph-database-backed assistant (\xpar{3}) versus a multi-agent
+orchestrator (\xpar{7})---must rely on incomparable, paradigm-specific
+benchmark results.
+The surveys of Hou~et~al.~\cite{hou2024llmse_slr},
+Husein~et~al.~\cite{husein2025llmcompletion_slr},
+Jiang~et~al.~\cite{jiang2026surveycodegen}, and
+Tao~et~al.~\cite{tao2026ragsurvey} each acknowledge the lack of unified
+evaluation but do not provide a solution framework.
+
+\paragraph{Root Causes.}
+Three factors perpetuate paradigm isolation.
+First, \emph{computational cost asymmetry}: fair comparison requires
+running graph-indexing (\xpar{3}) and agentic exploration (\xpar{7}) at
+the same context budget as dense-retrieval (\xpar{1}), which is
+non-trivial to enforce and costly to execute at scale.
+Second, \emph{benchmark balkanisation}: each paradigm has gravitationally
+adopted its preferred benchmark---SWE-bench~\cite{jimenez2024swebench}
+for agents, RepoBench~\cite{liu2024repobench} for completion,
+CrossCodeEval~\cite{ding2023crosscodeeval} for cross-file retrieval---
+creating incommensurable evaluation landscapes by design.
+Third, \emph{tooling incompatibility}: \xpar{7} agentic systems (e.g.,
+SWE-agent~\cite{yang2024sweagent},
+OpenHands~\cite{wang2025openhands}) require interactive sandboxed
+environments not supported by static evaluation harnesses, while
+\xpar{1} and \xpar{2} systems require only an embedding index.
+
+%%── Research Agenda ─────────────────────────────────────────────────────────
+\begin{agendabox}
+\textbf{\xra{5} --- A Unified Cross-Paradigm Repository Benchmark
+(CPRB).}\;
+We propose the creation of a \emph{Cross-Paradigm Repository Benchmark}
+(CPRB) governed by the following design principles:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item A \emph{fixed task suite} spanning all six objectives
+    (\xobj{1}--\xobj{6}) on the same set of repositories, drawn from
+    multiple languages and domains;
+  \item A \emph{token budget protocol} imposing identical context-window
+    constraints across paradigms (e.g., 4K, 16K, and 128K token tiers)
+    to expose cost--accuracy trade-offs at each tier;
+  \item A \emph{temporal integrity constraint} per \xra{4}, ensuring
+    stale-context-free evaluation across all paradigms;
+  \item Standardised \emph{paradigm adapters}---thin shim layers that
+    transform each system's native output (vector index, graph query
+    result, agent action sequence) into a common context-block
+    representation for evaluation;
+  \item An \emph{efficiency leaderboard} reporting accuracy,
+    wall-clock latency, and estimated cost-per-task for each paradigm
+    tier, enabling practitioners to make evidence-based selection
+    decisions under real operational constraints.
+\end{enumerate}
+Such a benchmark would, for the first time, enable controlled ablation
+of \xpar{2}~(RAG) against \xpar{3}~(Graph) against \xpar{7}~(Agent) on
+identical tasks---transforming the field from paradigm advocacy to
+\emph{evidence-based paradigm selection}.
+\end{agendabox}
+
+%%─────────────────────────────────────────────────────────────────────────────
+\subsection{Summary and Prioritisation}
+\label{sec:gap_summary}
+
+Table~\ref{tab:gap_summary} presents a consolidated view of the five gaps and
+their associated agenda items.
+We designate \xrg{4} (static evaluation bias) as \emph{Critical} because
+it undermines the validity of all extant quantitative results across all
+paradigms: until the community adopts temporal-faithful evaluation and
+standardised TLS reporting, any performance claim in the literature must
+be interpreted with caution.
+\xrg{1} and \xrg{2} are \emph{High}-priority gaps whose resolution would
+unlock entirely new capability classes---execution-aware repair and
+long-horizon autonomous development---currently beyond the reach of the
+field.
+\xrg{3} addresses the economic priority mismatch between what the
+industry needs (refactoring, testing at scale) and what the research
+community delivers.
+\xrg{5} is a prerequisite for mature, evidence-based engineering: without
+a cross-paradigm benchmark, the community cannot rationally guide
+technology transfer decisions for any of the preceding gaps.
+
+Collectively, resolving \xrg{1}--\xrg{5} would advance the field from a
+collection of paradigm-specific demonstrations to a principled,
+empirically grounded engineering discipline for LLM-based code
+repository representation.
