@@ -1,0 +1,1029 @@
+      N EMOTRON -C ORTEXA: Enhancing LLM Agents for Software Engineering
+             Tasks via Improved Localization and Solution Diversity
+
+
+      Atefeh Sohrabizadeh * 1 Jialin Song * 1 Mingjie Liu 1 Rajarshi Roy 1 Chankyu Lee 1 Jonathan Raiman 1
+                                                 Bryan Catanzaro 1
+
+
+                         Abstract                                  1. Introduction
+      Large Language Models (LLMs) have demon-                     Recent advancements in Large Language Models (LLMs)
+      strated significant potential in code generation by          have demonstrated remarkable capabilities across various
+      following natural language instructions. Unfor-              domains, ranging from creative writing to analytical reason-
+      tunately, crucial real-world software engineering            ing (Wei et al., 2022; Yuan et al., 2022; Gómez-Rodrı́guez
+      tasks, such as debugging or repository-level fea-            & Williams, 2023; Ahn et al., 2024). The influence of LLMs
+      ture implementation, involve processing exten-               on software engineering has been especially widespread and
+      sive contexts beyond current LLM context sizes               recognized. Early models showcased their proficiency in
+      and performing complex reasoning that is brit-               generating syntactically correct code and solving interview-
+      tle using standard autoregressive decoding. En-              style programming questions (Chen et al., 2021; Roziere
+      hancing LLMs’ performance in these scenarios                 et al., 2023; Li et al., 2023; Guo et al., 2024). Building on
+      requires careful consideration of the contextual             this progress, recent efforts in LLM research on program-
+      information provided to the model, optimizing                ming have shifted from snippet and function-level gener-
+      how the model leverages that, and identifying                ation towards developing LLM coding agents capable of
+      tools that enable more effective navigation of the           tackling entire real-world software engineering tasks (Yang
+      development environment. To address these chal-              et al., 2024; Xia et al., 2024; Wang et al., 2024a; Antoni-
+      lenges, we introduce N EMOTRON -C ORTEXA, an                 ades et al., 2024; Liu et al., 2024b; Xie et al., 2025). These
+      agentic system built on a predefined scaffold that           coding agents are equipped to utilize tools commonly used
+      enhances LLMs’ ability to navigate and reason                by human engineers, including Command Line Interfaces
+      efficiently in complex software engineering con-             (CLI) and Integrated Development Environments (IDE),
+      texts. Specifically, we develop a novel code em-             to perform critical tasks such as debugging and applying
+      bedding model that retrieves the most relevant               patches in a repository. A key benchmark for evaluating the
+      files with greater precision, along with a localiza-         effectiveness of these LLM agents is SWE-bench (Jimenez
+      tion agent that refines the granularity of the re-           et al., 2023), which features real-world software engineering
+      trieval process. Additionally, we demonstrate that           problems derived from GitHub issues, aimed at generating
+      providing diverse contextual information and uti-            patches that successfully resolve them. The rapid improve-
+      lizing different prompt formats enable the model             ments on the SWE-bench leaderboard highlight the growing
+      to identify and resolve issues more efficiently.             interest in building powerful LLM software agents and un-
+      We evaluate N EMOTRON -C ORTEXA using SWE-                   derscore their potential to automate software engineering
+      bench (Jimenez et al., 2023), a benchmark derived            tasks. In this work, we propose several ways to simultane-
+      from real-world GitHub issues. Compared to                   ously enhance the efficiency and accuracy of LLM agents
+      the widely used Agentless framework (Xia et al.,             within this context, and use SWE-bench as a benchmark.
+      2024), N EMOTRON -C ORTEXA achieves a higher
+      issue resolution rate at a lower cost, highlight-            System design decisions play a crucial role in the end-to-end
+      ing its practical impact in addressing real-world            performance of an LLM software agent, since real-world
+      software engineering challenges.                             software engineering tasks often involve processing a large
+  *                         1
+                                                                   code repository and reasoning about relations among mod-
+    Equal contribution        NVIDIA, Santa Clara, CA,             ules. A practical example of the impact of system design
+USA. Correspondence to: Atefeh Sohrabizadeh <asohra-
+bizade@nvidia.com>, Jialin Song <jialins@nvidia.com>.              can be found in the coding agents of OpenHands (Wang
+                                                                   et al., 2024a) and SWE-Agent (Yang et al., 2024): the au-
+Proceedings of the 42 nd International Conference on Machine       thors allow an agent to perform free-form action sequences
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025        guided by system prompts that outline the available action
+by the author(s).
+
+                                                               1
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+types. While such free-form flows can be effective, the              • We propose a diverse solution generation method that
+large action space often results in many costly iterations and         leverages different contextual information and varied
+makes debugging difficult. To mitigate this, Agentless (Xia            prompt formats, significantly enhancing sample effi-
+et al., 2024) employs a more structured approach, guiding              ciency.
+the LLM through a predetermined sequence of steps. De-
+                                                                     • Experimental results demonstrate that N EMOTRON -
+spite these advances, challenges remain to accurately locate
+                                                                       C ORTEXA outperforms Agentless, OpenAI’s go-to ap-
+the problem and generate correct repairs.
+                                                                       proach for showcasing their real-world coding perfor-
+We present N EMOTRON -C ORTEXA (Code Optimization for                  mance, while being more cost-effective.
+Repository Tasks with EXecution Agents), a coding agent
+designed to strengthen issue localization and repair genera-
+                                                                     2. Related Works
+tion. First, we develop a dedicated code embedding model
+that optimizes the retrieval of relevant files and a localiza-       2.1. LLMs for Code Generation
+tion agent that refines the granularity of issue localization.
+Second, we equip the localization agent with programming             LLM progress in code generation has been driven by re-
+tools based on Abstract Syntax Tree (AST) and Language               search efforts to specialize them through continued pre-
+Server Protocol (LSP) that enable compact code naviga-               training on code data (Guo et al., 2024; Bai et al., 2023;
+tion by taking advantage of multi-step reasoning. Third,             Roziere et al., 2023; DeepSeek-AI et al., 2024) sourced from
+we adopt an ensemble of LLMs approach that improves                  open repositories (Kocetkov et al., 2022; Lozhkov et al.,
+localization accuracy and helps identify additional relevant         2024) and commit histories (Muennighoff et al., 2023). Fur-
+code elements that can improve the repair process. The               ther enhancements come from reinforcement learning (Le
+inspiration for ensembling was drawn from our observation            et al., 2022) and, more commonly, instruction fine-tuning.
+that localization agents instantiated with different LLMs            Instruction fine-tuning incorporates techniques to solve com-
+perform particularly well on different problems, as also             plex coding challenges (Luo et al., 2024), broadens model
+noted in (Zhang et al., 2024a). We can explain this bene-            capabilities by leveraging unlabeled open source code (Wei
+fit by observing that even when models fail to accurately            et al., 2023; Yu et al., 2024; Wu et al., 2024), ensures solu-
+identify the exact entity (function or class) causing an is-         tion accuracy with self-generated tests (Chen et al., 2022),
+sue, they nonetheless often identify closely related entities.       and improves code validation and debugging via interactions
+Our optimizations here improve the localization precision            with LLM agents (Lei et al., 2024).
+over Agentless, a competitive approach on SWE-bench that
+is widely used in model benchmarking (Liu et al., 2024a;             2.2. LLM Agents for Software Engineering
+Jaech et al., 2024), by 18.08% and recall by 11.32%, on              Real-world software engineering tasks are more complex
+average. In addition, we show that the introduction of diver-        than solving interview questions as evidenced by the devel-
+sity in the repair stage can further enhance performance. To         opment of SWE-bench (Jimenez et al., 2023). Recent rapid
+induce diversity, we develop a simple and efficient method           progress in designing LLM agents highlights the importance
+that leverages different contextual information and multiple         of this application. SWE-agent (Yang et al., 2024) enables
+prompt formats during patch generation. This approach                an LLM agent to interact with the development environment
+outperforms standard temperature sampling (Brown et al.,             for tasks like search and edit. AutoCodeRover (Zhang et al.,
+2024; Xia et al., 2024) and allows N EMOTRON -C ORTEXA               2024b) builds a more sophisticated code search tool based
+to achieve a higher issue resolution rate while minimizing           on the abstract syntax tree. Multi-agent systems perform
+the number of inference calls for patch generation by 4.4×           a divide-and-conquer strategy by developing specialized
+compared to Agentless. N EMOTRON -C ORTEXA outper-                   agents for each sub-task (Liu et al., 2024b; Wang et al.,
+forms Agentless by achieving an issue resolution rate of             2024a). Agentless (Xia et al., 2024) takes a different ap-
+42.00% on the SWE-bench Lite and 52.60% on SWE-bench                 proach by designing a multi-step pipeline where LLMs com-
+Verified, while costing only $0.51 per instance.                     plete each step. Iterative approaches and self-reflections,
+In summary, our main contributions are as follows:                   such as in (Chen et al., 2023; Shinn et al., 2024) improve
+                                                                     coding performance, with SWE-Search (Antoniades et al.,
+• We develop a code embedding model specialized in re-               2024) integrating self-feedback within a Monte-Carlo Tree
+  trieving relevant code chunks to a given bug, achieving            Search framework to refine strategies.
+  state-of-the-art file retrieval accuracies on the SWE-bench
+  benchmark.                                                         2.3. Code Retrieval
+• We design a localization agent that integrates advanced            Code retrieval is a critical task in domains like code expla-
+  programming tools and leverages an ensemble of LLMs                nation, code summarization, and documentation lookup, as
+  to deliver more precise and granular issue localization.
+
+                                                                 2
+           Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+shown by recent benchmarks (Li et al., 2024; Wang et al.,                 tions: the LLM is expected to make decisions based solely
+2024b). Early efforts to create code-specific embedding                   on file names, which can lower its accuracy, or depend on
+models include BERT-based (Devlin, 2018) models such as                   prior knowledge of these repositories. On the other hand,
+CodeBERT (Feng et al., 2020) and UniXcoder (Guo et al.,                   processing the entire codebase and passing the full contents
+2022). While there has been a growing interest in develop-                of each file to it would be prohibitively expensive. To tackle
+ing decoder-only LLM-based embedding models for text re-                  this, we develop a coding embedding model specifically
+trieval tasks (Neelakantan et al., 2022; Moreira et al., 2024b;           trained to retrieve the most relevant files based on the is-
+Meng et al., 2024; Lee et al., 2024), few models target code              sue description. Our model, called NV-EmbedCode1 , is
+retrieval. Notable exceptions include the models developed                fine-tuned from an existing text-based embedding model
+by Voyage AI (Voyage AI, 2024) and OpenAI (Neelakan-                      that uses bidirectional attention followed by average pool-
+tan et al., 2022). More recently, CodeXEmbed (Liu et al.,                 ing (Muennighoff et al., 2024; Lee et al., 2024; Moreira
+2024c) emerged as a family of code embedding models,                      et al., 2024a).
+excelling in many code retrieval tasks. However, limited
+                                                                          The retrieval task involves identifying the “oracle” file —
+focus has been given to code retrieval for identifying buggy
+                                                                          the file requiring edits to resolve the issue — based on the
+code based on issue descriptions.
+                                                                          issue description. Since files can be large, we chunk them
+                                                                          and prefix each chunk with meta-information, such as the
+3. N EMOTRON -C ORTEXA                                                    full file path, to help the model maintain context about the
+                                                                          chunk’s location. We curate a dataset specifically for this
+3.1. Overview of the Pipeline
+                                                                          purpose, mapping issues to code edits. The relevant pas-
+Since an entire codebase frequently exceeds the context win-              sages for retrieval are the chunks from the oracle files. Once
+dow of present LLMs, we are obligated to subsample the                    a chunk is retrieved, the oracle file is located by referencing
+relevant files to provide a context that fits yet is sufficient for       its meta-information. The issue descriptions often may have
+resolving the issue. Consider that issue descriptions are typi-           redundant information, such as package version details, or
+cally under 1000 tokens, while repository codebases contain               insufficient details, like ambiguous buggy code with little
+orders of magnitude more tokens. For example, SWE-bench                   explanation. To mitigate this problem, we prompt an LLM
+instances have on average 195 words per issue for 438k lines              to generate a concise summary that includes all relevant
+of code (Jimenez et al., 2023). Our approach is therefore to              information, such as filenames, functions, error messages,
+use the issue description to retrieve relevant files that form a          stack traces, and other technical details. We then create a
+context that fits and is likely to be sufficiently informative to         second dataset containing these summaries, while selecting
+resolve the issue. This retrieval not only ensures the model              the positive passages the same way as before.
+has the right context but also helps filter out irrelevant or
+                                                                          To enhance the embedding model’s understanding of
+confusing information. Therefore, similar to Agentless (Xia
+                                                                          code data, we augment our training set with additional
+et al., 2024), the N EMOTRON -C ORTEXA pipeline is divided
+                                                                          publicly available datasets for text-to-code (retrieving
+into two main stages: localization and repair, as shown in
+                                                                          code documents based on a textual query), code-to-code
+Figure 1. The localization stage involves two steps: first,
+                                                                          (retrieving code documents based on a code query), and
+identifying the most relevant files (Section 3.2), and then
+                                                                          hybrid code (retrieving a combination of code and text
+refining the granularity of the retrieval to focus on specific
+                                                                          documents based on a hybrid query) retrieval tasks, as
+functions, classes, or methods (Section 3.3). During the
+                                                                          categorized by (Li et al., 2024). We also extend the
+repair stage, we combine different contexts and prompts to
+                                                                          hybrid code category by generating a synthetic dataset
+increase patch diversity (Section 3.4), followed by a filtering
+                                                                          where an LLM creates code in response to a query. To
+process to select the most promising patch (Section 3.5).
+                                                                          help the model differentiate between these datasets,
+                                                                          we prefix the queries with dataset-specific instructions
+3.2. File Localization with Code Embedding Model                          following the approach in prior works (Wang et al.,
+Accurately localizing the issue to the relevant files is es-              2023; Lee et al., 2024) with the template “Instruct:
+sential for the success of the pipeline. If this step fails, the          {dataset instruction}\n Query: {query}”.
+model cannot produce an effective patch, making the remain-               Similar to NV-Embed (Lee et al., 2024), we mask out the
+der of the pipeline irrelevant. To tackle this, Agentless cre-            instruction tokens during average pooling.
+ates a concise repository representation, similar to the Linux            We train the embedding model with a contrastive learning
+tree command, and provides it to the LLM to identify the                  objective (Gao et al., 2021) to maximize the similarity be-
+top N suspicious files. It also experiments with using a gen-             tween the query and its relevant (positive) passage, while
+eral embedding model but finds that the embedding-based
+                                                                             1
+approach performs worse than the prompt-based method.                        Available at https://build.nvidia.com/nvidia/
+However, the prompt-based approach has its own limita-                    nv-embedcode-7b-v1
+
+
+                                                                      3
+                 Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+                                                    [django/forms/widgets.py]          [django/forms/__init__.py]                     1. (a) File                                        [django/forms/widgets.py]                   get_definition(                    1. (b) Entity
+                                                    class Media:                       from django.utils.version..                   Localization                                        class Media:                                django/forms/widgets.py,           Localization
+                                                       def __init__(self, media):      VERSION=(3,0,0,‘alpha’,0)                                                                            def __init__(self, media):               Media.render_js)
+                                  chunking               if media is not None:                                                                                                              def render_js(self):
+                                                             css = …                   def setup(set_prefix=True):                                                                       def media_property(cls):                    get_definition(
+                                                    ….                                                                                                                                                                   Tool Call
+                                                                                       ….                                                                                                [django/core/wsgi.py]                       django/core/wsgi.py,
+                                                                                                                                                                                         def get_msgi_application():                 get_msgi_application)
+
+
+
+
+                                                                                                                                                Order by similarity
+                                                                                                                              Embedding model
+                                                     [django/forms/widgets.py]         [django/core/wsgi.py]
+                                                     def media_property(cls):          def get_wsgi_application():
+                                                        def _media(self):                 “””                                                                                                    Tool Call Results                                             Final           Relevant
+                                                          sup_cls=super(cls, self)        The public interface to …                                                                                                                                          Selection          Context
+    Codebase                                              try:                            “””                                                                                             [django/forms/widgets.py]
+                                                     ….                                ….                                                                                                 class Media:
+    Merging 3 or more media objects…
+                                                                                                                                                                                             def render_js(self):                    get_outgoing_dependency(
+    Description                                                     Merging 3 or more media objects…                                                                                            format_html(self.path)               django/core/wsgi.py,
+                                                LLM                                                                                                                                                                                  get_msgi_application)
+    Consider the following form…                                    *   Affected files:…                                                                                                  [django/core/wsgi.py]
+    from django import forms
+                                                                    *   Error message:…                                                                                                   def get_msgi_application():
+    class ColorPicker(forms.Widget):
+                                              summary                                                                                                                                                                    Tool Call
+        class Media:                                                *   Stack trace:…                                                                                                        return WSGIHandler()
+    …                                                               *   Relevant code sections:…
+    result is unintuitive here…
+
+
+                                                                                    2. (a) Patch                                                                            Identify tests to        Generate a complete test    2. (b) Patch
+                                                                                    Generation                                                                             skip after patching       to reproduce the issue       Selection
+                                       {filepath:
+                                           {'classes': {CLASS_NAME:
+                                               {'methods': [LIST_OF_METHODS]
+                                           }},
+                                           'functions': [LIST_OF_FUNCTIONS]
+                                       }}
+
+                                                 Context choices                                                                                                                                                                                       @@ -5,3 +5,2 @@ def __str__(self, ):
+                                                                                                                @@ -5,3 +5,2 @@ def __str__(self, ):
+                                                                                                                  def _css(self):
+                                                                                                                                                                                        Patch Filter                                                   -
+                                                                                                                                                                                                                                                         def _css(self):
+                                                                                                                                                                                                                                                            css = self._css_lists[0]
+                                                                                                                                                                                        with Tests                              Vote
+                                         ### [complete filepath]
+                                         <<<<<<< SEARCH                                                         -    css = self._css_lists[0]                                                                                                          -     # filter(None, ...)
+                                         [original code block]                                                  -     # filter(None, ...)                                                                                                              -     for obj in filter(None, self._css:
+                                         =======                                                                -     for obj in filter(None, self._css:                                                                                               +    css = defaultdict(list)
+                                         [new code block]                                                       +    css = defaultdict(list)                                                                                                           +    for css_list in self._css_lists:
+                                         >>>>>>> REPLACE                                                        +    for css_list in self._css_lists:                                 [django/forms/widgets.py]
+                                         edit_file(filepath: str,                                                                                                                     def fun1(var1):
+                                                   start_line: int,                                                                                                                      def fun2(self):
+                                                   end_line: int,                                                                                                                          obj1=super(var1, self)
+                                                   content: str)                                                                                                                           try:
+
+                                              Edit format choices
+
+
+
+Figure 1. Overview of N EMOTRON -C ORTEXA. From the issue description, N EMOTRON -C ORTEXA first retrieves relevant files using
+NV-EmbedCode, our specialized code embedding model, then refines issue locations to granular entities with a localization agent. We use
+a novel strategy to generate diverse candidate patches and select one based on LLM-generated tests and majority voting.
+
+
+minimizing the similarity to irrelevant (negative) passages.                                                                                                              File: separable.py
+                                                                                                                                                                          def separability_matrix(transform):                                                                   Function
+
+We adopt the positive-aware hard-negative mining technique                                                                                                                    ...                                                                                           separability_matrix
+
+                                                                                                                                                                              separable_matrix = _separable(transform)
+from NV-Retriever (Moreira et al., 2024b) to minimize the                                                                                                                    ...                                                                             Contain                  Use
+
+
+likelihood of including false negatives in the data. Since                                                                                                                def _separable(transform):
+                                                                                                                                                                                                                                                  File
+                                                                                                                                                                                                                                                                  Contain
+                                                                                                                                                                                                                                                                                 Function
+                                                                                                                                                                             ...
+                                                                                                                                                                                                                                              separable.py                      _separable
+the base model may not fully understand code data, we                                                                                                                        return _coord_matrix(
+                                                                                                                                                                                        transform,
+fine-tune it and subsequently mine new hard negatives from                                                                                                                                 'left',
+                                                                                                                                                                                           transform.n_outputs)
+                                                                                                                                                                                                                                                             Contain
+                                                                                                                                                                                                                                                                                      Use
+
+
+
+
+the refined model to improve the quality of the hard nega-                                                                                                                def _coord_matrix(model, pos, noutp):
+                                                                                                                                                                                                                                                                                Function
+                                                                                                                                                                                                                                                                              _coord_matrix
+
+tives. Each batch includes samples from all datasets, but we                                                                                                                 ...
+
+
+avoid using in-batch negatives to prevent conflicts between
+                                                                                                                                                                               (a) Code Example              (b) Code Graph
+positive and negative samples. This problem occurs when
+chunking the oracle files to create positive passages, as a                                                                                                                Figure 2. Example code and its graph representation.
+single query may correspond to multiple positive passages.
+                                                                                                                                                                      and tracing call stacks. To facilitate structured navigation
+If these query-positive pairs appear in the same batch, it can
+                                                                                                                                                                      of the repository, we start by building its graph representa-
+lead to misleading negative and positive samples.
+                                                                                                                                                                      tion. The nodes represent code files and entities – functions,
+                                                                                                                                                                      classes, and class methods – extracted using AST. Each node
+3.3. Entity Localization with Localization Agent
+                                                                                                                                                                      stores the corresponding code text and its position metadata.
+With the code embedding model, we can obtain a short                                                                                                                  We establish two types of directed edges: contain and use.
+list of files relevant to the issue. However, the full texts                                                                                                          The contain edges establish hierarchical relationships, con-
+of these files often still exceed a model’s context window.                                                                                                           necting files to their functions and classes, and classes to
+We need to narrow down the issue locations further. A                                                                                                                 their methods, thereby providing agents with a structural
+code file consists of high-level entities, such as classes and                                                                                                        view of the repository. Complementarily, use edges capture
+functions, so the next step of localization is to identify can-                                                                                                       functional dependencies, including function invocations and
+didate entities from a few top-ranked files. Agentless uses                                                                                                           class instantiations. For example, in Figure 2, the graph
+a direct prompting approach, providing a skeleton format                                                                                                              contains a node for the file separable.py and a node
+of each file containing only entity headers and asking an                                                                                                             each for the three functions separability_matrix,
+LLM to select the relevant ones. However, without access                                                                                                              _separable, and _coord_matrix. The file node has
+to the code content, the model lacks sufficient context to                                                                                                            an edge pointing to each function with the contain type.
+respond accurately. Inspired by information foraging theory                                                                                                           separability_matrix node has an edge pointing to
+in software debugging (Lawrance et al., 2010), we develop a                                                                                                           _separable with the use type, as does _separable to
+localization agent that iteratively explores the repository by                                                                                                        _coord_matrix.
+performing common actions such as looking up definitions                                                                                                              We equip the localization agent with three tools to navigate
+
+                                                                                                                                                4
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+through the graph. They are reminiscent of features in                 even with all other factors held constant.
+popular IDEs such as Go To Definition and Call Hierarchy.
+                                                                       To explore this further, we studied the effect of two spe-
+We use an LSP server to implement these tools.
+                                                                       cific edit formats on the resolved instances of SWE-bench.
+• get definition(file name, entity name): returns the code             These formats are illustrated in Figure 1. The first format,
+  definition of the specified entity in the requested file.            referred to as the search/replace format, consists of
+                                                                       a search component that includes the original code snippet
+• get incoming dependency(file name, entity name): re-                 to be replaced and a replace component that specifies the
+  turns the definition codes of the specified entity’s source          replacement content. The second one is an edit file
+  nodes using the list of its incoming edges.                          API that specifies the file path, the starting and ending line
+• get outgoing dependency(file name, entity name): re-                 numbers of the code to be edited, and the content to be in-
+  turns the definition codes of the specified entity’s destina-        serted or modified. Additionally, we evaluated the effect of
+  tion nodes using the list of outgoing edges.                         two different contexts within the code section of the prompt:
+                                                                       the entities identified in Section 3.3 and the top-retrieved
+Concurrent to our work, MarsCode Agent (Liu et al., 2024b)             file from Section 3.2.
+also builds a code knowledge graph from a repository with
+AST and LSP. Our version differs by focusing only on high-
+level entities and providing additional tools built on top of
+standard LSP functions.
+The localization agent leverages the file ranking results from
+the code embedding model, focusing on the top-ranked
+ones. For these files, we create a concise representation
+containing only definition signatures of high-level entities.
+These signatures, combined with the issue description, are
+then fed into an LLM to identify a few entities relevant to
+the issue description. This step is similar to Agentless’s
+direct prompting approach after identifying suspicious files           Figure 3. Venn diagram showing the distribution of the percent-
+(Section 3.1.2 in (Xia et al., 2024)). Next, the localization          age of resolved instances across context and edit format changes
+                                                                       for SWE-bench Lite. Different combinations of context and edit
+agent examines the full code of the chosen entities and
+                                                                       formats demonstrate varying strengths, here ranging from 19.3%
+utilizes tools to inquire about related entities. Each tool
+                                                                       to 32%, and cover different instances which, can contribute to a
+call returns a collection of new code snippets that the agent          higher overall pass rate of 40.3%.
+stores in its context for future queries. The agent iterates
+through multiple interactions with the repository to gather
+sufficient context. Since excessive tool calls can lead to             Figure 3 depicts the Venn diagram of the resolved instances
+context overload, the agent is tasked to filter the context and        when we vary these choices of contexts and edit formats.
+keep only the relevant ones in a memory buffer. After a few            The numbers in each section indicate the percentage of re-
+iterations, the localization agent is prompted to select a final       solved instances in SWE-bench Lite that fall into that subset.
+set of entities requiring modifications to fix the issue.              While it is expected that changes in context would result in
+                                                                       different instances being resolved, the diagram also high-
+3.4. Diverse Patch Generations                                         lights that the final fix is highly sensitive to the choice of
+                                                                       the edit format. Different combinations of context and edit
+After localizing the issue and narrowing it down to specific           format exhibit varying strengths in resolving the instances
+suspicious entities, the next step is to generate a patch that         and cover very different instances. Existing approaches
+resolves it. In this step, the LLM is prompted to generate             focus on identifying the single most effective choice and
+a patch based on the provided code context. Instead of                 then rely on temperature sampling to generate diverse solu-
+producing the entire code, the LLM typically is prompted to            tions. In contrast, we propose changing both the context and
+generate only the edit, either as a search/replace format (Xia         the edit format, in addition to temperature sampling. This
+et al., 2024; Aide, 2024) or a git diff format (Jimenez et al.,        method increases solution diversity, which in turn increases
+2023; Yang et al., 2024). Our observations indicate that the           the number of resolved issues while reducing the number of
+choice of context and prompt format significantly impacts              inference calls needed for patch generation.
+the correctness of the generated patches, leading to varied
+sets of resolved instances. Specifically, LLMs are highly              3.5. Patch Selection
+sensitive to the format of the requested edits, often yielding
+different solutions when only the patch format is changed,             After generating a diverse set of patches, we apply a series
+                                                                       of filtering steps to identify the most promising patch as the
+
+                                                                   5
+             Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+final solution. First, we remove solutions that fail to produce
+                                                                        Table 1. Overall comparison over SWE-bench Lite and Verified.
+valid edit instructions or result in syntax errors. Next, we
+                                                                        Claude refers to the Claude-3.5-Sonnet model.
+normalize the edited codes by removing comments, doc-                                                         % Resolved      Avg.
+strings, and empty lines, as well as standardizing variable,             Method                 LLM
+                                                                                                            Lite     Verified $ Cost
+function, and class names. Using these normalized versions,                                                  125      265
+                                                                         OpenHands                                               –
+we record the frequency of the repeated solutions. We then                                      Claude (41.67%) (53.00%)
+                                                                         (Wang et al., 2024a)                78
+use regression tests and the generated reproduction tests to                                                            –     1.10
+                                                                                                          (26.00%)
+filter out solutions that fail these tests. Our approach closely                                             122      254
+follows the methodology outlined in Agentless (Xia et al.,               Agentless              Claude                           –
+                                                                                                          (40.67%) (50.80%)
+2024) and directly leverages their released artifacts2 . In              (Xia et al., 2024)                  96
+                                                                                                GPT-4o                  –     0.70
+this process, Agentless first executes all existing tests in the                                          (32.00%)
+repository to identify a subset of passing tests that success-           Moatless Tools                      115
+                                                                                                Claude                  –        –
+                                                                         (Team, 2024a)                    (38.33%)
+fully run on the original codebase. The passing tests are then
+                                                                         AutoCodeRover                       92       192
+analyzed by an LLM, which identifies any test that is not                                       GPT-4o                           –
+                                                                         (Zhang et al., 2024b)            (30.67%) (38.40%)
+suitable to verify whether the issue has been correctly fixed.           SWE-agent                           69       168
+                                                                                                Claude                           –
+The remaining tests are designated as regression tests. For              (Yang et al., 2024)              (23.00%) (33.60%)
+reproduction tests, Agentless generates a complete testing                                                   126      263
+                                                                         N EMOTRON -            Mix                           0.51
+file designed to both reproduce the original issue described                                             (42.00%) (52.60%)
+                                                                         C ORTEXA
+and verify whether the issue has been successfully resolved.
+These tests are executed on the original repository to filter
+out any tests that fail to detect the issue. We retain all valid        et al., 2024). Additionally, we synthetically generate a
+reproduction tests at this stage. In cases where no solutions           dataset of code produced from coding queries in Code-
+remain after filtering, we re-include all solutions available           Feedback (Zheng et al., 2024) by prompting DeepSeek-
+before applying the test. Finally, we apply majority voting             v2.5 (DeepSeek-AI, 2024). The LLM summaries mentioned
+on the remaining solutions based on the frequency of their              in Section 3.2 are generated using Llama-3.1 405B (Dubey
+repetition to select the final patch.                                   et al., 2024). The final dataset contains approximately
+                                                                        534k pairs of query-positive documents, as detailed in Ap-
+                                                                        pendix A.1
+4. Experiments
+                                                                        We build the code graphs using tree-sitter3 to extract entities
+4.1. Experiment Setup                                                   from code files. We implement the three code navigation
+To train the embedding model, we use a Parameter-Efficient              tools in Section 3.3 with pylsp4 . The localization agent
+Fine-Tuning (PEFT) technique called Low-Rank Adapta-                    starts with the top-6 files according to our code embedding
+tion (LoRA) (Hu et al., 2021). Specifically, we fine-tune               model and performs a maximal of 5 rounds of entity local-
+a text embedding model with contrastive loss, applying                  ization with tools. The agent can issue multiple tool calls
+LoRA with a rank of 16, alpha of 32, and a dropout rate                 at each round. We instantiate the localization agent with
+of 0.1. Our base model is NV-EmbedQA-Mistral-7B-v2                      four different LLMs: DeepSeek-v3 (Liu et al., 2024a), GPT-
+(NV-EmbedQA-v2 for short) (Moreira et al., 2024a), a com-               4o (OpenAI, 2024), Llama-3.3 70B (Dubey et al., 2024),
+mercially available version of NV-Embed-v2 (Lee et al.,                 and Qwen2.5-72B-Instruct (Team, 2024b; Bai et al., 2023).
+2024). We employ the Adam optimizer (Kingma, 2014)                      The final localization result is an ensemble of them. During
+with 200 warm-up steps, a learning rate of 1e-6, and linear             localization, we use greedy sampling to generate responses.
+decay. The training is conducted using Bfloat16, with a                 The patches are generated using Claude 3.5 Sonnet.
+maximum sequence length of 512 tokens. The model is
+fine-tuned with a batch size of 64, where each batch consists           4.2. End-to-end Issue Resolution Results
+of a query, one positive document, 7 hard negatives, and we             We validate N EMOTRON -C ORTEXA on SWE-
+do not use in-batch negatives, as explained in Section 3.2.             bench (Jimenez et al., 2023) Lite and Verified, which
+The training data is curated from the SWE-bench train-                  consist of 300 and 500 instances, respectively. Table 1
+ing set (Jimenez et al., 2023) and a portion of the CoIR                summarizes the comparison to five representative open-
+training set (Li et al., 2024), which includes data from                source baselines: OpenHands (Wang et al., 2024a),
+APPS (Hendrycks et al., 2021), CoSQA (Huang et al.,                     Moatless Tools (Team, 2024a), AutoCodeRover (Zhang
+2021), CodeTransOcean (Yan et al., 2023), StackOver-                    et al., 2024b), SWE-agent (Yang et al., 2024), and
+flowQA (Overflow, 2021), and SyntheticText2SQL (Meyer                   Agentless (Xia et al., 2024). N EMOTRON -C ORTEXA
+                                                                           3
+   2
+       https://github.com/OpenAutoCoder/Agentless/releases/tag/v1.5.0          https://tree-sitter.github.io/tree-sitter/
+                                                                           4
+                                                                               https://github.com/python-lsp/python-lsp-server
+
+                                                                   6
+           Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+achieves the highest resolution rate of 42% (126 / 300) on
+                                                                        Table 2. Recall@k in retrieval for SWE-bench Lite and Verified,
+Lite and the second highest rate 52.60% (263 / 500) on
+                                                                        where k is the number of oracle files, using either the original issue
+Verified. Notably, N EMOTRON -C ORTEXA achieves its                     description or its LLM-generated summary as input.
+performance at an average cost of only $0.51 per issue.                  Method       Model / Approach         Issue      Lite      Verified
+In comparison, OpenHands reports a 26% resolution rate
+                                                                                                               Original 42.33% 40.67%
+on SWE-bench Lite at $1.10/issue, and Agentless reports                  Lexical      BM25
+                                                                                                               Summary 38.00% 41.75%
+32% at $0.70/issue.5 Further scaling test-time compute in
+N EMOTRON -C ORTEXA can yield higher resolution rates                    Prompt*      GPT-4o                   Original 63.00% 65.55%
+here. Our contributions drive N EMOTRON -C ORTEXA’s                                                            Original 60.33% 61.00%
+                                                                                      SFR-Embedding-2 R
+strong performances at minimal cost: our code embedding                                                        Summary 55.33% 55.46%
+model and localization agent provide more accurate and                                                         Original 56.00% 59.90%
+                                                                                      NV-Embed-v2
+informative contexts for LLMs, while our novel diverse                                                         Summary 57.67% 59.62%
+                                                                         Embedding
+solution generation strategy significantly reduces the                                                         Original 61.33% 62.81%
+                                                                                      NV-EmbedQA-v2
+number of candidate generations needed. We will break                                                          Summary 55.67% 59.20%
+down their impacts in the next sections.                                                                       Original 67.67% 68.37%
+                                                                                      NV-EmbedCode
+                                                                                                               Summary 70.33% 71.95%
+4.3. Embedding Model Analysis                                           * Refers to Agentless results
+
+We rely on the golden solutions provided in SWE-bench as
+the ground truth for identifying the oracle files. While it is          and prefer the original descriptions. This is likely due to
+possible to address the issue by editing other parts of the             differences in linguistic styles and vocabulary of these sum-
+codebase, this ground truth offers a reliable base for compar-          maries compared to the natural queries the models were
+ing different approaches. We evaluate three approaches for              originally trained on. The decrease in the performance
+this localization task: lexical-based (i.e., BM25), prompt-             of BM25 with these summaries for SWE-bench Lite sug-
+based, and embedding-based methods, as detailed in Sec-                 gests a reduction in exact term matches and the frequency
+tion 3.2. The prompt-based results are taken from Agentless             of keywords. By developing our code-specific embedding
+logs. For the embedding-based approach, we chunk the                    model, NV-EmbedCode achieves significant improvements.
+files to 450 tokens with no overlap. This choice stems from             Not only does it outperform existing embedding models
+our experiment with existing embedding models, where we                 with original issue descriptions, but it also achieves signifi-
+tested token lengths ranging from 450 to 4096 and overlaps              cantly better results with LLM-generated summaries. These
+of 0 or half the context window, and saw that the mod-                  summaries enhance the issue descriptions by eliminating
+els perform better with smaller context windows (see Ap-                redundancy and removing irrelevant details, which can im-
+pendix A.1). This may be attributed to two factors: first,              prove their effectiveness for retrieval. The improvement in
+these models are often trained on short documents, and sec-             NV-EmbedCode is due to the inclusion of diverse code and
+ond, a smaller window allows the model to attend more to                synthetic data in our training set and the use of instruction
+individual code chunks and focus on their semantics rather              templates, which enable the model to recognize and adapt
+than normalizing the vector embedding across the entire file.           to different linguistic styles. Although the prompt-based
+Each chunk is further prefixed with the complete file path              method can outperform embedding-based ones when paired
+as additional metadata.                                                 with existing embedding models, it falls short compared to
+                                                                        our model.
+Table 2 presents a comparison of these methods on SWE-
+bench Lite and Verified sets. We evaluate NV-EmbedCode
+against state-of-the-art models, including SFR-Embedding-               4.4. Entity Localization Analysis
+2 R (Meng et al., 2024), NV-Embed-v2 (Lee et al., 2024),                Accurate entity localization provides focused context, in-
+and NV-EmbedQA-v2 (Moreira et al., 2024a). The evalu-                   creasing the likelihood of an LLM generating correct
+ation metric is recall@k, where k is the number of oracle               patches. N EMOTRON -C ORTEXA employs localization
+files for a given instance. This metric measures the pro-               agents to identify relevant entities. At the end of an agentic
+portion of the oracle files correctly identified within the             search trajectory, we combine its first iteration and last itera-
+top k results. The results indicate that existing embedding             tion responses to extract entities that balance the breadth and
+models struggle to perform well with the LLM summaries                  depth of localization. We refer to the first iteration results
+   5
+     The costs for more recent, higher-performing submissions
+                                                                        as Direct Prompting (DP), and the last iteration results as
+have not been reported. However, they are likely substantially          Localization Agent (LA). We compare our entity localiza-
+higher as OpenHands now allows more inference calls per issue           tion accuracy to Agentless (Xia et al., 2024), using results
+and Agentless uses Claude 3.5 Sonnet, which is priced higher than       extracted from their logs, as their method includes a dedi-
+GPT-4o.                                                                 cated entity localization step. We use the golden solutions in
+
+                                                                    7
+             Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+                                                                          4.5. Repair Generation
+Table 3. Precision and recall metrics in retrieving oracle entities
+for SWE-bench Lite and Verified. DP denotes direct prompting              As discussed in Section 3.4, changing the context and edit
+entities and LA refers to localization agent results.                     format leads to different instances being resolved. One ap-
+                                Lite                Verified              proach here is to identify the best-performing combination
+ Method
+                        Precision Recall Precision Recall                 of context and edit format and then generate multiple solu-
+ Agentless             15.90%       59.94% 17.54%        58.37%           tions using temperature sampling. For example, Agentless
+ N EMOTRON -      35.83%            60.56% 34.16%        57.46%           generates 40 patches per instance by sampling 4 edit loca-
+ C ORTEXA (DP)                                                            tions and creating 10 patches in the search/replace
+ N EMOTRON -      38.91%            71.17% 39.62%        64.04%           format for each (1 using greedy sampling and 9 using tem-
+ C ORTEXA (LA)                                                            perature sampling). They report that the number of resolved
+ N EMOTRON -      35.84%            74.72% 34.51%        67.62%           instances increases until 40 patches but plateaus beyond that
+ C ORTEXA (LA+DP)                                                         point.
+                                                                          Our observations indicate that we can achieve similar or
+Table 4. Localization agent’s precision and recall metrics in re-         better performance with fewer patches by increasing the
+trieving oracle entities for SWE-bench Lite and Verified set when         diversity in how these patches are generated. Figure 4 il-
+instantiated with different models. Ensemble of all four agents           lustrates the number of passed instances (out of 300 total)
+yields substantial gains in the recall.                                   for SWE-bench Lite across different contexts, edit formats,
+                                 Lite            Verified                 and temperature settings. We consider three contexts here:
+ Model
+                         Precision Recall Precision Recall                1) File, the top-1 file retrieved by NV-EmbedCode, 2) LA,
+ Qwen2.5-72B           34.40%       40.33% 36.58%        41.71%           and 3) DP. With greedy sampling (temperature 0.0), the
+ Llama3.3-70B          33.44%       40.40% 36.21%        39.74%           LA context, and the search/replace format, we can
+ Deepseek-v3           35.30%       45.94% 40.39%        46.94%           already achieve a high pass rate of 96 instances, highlighting
+ GPT-4o                34.25%       44.61% 36.67%        45.20%
+                                                                          the effectiveness of our localization step. Adding a patch
+                                                                          generated via temperature sampling increases the number of
+ Ensemble of Above     35.84%       74.72% 34.51%        67.62%
+                                                                          correctly resolved instances to 107 (pass@2). Interestingly,
+                                                                          while these two strategies have the highest pass rates indi-
+                                                                          vidually, their combination does not introduce many new
+SWE-bench to extract ground truth entities (oracle entities).             resolved instances compared to other alternatives. For exam-
+Table 3 shows mean precision and recall results for Agent-                ple, changing the context to File and the prompt format to
+less and N EMOTRON -C ORTEXA, together with its two com-                  edit file results in 115 resolved instances overall, even
+ponents. Overall, N EMOTRON -C ORTEXA achieves higher                     though this new combination individually has the lowest
+precision and recall than Agentless on both SWE-bench Lite                pass rate. This pattern persists across other contexts and edit
+and Verified. Its localization stage also costs less: $0.11               format combinations as well (Section 4.7), indicating that
+per instance for N EMOTRON -C ORTEXA compared to $0.15                    varying these factors increases solution diversity, ultimately
+per instance for Agentless. The superior LA results demon-                leading to a higher total number of correct solutions while
+strate the advantage of combining specialized tools with                  reducing the number of required inference calls.
+multi-step reasoning. Adding DP results further boosts the                While temperature sampling is less effective than chang-
+recall by capturing relevant entities that might be overlooked            ing other factors, it remains a useful strategy for gen-
+during the agent’s later, more focused iterations. Addition-              erating new patches. In our final patch generation pro-
+ally, the dual approach of DP and LA also provides diverse                cess, we consider 4 contexts (File, LA, DP, and LA+DP,
+high-quality contexts for repair generation and enables more              where LA and DP outputs are merged), two edit formats
+efficient repair generations, which we discuss in the next                (search/replace and edit file), and two tempera-
+section. N EMOTRON -C ORTEXA employs an ensemble of                       ture settings (0.0 for greedy sampling and 0.8 for temper-
+four localization agents, each instantiated with a different              ature sampling). We first generate 4 solutions with greedy
+LLM. Table 4 compares the ensemble results with those                     sampling by using the File and LA as context, and both
+of the individual agent. The recall increases by 28.78%                   our edit formats. We then generate a single additional
+and 20.68% over the best individuals for the Lite and Ver-                solution by greedy sampling the LA+DP as context and
+ified sets, respectively, thus retrieving significantly more              edit file prompt. Finally, we generate 4 more solutions
+relevant entities. The precision also increases for the Lite              via temperature sampling, covering all four contexts, with
+set because the ensemble benefit from models’ strengths                   two using the search/replace format and two using
+in solving different problem subsets. This result points to               the edit file format. These 9 solutions can achieve
+an alternative axis for inference-time scaling by employing               pass@1 performance (after applying the filtering steps as
+multiple models.
+
+                                                                      8
+           Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+
+Table 5. Precision and recall metrics in retrieving oracle entities       Table 6. Pass@9 and Pass@1 results across different generation
+for SWE-bench Verified. The localization agent starts with the            combinations for SWE-bench Verified with 500 instances. The
+top-6 files retrieved by different embedding models.                      primary diversification method is temperature sampling. We fur-
+ Embedding Model                   Precision      Recall                  ther evaluate the impact of introducing diversity by varying the
+                                                                          edit format as described in Section 3.4 and using the four contexts
+ NV-EmbedQA-v2 (LA+DP)           27.62%           65.03%
+                                                                          mentioned in Section 4.5.
+ NV-EmbedCode (LA+DP)            34.51%           67.62%                   Context                  Edit Format           Pass@9 Pass@1
+detailed in Appendix A.3) of 126 for the Lite set and 263                  File, LA, DP, LA+DP     Both           307              263
+for the Verified set, surpassing Agentless results of 122 and              LA                      search/replace 270              237
+254 with 40 patches. This demonstrates how diversifying                    LA                      Both           284              245
+the solutions can lead to a higher number of correct patches.              DP                      Both           261              220
+                                                                           LA+DP                   Both           286              239
+                                                                           File                    Both           257              223
+
+                                                                          entities as context and the search/replace edit format–
+                                                                          as it has shown to be the best single policy–while applying
+                                                                          temperature sampling for diversity. We then extended this
+                                                                          experiment by employing both edit formats while keeping
+                                                                          the context fixed, and repeated the process across all four
+                                                                          context types discussed in Section 4.5. Table 6 presents
+                                                                          a comparison of the pass@9 and pass@1 (after applying
+                                                                          the filtering steps outlined in Section 3.5) metric for each
+Figure 4. #Passed instances of SWE-bench Lite under different             combination. These results reinforce our claim that diversi-
+contexts – File, Localization Agent (LA), and Direct Prompting            fying both the edit format and context increases the number
+(DP) – with varying edit format and temperature settings. Two-            of correct patches, as each configuration brings distinct
+segment bars show pass@2 when both input solutions are used.              strengths and weaknesses. By combining them, we are able
+                                                                          to leverage their complementary advantages.
+
+4.6. Ablation on Localization
+                                                                          5. Conclusion & Future Work
+In this section, we provide ablation studies on SWE-bench
+Verified for our two contributions to localization: 1) our fine-          N EMOTRON -C ORTEXA demonstrates that improved local-
+tuned N EMOTRON -C ORTEXA embedding model; 2) the lo-                     ization and diverse solutions are effective avenues to en-
+calization agent for entity localization. First, Table 5 demon-           hance LLM software agents for real-world tasks. Our com-
+strates that as NV-EmbedCode achieves higher recall@k as                  prehensive analyses validate three key contributions: 1) our
+shown in Table 2, the localization agent produces more accu-              new code embedding delivers state-of-the-art file retrieval
+rate entity localization results. This improvement indicates              accuracies here; 2) our localization agent enables precise
+that starting with more accurate, relevant files enhances the             issue location identification; 3) our diverse solution genera-
+agent’s success in identifying oracle entities.                           tion method, leveraging different contexts and edit formats,
+                                                                          exhibits superior sample efficiency. N EMOTRON -C ORTEXA
+Second, to study the impact of entity localization on final               outperforms Agentless on SWE-bench at a lower cost, show-
+resolution, we compare using entity results (LA+DP) and                   casing its effectiveness.
+the top-1 retrieved file (File) as context for patch generation.
+We generate 9 patches with both edit formats and temper-                  We recognize that N EMOTRON -C ORTEXA’s resolution can
+ature sampling and apply the filtering steps described in                 be further improved by refining the selection process and/or
+Section 3.5. As shown in Table 6, using entity localization               scaling the number of generated patches. Currently, ma-
+results as contexts significantly improves the resolution rate,           jority voting in the patch selection process is suboptimal,
+highlighting the importance of entity localization.                       especially since we diversify the solutions generated, and
+                                                                          a correct solution may not appear multiple times. In fact,
+                                                                          by using LLM-based voting instead of majority voting, gen-
+4.7. Ablation on Solution Diversity
+                                                                          erating more accurate reproduction tests, and employing
+In Section 4.5, we demonstrated that diversifying the solu-               reasoning models during patch generation, N EMOTRON -
+tion generation strategies can increase the resolution rate.              C ORTEXA’s resolution on the Verified set can reach 68.4%
+To further investigate it, we conducted an additional ex-                 while costing $3.28/issue. These optimizations are com-
+periment in which, instead of the 9 diversified patches as                plementary to our approach, and a detailed analysis of the
+described in Section 4.5, we generated patches using LA                   impact of each component is left for future work.
+
+                                                                      9
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+Acknowledgments                                                     Chen, X., Lin, M., Schärli, N., and Zhou, D. Teaching
+                                                                      large language models to self-debug. arXiv preprint
+The authors would like to acknowledge the constructive                arXiv:2304.05128, 2023.
+feedback from anonymous reviewers and the work of ICML
+2025 program chairs and area chairs.                                DeepSeek-AI. DeepSeek-V2: A Strong, Economical, and
+                                                                      Efficient Mixture-of-Experts Language Model, 2024.
+Impact Statement
+                                                                    DeepSeek-AI, Zhu, Q., Guo, D., Shao, Z., Yang, D.,
+Reliable and capable LLM software agents have the po-                Wang, P., Xu, R., Wu, Y., Li, Y., Gao, H., Ma, S.,
+tential to automate routine programming tasks, such as de-            Zeng, W., Bi, X., Gu, Z., Xu, H., Dai, D., Dong, K.,
+bugging, and boost developer efficiency by freeing them               Zhang, L., Piao, Y., Gou, Z., Xie, Z., Hao, Z., Wang,
+to work on more innovative projects and explore more ef-              B., Song, J., Chen, D., Xie, X., Guan, K., You, Y.,
+ficient solutions. By providing natural language interfaces           Liu, A., Du, Q., Gao, W., Lu, X., Chen, Q., Wang,
+to programming tasks, these agents can also enable people            Y., Deng, C., Li, J., Zhao, C., Ruan, C., Luo, F., and
+without prior programming experience to use code in their             Liang, W. DeepSeek-Coder-V2: Breaking the Barrier of
+work. This potential can obviously be misused to do harm              Closed-Source Models in Code Intelligence, 2024. URL
+by malicious actors, for example, to generate malware or              https://arxiv.org/abs/2406.11931.
+automate cyber attacks. Thus it is important to build robust
+safety mechanisms in LLM agents to minimize their nega-             Devlin, J. Bert: Pre-training of deep bidirectional trans-
+tive impacts. By carefully considering these factors, we can          formers for language understanding. arXiv preprint
+work to maximize the benefits of LLM software agents.                 arXiv:1810.04805, 2018.
+
+                                                                    Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle,
+References                                                           A., Letman, A., Mathur, A., Schelten, A., Yang, A., Fan,
+Ahn, J., Verma, R., Lou, R., Liu, D., Zhang, R., and Yin, W.         A., et al. The llama 3 herd of models. arXiv preprint
+  Large language models for mathematical reasoning: Pro-              arXiv:2407.21783, 2024.
+  gresses and challenges. arXiv preprint arXiv:2402.00157,
+  2024.                                                             Feng, Z., Guo, D., Tang, D., Duan, N., Feng, X., Gong,
+                                                                      M., Shou, L., Qin, B., Liu, T., Jiang, D., et al. Code-
+Aide, S. K. P. SOTA on swebench-verified: (re)learning                bert: A pre-trained model for programming and natural
+  the bitter lesson, 2024. URL https://aide.dev/                      languages. arXiv preprint arXiv:2002.08155, 2020.
+  blog/sota-bitter-lesson. Accessed: 2025-01-
+  25.                                                               Gao, T., Yao, X., and Chen, D. Simcse: Simple con-
+                                                                      trastive learning of sentence embeddings. arXiv preprint
+Antoniades, A., Örwall, A., Zhang, K., Xie, Y., Goyal, A.,           arXiv:2104.08821, 2021.
+  and Wang, W. SWE-Search: Enhancing Software Agents
+ with Monte Carlo Tree Search and Iterative Refinement.             Gómez-Rodrı́guez, C. and Williams, P. A Confederacy
+  arXiv preprint arXiv:2410.20285, 2024.                              of Models: a Comprehensive Evaluation of LLMs on
+                                                                      Creative Writing. In Findings of the Association for
+Bai, J., Bai, S., Chu, Y., Cui, Z., Dang, K., Deng, X., Fan,          Computational Linguistics: EMNLP 2023, pp. 14504–
+  Y., Ge, W., Han, Y., Huang, F., et al. Qwen technical               14528. Association for Computational Linguistics, 2023.
+  report. arXiv preprint arXiv:2309.16609, 2023.
+Brown, B., Juravsky, J., Ehrlich, R., Clark, R., Le, Q. V.,         Guo, D., Lu, S., Duan, N., Wang, Y., Zhou, M., and Yin,
+  Ré, C., and Mirhoseini, A. Large language monkeys:                J. Unixcoder: Unified cross-modal pre-training for code
+  Scaling inference compute with repeated sampling. arXiv             representation. arXiv preprint arXiv:2203.03850, 2022.
+  preprint arXiv:2407.21787, 2024.
+                                                                    Guo, D., Zhu, Q., Yang, D., Xie, Z., Dong, K., Zhang,
+Chen, B., Zhang, F., Nguyen, A., Zan, D., Lin, Z., Lou,              W., Chen, G., Bi, X., Wu, Y., Li, Y., et al. DeepSeek-
+  J.-G., and Chen, W. CodeT: Code Generation with Gener-              Coder: When the Large Language Model Meets
+  ated Tests, 2022. URL https://arxiv.org/abs/                        Programming–The Rise of Code Intelligence. arXiv
+  2207.10397.                                                         preprint arXiv:2401.14196, 2024.
+
+Chen, M., Tworek, J., Jun, H., Yuan, Q., Pinto, H. P. D. O.,        Hendrycks, D., Basart, S., Kadavath, S., Mazeika, M., Arora,
+  Kaplan, J., Edwards, H., Burda, Y., Joseph, N., Brockman,           A., Guo, E., Burns, C., Puranik, S., He, H., Song, D., and
+  G., et al. Evaluating large language models trained on              Steinhardt, J. Measuring Coding Challenge Competence
+  code. arXiv preprint arXiv:2107.03374, 2021.                        With APPS. NeurIPS, 2021.
+
+                                                               10
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,          Liu, A., Feng, B., Xue, B., Wang, B., Wu, B., Lu, C., Zhao,
+  S., Wang, L., and Chen, W. Lora: Low-rank adaptation of                C., Deng, C., Zhang, C., Ruan, C., et al. Deepseek-
+  large language models. arXiv preprint arXiv:2106.09685,                v3 technical report. arXiv preprint arXiv:2412.19437,
+  2021.                                                                  2024a.
+
+Huang, J., Tang, D., Shou, L., Gong, M., Xu, K., Jiang, D.,            Liu, Y., Gao, P., Wang, X., Liu, J., Shi, Y., Zhang, Z., and
+  Zhou, M., and Duan, N. Cosqa: 20,000+ web queries                      Peng, C. MarsCode Agent: AI-native Automated Bug
+  for code search and question answering. arXiv preprint                 Fixing. arXiv preprint arXiv:2409.00899, 2024b.
+  arXiv:2105.13239, 2021.
+                                                                       Liu, Y., Meng, R., Jot, S., Savarese, S., Xiong, C., Zhou,
+Jaech, A., Kalai, A., Lerer, A., Richardson, A., El-Kishky,              Y., and Yavuz, S. CodeXEmbed: A Generalist Embed-
+  A., Low, A., Helyar, A., Madry, A., Beutel, A., Car-                   ding Model Family for Multiligual and Multi-task Code
+  ney, A., et al. Openai o1 system card. arXiv preprint                  Retrieval. arXiv preprint arXiv:2411.12644, 2024c.
+  arXiv:2412.16720, 2024.
+                                                                       Lozhkov, A., Li, R., Allal, L. B., Cassano, F., Lamy-Poirier,
+Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press,           J., Tazi, N., Tang, A., Pykhtar, D., Liu, J., Wei, Y., et al.
+  O., and Narasimhan, K. Swe-bench: Can language mod-                    StarCoder 2 and The Stack v2: The Next Generation.
+  els resolve real-world GitHub issues? arXiv preprint                   arXiv preprint arXiv:2402.19173, 2024.
+  arXiv:2310.06770, 2023.
+                                                                       Luo, Z., Xu, C., Zhao, P., Sun, Q., Geng, X., Hu, W., Tao, C.,
+Kingma, D. P. Adam: A method for stochastic optimization.                Ma, J., Lin, Q., and Jiang, D. WizardCoder: Empowering
+  arXiv preprint arXiv:1412.6980, 2014.                                  Code Large Language Models with Evol-Instruct. In The
+                                                                         Twelfth International Conference on Learning Represen-
+Kocetkov, D., Li, R., Allal, L. B., Li, J., Mou, C., Ferrandis,          tations, 2024. URL https://openreview.net/
+  C. M., Jernite, Y., Mitchell, M., Hughes, S., Wolf, T.,                forum?id=UnUwSIgK5W.
+  Bahdanau, D., von Werra, L., and de Vries, H. The Stack:
+  3 TB of permissively licensed source code, 2022. URL                 Meng, R., Liu, Y., Joty, S. R., Xiong, C., Zhou,
+  https://arxiv.org/abs/2211.15533.                                     Y., and Yavuz, S. SFR-Embedding-2: Advanced
+                                                                        Text Embedding with Multi-stage Training, 2024.
+Lawrance, J., Bogart, C., Burnett, M., Bellamy, R., Rector,             URL https://huggingface.co/Salesforce/
+  K., and Fleming, S. D. How programmers debug, revis-                  SFR-Embedding-2_R.
+  ited: An information foraging theory perspective. IEEE
+  Transactions on Software Engineering, 39(2):197–215,                 Meyer, Y., Emadi, M., Nathawani, D., Ramaswamy, L.,
+  2010.                                                                 Boyd, K., Van Segbroeck, M., Grossman, M., Mlocek, P.,
+                                                                        and Newberry, D. Synthetic-Text-To-SQL: A synthetic
+Le, H., Wang, Y., Gotmare, A. D., Savarese, S., and Hoi, S.             dataset for training language models to generate SQL
+  C. H. CodeRL: Mastering Code Generation through Pre-                  queries from natural language prompts, 2024.
+  trained Models and Deep Reinforcement Learning, 2022.
+  URL https://arxiv.org/abs/2207.01780.                                Moreira, G. d. S. P., Ak, R., Schifferer, B., Xu, M., Os-
+                                                                        mulski, R., and Oldridge, E. Enhancing Q&A Text
+Lee, C., Roy, R., Xu, M., Raiman, J., Shoeybi, M., Catan-               Retrieval with Ranking Models: Benchmarking, fine-
+  zaro, B., and Ping, W. NV-Embed: Improved Techniques                  tuning and deploying Rerankers for RAG. arXiv preprint
+  for Training LLMs as Generalist Embedding Models.                     arXiv:2409.07691, 2024a.
+  arXiv preprint arXiv:2405.17428, 2024.
+                                                                       Moreira, G. d. S. P., Osmulski, R., Xu, M., Ak, R., Schif-
+Lei, B., Li, Y., and Chen, Q. AutoCoder: Enhancing Code                 ferer, B., and Oldridge, E. NV-Retriever: Improving text
+  Large Language Model with AIEV-I NSTRUCT, 2024.                       embedding models with effective hard-negative mining.
+  URL https://arxiv.org/abs/2405.14906.                                 arXiv preprint arXiv:2407.15831, 2024b.
+Li, R., Allal, L. B., Zi, Y., Muennighoff, N., Kocetkov, D.,           Muennighoff, N., Liu, Q., Zebaze, A., Zheng, Q., Hui, B.,
+  Mou, C., Marone, M., Akiki, C., Li, J., Chim, J., et al.              Zhuo, T. Y., Singh, S., Tang, X., von Werra, L., and
+  Starcoder: may the source be with you! arXiv preprint                 Longpre, S. OctoPack: Instruction Tuning Code Large
+  arXiv:2305.06161, 2023.                                               Language Models. arXiv preprint arXiv:2308.07124,
+                                                                        2023.
+Li, X., Dong, K., Lee, Y. Q., Xia, W., Yin, Y., Zhang, H.,
+  Liu, Y., Wang, Y., and Tang, R. Coir: A comprehensive                Muennighoff, N., Su, H., Wang, L., Yang, N., Wei, F., Yu, T.,
+  benchmark for code information retrieval models. arXiv                Singh, A., and Kiela, D. Generative representational in-
+  preprint arXiv:2407.02883, 2024.                                      struction tuning. arXiv preprint arXiv:2402.09906, 2024.
+
+                                                                  11
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+Neelakantan, A., Xu, T., Puri, R., Radford, A., Han, J. M.,             Wei, Y., Wang, Z., Liu, J., Ding, Y., and Zhang, L. Magi-
+  Tworek, J., Yuan, Q., Tezak, N., Kim, J. W., Hallacy,                  coder: Source Code Is All You Need. arXiv preprint
+  C., et al. Text and code embeddings by contrastive pre-                arXiv:2312.02120, 2023.
+  training. arXiv preprint arXiv:2201.10005, 2022.
+                                                                        Wu, Y., Huang, D., Shi, W., Wang, W., Gao, L., Liu, S.,
+OpenAI. GPT-4o, 2024. URL https://platform.                              Nan, Z., Yuan, K., Zhang, R., Zhang, X., Du, Z., Guo,
+  openai.com/docs/models#gpt-4o. Accessed:                               Q., Pu, Y., Yin, D., Hu, X., and Chen, Y. InverseCoder:
+  2025-01-27.                                                            Unleashing the Power of Instruction-Tuned Code LLMs
+                                                                         with Inverse-Instruct, 2024. URL https://arxiv.
+Overflow, S. Stacksample: 10% of stack overflow                          org/abs/2407.05700.
+  q&a, 2021. URL https://www.kaggle.com/
+  datasets/stackoverflow/stacksample. Ac-                               Xia, C. S., Deng, Y., Dunn, S., and Zhang, L. Agentless: De-
+  cessed: 2025-01-26.                                                     mystifying llm-based software engineering agents. arXiv
+                                                                          preprint arXiv:2407.01489, 2024.
+Roziere, B., Gehring, J., Gloeckle, F., Sootla, S., Gat, I.,
+                                                                        Xie, C., Li, B., Gao, C., Du, H., Lam, W., Zou, D., and
+  Tan, X. E., Adi, Y., Liu, J., Sauvestre, R., Remez, T., et al.
+                                                                          Chen, K. SWE-Fixer: Training Open-Source LLMs for
+  Code llama: Open foundation models for code. arXiv
+                                                                          Effective and Efficient GitHub Issue Resolution. arXiv
+  preprint arXiv:2308.12950, 2023.
+                                                                          preprint arXiv:2501.05040, 2025.
+Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K., and               Yan, W., Tian, Y., Li, Y., Chen, Q., and Wang, W. Code-
+  Yao, S. Reflexion: Language agents with verbal rein-                    transocean: A comprehensive multilingual benchmark
+  forcement learning. Advances in Neural Information                      for code translation. arXiv preprint arXiv:2310.04951,
+  Processing Systems, 36, 2024.                                           2023.
+Team, M. T.   Moatless tools, November 2024a.                           Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao,
+  URL        https://github.com/aorwall/                                  S., Narasimhan, K., and Press, O. Swe-agent: Agent-
+  moatless-tools.                                                         computer interfaces enable automated software engineer-
+                                                                          ing. arXiv preprint arXiv:2405.15793, 2024.
+Team, Q. Qwen2.5: A Party of Foundation Models, Septem-
+  ber 2024b. URL https://qwenlm.github.io/                              Yu, Z., Zhang, X., Shang, N., Huang, Y., Xu, C., Zhao,
+  blog/qwen2.5/.                                                          Y., Hu, W., and Yin, Q. WaveCoder: Widespread And
+                                                                          Versatile Enhancement For Code Large Language Models
+Voyage AI. Voyage-code-3: more accurate code retrieval                    By Instruction Tuning, 2024. URL https://arxiv.
+  with lower dimensional, quantized embeddings, Decem-                    org/abs/2312.14187.
+  ber 4 2024. URL https://blog.voyageai.com/
+  2024/12/04/voyage-code-3/.                                            Yuan, A., Coenen, A., Reif, E., and Ippolito, D. Wordcraft:
+                                                                          story writing with large language models. In Proceedings
+Wang, L., Yang, N., Huang, X., Yang, L., Majumder, R., and                of the 27th International Conference on Intelligent User
+ Wei, F. Improving text embeddings with large language                    Interfaces, pp. 841–852, 2022.
+ models. arXiv preprint arXiv:2401.00368, 2023.
+                                                                        Zhang, K., Yao, W., Liu, Z., Feng, Y., Liu, Z., Murthy,
+Wang, X., Li, B., Song, Y., Xu, F. F., Tang, X., Zhuge, M.,               R., Lan, T., Li, L., Lou, R., Xu, J., et al. Diversity
+ Pan, J., Song, Y., Li, B., Singh, J., et al. Openhands: An               empowers intelligence: Integrating expertise of software
+ open platform for AI software developers as generalist                   engineering agents. arXiv preprint arXiv:2408.07060,
+ agents. arXiv preprint arXiv:2407.16741, 2024a.                          2024a.
+
+                                                                        Zhang, Y., Ruan, H., Fan, Z., and Roychoudhury, A. Au-
+Wang, Z. Z., Asai, A., Yu, X. V., Xu, F. F., Xie, Y.,
+                                                                          tocoderover: Autonomous program improvement. In
+ Neubig, G., and Fried, D. CodeRAG-Bench: Can Re-
+                                                                          Proceedings of the 33rd ACM SIGSOFT International
+ trieval Augment Code Generation?     arXiv preprint
+                                                                          Symposium on Software Testing and Analysis, pp. 1592–
+ arXiv:2406.14497, 2024b.
+                                                                          1604, 2024b.
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,             Zheng, T., Zhang, G., Shen, T., Liu, X., Lin, B. Y., Fu, J.,
+ E., Le, Q. V., Zhou, D., et al. Chain-of-thought prompting               Chen, W., and Yue, X. Opencodeinterpreter: Integrating
+ elicits reasoning in large language models. Advances in                  code generation with execution and refinement. arXiv
+ neural information processing systems, 35:24824–24837,                   preprint arXiv:2402.14658, 2024.
+ 2022.
+
+                                                                   12
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+A. Appendix.
+A.1. NV-EmbedCode Training Details
+We employ three types of instructions for the various retrieval datasets used in training NV-EmbedCode:
+
+  1. Bug-to-File: Applied to the dataset derived from the SWE-bench training set, which maps issue descriptions to their
+     respective “oracle” files - files requiring edits to resolve the issue. These oracle files are identified based on the pull
+     request (PR) that resolved the issue successfully.
+  2. BugSummary-to-File: Also based on the SWE-bench training set, except that here the original issue descriptions are
+     replaced with summaries generated by an LLM - Llama-3.1 405B.
+  3. General: Used for all other retrieval datasets, which include a diverse set of tasks, including text-to-code, code-to-text,
+     code-to-code, and hybrid retrieval.
+
+Table 7 provides an overview of these instruction templates along with the number of samples for each. Each training sample
+consists of one query-positive document pair and 7 hard negative documents.
+
+         Table 7. Instruction template and number of samples used for each category of NV-EmbedCode’s training dataset.
+       Dataset Type           Instruction Template                                                         Number of Samples
+       Bug-to-File            Given a bug description, retrieve codes that need to be edited to resolve it              177k
+                              Given a summary of bug description generated by an LLM, retrieve codes
+       BugSummary-to-File                                                                                                92k
+                                that need to be edited to resolve it
+       General                Retrieve code or text based on user query                                                 265k
+
+The SWE-bench training set consists of 19,008 issues extracted from pull requests across 35 non-test repositories. We filter
+out instances in which the corresponding golden solution creates a new file or modifies non-Python files, resulting in a curated
+subset of 13,922 issues. For each remaining instance, the oracle files are designated as positive documents. As described in
+Section 3.2, all documents are segmented into chunks; in this setting, we use a chunk size of 512 tokens. We also include a
+portion of the CoIR training set (Li et al., 2024), which includes data from APPS (Hendrycks et al., 2021), CoSQA (Huang
+et al., 2021), CodeTransOcean (Yan et al., 2023), StackOverflowQA (Overflow, 2021), and SyntheticText2SQL (Meyer et al.,
+2024). Additionally, we synthetically generate a dataset of code produced from coding queries in CodeFeedback (Zheng
+et al., 2024) by prompting DeepSeek-v2.5 (DeepSeek-AI, 2024). Table 8 summarizes the number of samples for each
+dataset.
+
+                           Table 8. Number of samples for each training dataset of NV-EmbedCode.
+        Dataset Name                                Main Retrieval Task Dataset Type             Number of Samples
+        SWE-bench Train Set (Original issue)        Issue-to-Oracle-File Bug-to-File                          177k
+        SWE-bench Train Set (LLM summary as issue) Issue-to-Oracle-File BugSummary-to-File                     92k
+        APPS (Hendrycks et al., 2021)               Text-to-Code             General                            5k
+        CoSQA (Huang et al., 2021)                  Text-to-Code             General                           20k
+        SyntheticText2SQL (Meyer et al., 2024)      Text-to-Code             General                          100k
+        CodeTransOcean (Yan et al., 2023)           Code-to-Code             General                            1k
+        StackOverflowQA (Overflow, 2021)            Hybrid Code              General                           14k
+        CodeFeedback (Zheng et al., 2024) +
+                                                    Hybrid Code              General                          125k
+          DeepSeek-v2.5 (DeepSeek-AI, 2024)
+
+As described in Section 4.3, we evaluated a range of chunk sizes from 450 to 4096 tokens using the SFR-Embedding-Mistral
+model to determine the optimal chunking of code files. Our experiments on the SWE-bench Lite set revealed that a chunk
+size of 450 tokens yields the highest retrieval accuracy, as illustrated in Figure 5. Based on these findings, we adopted a
+chunk size of 512 tokens for training and 450 tokens for inference with our model. Consistent with the behavior observed in
+the SFR-Embedding-Mistral model, NV-EmbedCode also exhibits a decline in retrieval accuracy as chunk size increases, as
+shown in Figure 5. This can be attributed to two factors: first, a more localized view of the files enables the model to more
+effectively determine if the code snippet is related to the issue; second, larger chunk sizes will be out-of-distribution, as both
+our current training set and the training data used for the base model consist primarily of shorter documents.
+
+                                                                13
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+
+
+
+Figure 5. Recall@k in file retrieval for SWE-bench when changing the maximum number of tokens per each chunk. k is the number of
+oracle files based on the golden solution that resolved the issue.
+
+
+Table 9. N EMOTRON -C ORTEXA file retrieval accuracy compared to free-form agentic retrieval baselines for SWE-bench Verified. As
+baselines retrieve an arbitrary number of files, we report recall@∞. For N EMOTRON -C ORTEXA, we use recall@10, since other methods
+retrieved at least 15 files on average.
+                                      Method                                  Recall@∞
+                                  OpenHands (Wang et al., 2024a)            85.60%
+                                  AutoCodeRover-v2 (Zhang et al., 2024b)    88.20%
+                                  MarsCode (Liu et al., 2024b)              87.20%
+                                  SWE-agent-v1 (Yang et al., 2024)          76.80%
+                                  N EMOTRON -C ORTEXA                       94.00% (recall@10)
+
+
+
+A.2. Additional Results for Localization
+Compare with agentic file retrieval methods. We compare file retrieval accuracy of NV-EmbedCode against four
+representative free-form agentic approaches: OpenHands (Wang et al., 2024a), AutoCodeRover-v2 (Zhang et al., 2024b),
+MarsCode Agent (Liu et al., 2024b), and SWE-agent-v1 (Yang et al., 2024). For each agent, we extract files from their official
+trajectory logs in the SWE-bench leaderboard. Since these methods can retrieve an arbitrary number of files, we denote
+the accuracy metric with recall@∞. In this comparison, we use recall@10 for N EMOTRON -C ORTEXA as other baseline
+methods retrieved at least 15 files on average. Table 9 shows that our code embedding model, NV-EmbedCode, enables
+N EMOTRON -C ORTEXA to achieve significantly higher file recall accuracy compared to agentic baselines, demonstrating the
+effectiveness of finetuning for the specialized task of file retrieval from issue descriptions.
+
+Entity localization with different ensemble methods. In Section 4.4, we discussed how N EMOTRON -C ORTEXA utilizes
+an ensemble of four localization agents, each instantiated with a different model. Here, we explore two alternative ensemble
+strategies. The first uses temperature sampling with a single model to generate diverse outputs. The second aggregates entity
+results across all steps from a single agent. We use DeepSeek-v3 as it is individually the strongest in entity localization.
+For the temperature sampling ensemble, we run entity localization four times; once with temperature 0 and three times
+with temperature 0.8. When aggregating all steps, we use greedy sampling (temperature 0). Table 10 demonstrates that the
+model-based ensemble achieves higher entity recall than both alternatives, while the temperature sampling baseline obtains
+a higher precision by retrieving fewer entities. These results highlight that model diversity helps improve the recall accuracy
+of entity localization the most among the three ensemble methods.
+
+Entity Localization Accuracy and Resolution Status. To further assess the impact of localization on the final resolution
+rate, we divide the instances into two sets, resolved and unresolved, based on whether any of the nine patches successfully
+resolve the issue. We then calculate the entity localization accuracy for each set. As shown in Table 11, we observe that
+resolved cases exhibit consistently higher precision and recall in localization compared to unresolved ones, indicating a
+strong correlation between localization accuracy and successful patch generation.
+
+                                                                14
+           Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+
+Table 10. N EMOTRON -C ORTEXA’s entity ensemble achieves higher recall accuracy compared to other ensemble baselines.
+                               Method                                       Precision Recall
+                                   Temperature Sampling                        49.93%      57.03%
+                                   Aggregating Results of All Agent Iterations 35.47%      53.47%
+                                   Ensemble of Models (LA + DP)                34.51%      67.62%
+
+
+Table 11. Average entity precision and recall accuracy as broken down by resolution results. Resolved instances have higher accuracies.
+                                                                   Lite             Verified
+                                     Result
+                                                            Precision Recall Precision Recall
+                                    Resolved              44.54%       86.87% 46.05%       90.91%
+                                    Unresolved            27.58%       63.20% 32.75%       64.06%
+
+
+A.3. Solution Filtering
+After generating 9 patches for each instance as described in Section 4.5, we have the correct patch for 146 instances of
+SWE-bench Lite and 307 instances of SWE-bench Verified. However, the PASS to PASS and FAIL to PASS tests
+provided by SWE-bench cannot be used to identify the correct patches. Table 12 summarizes the average number of patches
+remaining after each filtering step described in Section 3.5, as well as the number of resolved instances achieved by applying
+majority voting at each step (pass@1). The results demonstrate the effectiveness of these filtering steps but also indicate
+areas for improvement, which we leave for future work. Specifically, the regression and reproduction tests, generated using
+an LLM, may have inaccuracies that could result in removing correct solutions or failing to prune the wrong solutions.
+Furthermore, majority voting is not an ideal heuristic here, as certain incorrect solutions may repeat multiple times, whereas
+some correct solutions may only be generated once or fewer times than the incorrect ones. Additionally, in cases of ties
+between solutions based on their frequency, we choose one of them randomly. A more robust scoring mechanism can help
+mitigate these limitations.
+
+
+Table 12. The impact of filtering techniques on the average number of remaining patches and the number of resolved instances when
+majority voting is applied after filtering (pass@1).
+                                                               Lite                Verified
+                                      Filtering
+                                                         avg. % Resolved avg. % Resolved
+                                   Syntax check           7.7            -      7.9            -
+                                   + Normalization        5.7 107 (35.67%)      5.5 225 (45.00%)
+                                   + Regression test      4.6 116 (38.67%)      4.5 242 (48.40%)
+                                   + Reproduction test    4.0 126 (42.00%)      4.0 263 (52.60%)
+
+
+A.4. Cost Analysis
+For measuring costs, we use the following prices for the models we employ:
+
+• Claude 3.5 Sonnet API: $3/M input tokens and $15/M output tokens.
+• GPT-4o API: $2.5/M input tokens and $10/M output tokens.
+• DeepSeek-V3: $0.9/M input tokens and $1.1/M output tokens.
+• Llama 3.3-70B: $0.59/M input tokens and $0.73/M output tokens.
+• Qwen2.5-72B: $0.4/M input tokens and $0.75/M output tokens.
+• NV-EmbedCode: As this is a Mistral 7B-based model, we use Mistral pricing of $0.11/M input tokens. We cache the
+  chunks and query our vector database for repeated ones.
+Table 13 summarizes a breakdown of the cost for each step of our pipeline. SWE-bench Lite and Verified have a total of 800
+instances, but 93 instances are common between them. We consider the common ones only once in the cost calculation.
+
+                                                                  15
+          Enhancing LLM Agents for Software Engineering Tasks via Improved Localization and Solution Diversity
+
+
+
+
+Table 13. Breakdown of the cost for running N EMOTRON -C ORTEXA on the 707 unique instances of SWE-bench Lite and Verified,
+considering the 93 instances common between them only once.
+                                               #Input Tokens #Output Tokens         Total Cost    Avg. Cost / Instance
+    Stage                  Model
+                                                     M              M                USD (%)            USD (%)
+    File Localization      NV-EmbedCode           217.95             –            23.97 (6.69%)       0.03 (6.69%)
+    Entity Localization    Mix                     42.66           1.74           53.68 (15.00%)     0.08 (15.00%)
+    Generating Tests       GPT-4o                  13.00           5.74           89.90 (25.11%)     0.13 (25.11%)
+    Patch Generation       Claude-3.5-Sonnet       47.63           3.17          190.44 (53.20%)     0.27 (53.20%)
+    Total                  Mix                    321.24          10.65           358.00 (100%)       0.51 (100%)
+
+
+
+
+                                                            16
+

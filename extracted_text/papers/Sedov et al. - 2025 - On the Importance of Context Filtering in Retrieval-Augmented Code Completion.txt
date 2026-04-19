@@ -1,0 +1,208 @@
+                                                                                                                                                                                            2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW)
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW) | 979-8-3315-8503-7/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASEW67777.2025.00074
+
+
+
+
+                                                                                                                                                                                                  On the Importance of Context Filtering in
+                                                                                                                                                                                                   Retrieval-Augmented Code Completion
+                                                                                                                                                                                                       Sergey Sedov                            Vsevolod Savinskiy                            Andrei Arzhantsev
+                                                                                                                                                                                                   New York University                   Constructor University Bremen                 Technical University of Munich
+                                                                                                                                                                                            evolution3000futurama@gmail.com                  tirlimster@gmail.com                         arzhanandrey@gmail.com
+
+
+
+                                                                                                                                                                                   Abstract—We present a retrieval-augmented pipeline for code                 index doc-string enrichment could play a crucial role for
+                                                                                                                                                                                   completion task developed by our NoMoreActimel team during                  retrieval quality, especially if used embedding model was not
+                                                                                                                                                                                   the JetBrains & Mistral AI Context Collection Competition. Our              trained on less common languages, e.g. Kotlin.
+                                                                                                                                                                                   approach separates offline index pre-processing and online query
+                                                                                                                                                                                   processing parts. We highlight the importance of asymmetric                 Contributions: (1) A two-stage RAG system tailored to code
+                                                                                                                                                                                   approach to RAG in code completion tasks, separating index-                 completion task, with short description generation that con-
+                                                                                                                                                                                   specific and query-specific heuristics. We argue that stronger              sistently improves retrieval and final composition; (2) a
+                                                                                                                                                                                   embedding models should perform increasingly better than BM-                length- and distance-aware scoring and robustness to context-
+                                                                                                                                                                                   25 baselines when applied on large databases, which leads
+                                                                                                                                                                                                                                                               window truncation; (3) evidence that cross-repository re-
+                                                                                                                                                                                   us to retrieval across all repositories instead of a single one.
+                                                                                                                                                                                   However, as our experiments show that sometimes less context is             trieval with strong code embeddings is beneficial compared to
+                                                                                                                                                                                   better, retrieval over larger code-bases increases the significance         single-repository baselines; (4) evidence that completion text-
+                                                                                                                                                                                   of proper context filtering. Therefore, we identify the main                descriptions work more robustly than suggested code com-
+                                                                                                                                                                                   challenges of model-based RAG in code completion as poor                    pletions when generated by a smaller model (5) comparison
+                                                                                                                                                                                   context relevancy and extensive generality of chunk embeddings
+                                                                                                                                                                                                                                                               of time consumption by different parts of pipeline, some
+                                                                                                                                                                                   in particular. We focus on experiments with different chunking
+                                                                                                                                                                                   strategies, introducing a hole-centered query chunking strategy as          engineering notes on how to reduce I/O latency.
+                                                                                                                                                                                   our first modification that controls query relevance. We propose
+                                                                                                                                                                                   several reweighting penalties for similarity scores in order to                                      II. M ETHOD
+                                                                                                                                                                                   increase relevancy of in-context chunks, penalizing by length
+                                                                                                                                                                                   and distance to completion hole. Filtering by simple similarity             We denote the code hole location by line index h. The context
+                                                                                                                                                                                   score thresholds also helps the final model performance. Besides            budget is B = 16,384 tokens afterwards truncated to model
+                                                                                                                                                                                   that, we find that generation of short textual descriptions of              context-length from left.
+                                                                                                                                                                                   completion target significantly improves metrics as well. While
+                                                                                                                                                                                   textual descriptions can be generated with much smaller model
+                                                                                                                                                                                   (1.5B) and token budget (1-2 sentences), they deal with context-            A. Offline indexing
+                                                                                                                                                                                   overfitting compared to potential code-completion generations               Index Chunking: We construct two chunk types over all
+                                                                                                                                                                                   provided in-context. The described approach achieved top results:
+                                                                                                                                                                                                                                                               repositories: (a) max-length chunks which include up to 1024
+                                                                                                                                                                                   1st in Python and 2nd in Kotlin private phases using lightweight
+                                                                                                                                                                                   Qwen 0.6B embedding model. Heavier Nomic 7B model gave the                  tokens, splitted by new-lines; (b) function-level segments sep-
+                                                                                                                                                                                   substantial lead of 13% to the second-best solution in the Python           arated by syntactic features, i.e. function and class definitions.
+                                                                                                                                                                                   public phase leaderboard. The code is available on github.                  Some methods (import-level chunks; generated doc-string
+                                                                                                                                                                                   Index Terms—code completion, retrieval, RAG, embeddings,                    chunks for functions) were implemented but excluded from
+                                                                                                                                                                                   FAISS, ChrF, context composition                                            final submissions due to pre-processing costs when offline and
+                                                                                                                                                                                                                                                               online parts are computed together.
+                                                                                                                                                                                                          I. I NTRODUCTION                                     Embeddings and storage: We embed all chunks using ei-
+                                                                                                                                                                                   Context information is critical for code completion quality.                ther nomic-ai/nomic-embed-code (7B) or Qwen/Qwen3-
+                                                                                                                                                                                   The JetBrains & Mistral AI Context Collection Challenge                     Embedding-0.6B. All embeddings are consolidated into a
+                                                                                                                                                                                   evaluates submitted contexts via Fill-in-the-Middle prompting               single FAISS index to avoid small-file I/O overhead. We found
+                                                                                                                                                                                   of three code models (Mellum, Codestral, Qwen2.5-Coder)                     that single-file indices substantially reduce online-stage latency
+                                                                                                                                                                                   and averages ChrF scores across models. To our under-                       compared to per-repository .npz files.
+                                                                                                                                                                                   standing, the specific models have 4B, 22B and 14B of                       Correctness and scope: Public/practice phases include times-
+                                                                                                                                                                                   parameters correspondingly. This paper documents a compact,                 tamped repository variants. We additionally verified that the
+                                                                                                                                                                                   reproducible RAG [1] pipeline that builds a global index                    proposed cross-repository retrieval does not leak answers
+                                                                                                                                                                                   over all repositories and composes per-query contexts through               from future snapshots, i.e. that different data samples do not
+                                                                                                                                                                                   multi-view retrieval with soft penalties. We highlight that, in             include answers for each other, which makes sense in the
+                                                                                                                                                                                   case of separation between offline index creation and online                common application scenario. With strong embedding models,
+                                                                                                                                                                                   query processing stages, mentioned ideas can be applied more                cross-repository retrieval was substantially better than single-
+                                                                                                                                                                                   extensively by exploiting pre-processing time. For instance,                repository retrieval, both being ahead of BM25 baseline.
+
+
+                                                                                                                                                                                979-8-3315-8503-7/25/$31.00 ©2025 IEEE                                   368
+                                                                                                                                                                                DOI 10.1109/ASEW67777.2025.00074
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:24:45 UTC from IEEE Xplore. Restriction
+                 B. Online query processing: Query chunking                                 threshold. Empirically we estimated similarity thresholds near
+                 Given the incomplete file (prefix, suffix), we form several types          0.2 to be optimal, so the final index-chunk similarity score is:
+                 of chunks excluding semantics-based methods (which could be                  s(qc, ic) = embed(qc), embed(qi) · wq (qc) · wi (ic) (4)
+                 done in the future):
+                    1) Full-file chunks as a baseline.                                                s(qc, ic) = s(qc, ic) · I{s(qc, ic) ≥ 0.2}         (5)
+                    2) Max-length chunks that include up to 1024 tokens, split-             We then insert chunks by descending s from right to left until
+                       ted by new-lines. Basic approach that covers everything.             the budget B is reached. This ordering ensures that any left-
+                    3) Centered windows around h that include [h − m, h + m]                side trimming removes the least relevant context first. We use
+                       lines of the incomplete file for various m.                          the < |file sep| > between chunks.
+                    4) Short natural-language task description produced by
+                       Qwen2.5-Coder 1.5B Instruct, which we append to every                          III. I MPLEMENTATION AND EFFICIENCY
+                       query chunk calling it the combined strategy.                        Models and Latency: Public phase runs mainly used Nomic
+                 We carefully select prompt and special tokens for description              7B embeddings; private phase used Qwen3 0.6B for the better
+                 generation, limiting it to 128 token cap. Importantly, we                  trade-off between final quality and compute requirements. The
+                 append descriptions to suffices of final contexts, using them              reason for using a lighter model is no separation between
+                 for index retrieval at the same time.                                      offline and online stages in private phase, so index creation
+                                                                                            was done along with query answering, consuming most of the
+                 C. Online query processing: Scores reweighting                             time. In scenarios where user’s code-base can be sent to cloud
+                 Query Chunks Distance Penalty:         Common          retrieval-          to be pre-processed in order to update the index, costly time
+                 augmentation approach is to compute embeddings over                        consumption of embedding models drops significantly.
+                 the whole query files. Frequently such approach poorly fits                We used Qwen2.5-Coder 1.5B for generatng descriptions,
+                 the code completion purposes as query files may contain a lot              carefully selecting prompt with special tokens and generation
+                 of task-irrelevant information. To deal with this, we introduce            limits (1-2 sentences). Docker images cached light models; a
+                 distance-based score weighting which assigns [0, 1] weight                 helper script cached larger ones when needed.
+                 to each query chunk based on the line-wise distance between
+                                                                                            Assuming <1 minute/query on an A40-class GPU, most time
+                 chunk center and completion hole, normalized by the total
+                                                                                            was spent on query embeddings, then description generation,
+                 number of lines in query. Denoting query as q, query chunk
+                                                                                            then FAISS search and packing. Consolidating indices into
+                 as qc and number of lines as L(·):
+                                                                                            single file gave the biggest latency improvement, batched
+                                                 |center(qc) − h|                           query processing (meaning across different query chunks) also
+                                  wq (q, qc) =                                  (1)
+                                                       L(q)                                 proved worthwhile.
+                 Query Chunks Length Penalty: Distance-based weighting                      We measured time consmuption for Python practice phase
+                 does not capture the size of query chunk, which generally                  data that included only 47 repositories. Nomic 7B index
+                 correlates negatively with its relevance for the completion                creation took 3 hours to complete and query processing
+                 task. This is especially relevant for centered-chunking which              took 30 minutes. For Qwen 0.6B it took 30 and 4 minutes
+                 is not affected by distance-based weights. Therefore, looking              correspondingly. We conclude that Qwen 0.6B suits fast code
+                 at final matching scores, we empirically selected length-based             completion purposes well enough, especially when index pre-
+                 scored weighting parameters for centered query chunks only:                processing can be done on the side. Possible scenarios of using
+                                                                                            Nomic 7B include distillation into smaller model, index pre-
+                                              1                                             processing, careful query chunk selection and faster GPUs.
+                             wq (q) =               ; m = 0.5 · L(qc)           (2)
+                                        0.2 · m + 1                                         We highlight that our method used extensive number of query
+                 Index Chunks Length Penalty: As we aimed to retrieve over                  chunks created by 4 different strategies. In case of stronger
+                 all repositories, proper filtering of large index chunks became            time constraints for online stage, number of calls to embedding
+                 more important. We mentioned that sometimes large file- or                 model can be easily reduced by some heuristics on chunk
+                 function- level chunks are getting the highest cosine-similarity           selection.
+                 scores, extensively consuming the limited context length. This
+                 becomes more relevant for models with smaller 8k context-                                          IV. R ESULTS
+                 length. We introduced softer length-penalty for index chunks               A. Public leaderboard
+                 which preserves mid-size chunks better than linear penalties:              Main Python submission used Nomic 7B embedding model.
+                                    wi (ic) = 1 − (L(ic)/B)   2
+                                                                                (3)         Python (1st place): Average ChrF 0.7469 (Mellum 0.6950,
+                                                                                            Codestral 0.8034, Qwen 0.7424).
+                 Retrieval and scoring: For each query chunk, we retrieve top-              Kotlin (4th place): Average ChrF 0.6590 (Mellum 0.6115,
+                 k = 3 index chunks using FAISS kNN cosine similarity                       Codestral 0.7139, Qwen 0.6515). We had not submitted the
+                 search. We apply the aforementioned score reweighting fol-                 latest solution to Kotlin, but saw direct correlation between
+                 lowed by threshold filtering which drops all chunks under the              Python and Kotlin results among first submissions.
+
+
+
+
+                                                                                      369
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:24:45 UTC from IEEE Xplore. Restriction
+                 B. Private phase                                                           per-file or per-repo clusters are being formed; each cluster is
+                 Both submissions used Qwen 0.6B embedding model.                           getting assigned an embedding by total summary and meta-
+                 Python (1st place): Average ChrF 0.734 (Mellum 0.656;                      data; query chunks are first matched with cluster-embeddings,
+                 Codestral 0.820; Qwen 0.725).                                              and then re-matched within each cluster. Instead of per-repo
+                 Kotlin (2nd place): Average ChrF 0.731 (Mellum 0.684;                      approach, cluster assignment may be done on the embedding
+                 Codestral 0.791; Qwen 0.719).                                              level as well - just clusterize embeddings of default chunks
+                                                                                            and select the mean of each cluster as the new embedding.
+                              V. A BLATIONS AND OBSERVATIONS
+                                                                                            B. Query chunks irrelevance.
+                   1) Cross-repository retrieval enables stronger gains than
+                      swapping embedders in single-repository settings.                     As we have discussed, it is frequently incorrect to assume
+                   2) Short descriptions by smaller models can improve re-                  that query chunks contain sufficient information about the
+                      trieval at negligible cost compared to candidate-code                 completion task. The next step in our plan was to deal with
+                      generation or beam search.                                            this problem via specific hierarchical retrieval design. Namely,
+                   3) Score reweighting methods balance diversity of both                   we suggest a following strategy for improving context-chunks
+                      index and query chunk types that contribute to context;               relevance:
+                      linear variants of index-chunk length penalty excessively                1) All index chunks are being assigned a cluster label, e.g.
+                      suppress mid-size functions.                                                 filename, by which we can filter the index.
+                   4) Conservative thresholds reduce noise without starving                    2) First, query chunks are getting matched with index with
+                      the budget, this is an important hyperparameter and                          the goal to find files similar to query (regularly some
+                      needs to be carefully selected for the particular embed-                     files do not fit into context length of embedding model).
+                      ding model and language.                                                     Import-level chunks may be good at this stage.
+                                                                                               3) After the most relevant files for the current query file
+                                 VI. D EVELOPMENT TIMELINE                                         were found, we perform second-stage chunk matching
+                   1) Research stage:                                                              within them, only based on generated query text de-
+                        a) Search for existing solutions, common chunking                          scription. This should help us find ”missing parts” and
+                            strategies and strong code embedding models                            control the noise from pure text-to-code matching over
+                        b) Formulate the specifics of RAG applications for                         the whole index.
+                            Code Completion, e.g. different chunking for                                             VIII. C ONCLUSION
+                            query, problems of chunk length-imbalance and
+                                                                                            We presented an effective RAG pipeline for Code Completion
+                            completion-irrelevance
+                                                                                            task that has proven itself by achieving great results in the
+                        c) Create a plan for development, manage team-work
+                                                                                            JetBrains & Mistral AI competition leaderboard. Our approach
+                   2) Baseline solution: max-length index, single whole-query               is based on the cosine-similarity top-k retrieval of relevant
+                      chunk, strong Nomic model                                             chunks from the index over all repositories. It divides the task
+                   3) Full code-base refactoring, separate into online and                  into offline index-preprocessing and online query-answering
+                      offline stages.                                                       stages, explores different chunking strategies, benefits from
+                   4) Query-chunking: max-length, full-file and centered                    short text descriptions generation and balances chunks in
+                      query chunks. Top-k for FAISS.                                        context via several score reweighting mechanisms.
+                   5) Introduce short description generation; tune prompt to
+                      keep 1–2 sentences.                                                                               R EFERENCES
+                   6) Use description both in retrieval and always in suffix of             [1] P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H.
+                      the final context.                                                        Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel, S. Riedel, and D. Kiela,
+                                                                                                “Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,”
+                   7) Add distance- and length- penalties for query chunks to                   in NeurIPS, 2020.
+                      increase retrieval from near the hole.                                [2] M. Popović, “chrF: character n-gram F-score for automatic MT evalua-
+                   8) Add quadratic length penalty for index chunks in order                    tion,” in WMT, 2015.
+                                                                                            [3] J. Johnson, M. Douze, and H. Jégou, “Billion-scale similarity search
+                      to deal with oversize chunks.                                             with GPUs,” IEEE TPAMI, 2019.
+                   9) Migrate to cross-repo retrieval                                       [4] S. Robertson and H. Zaragoza, “The probabilistic relevance framework:
+                  10) Latency: consolidate FAISS index into a single file,                      BM25 and beyond,” Foundations and Trends in Information Retrieval,
+                                                                                                2009.
+                      batched query chunks processing.
+                  11) Private phase: switch to Qwen3 0.6B embeddings for
+                      speed/memory.
+                            VII. L IMITATIONS AND FUTURE WORK
+                 A. Hierarchical retrieval.
+                 Retrieval time ultimately grows with index size. For larger
+                 indexes hierarchical retrieval may be the optimal solution: first,
+
+
+
+
+                                                                                      370
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:24:45 UTC from IEEE Xplore. Restriction
+

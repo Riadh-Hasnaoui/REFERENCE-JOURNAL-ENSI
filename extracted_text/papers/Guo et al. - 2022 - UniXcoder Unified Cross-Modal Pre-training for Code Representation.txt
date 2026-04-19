@@ -1,0 +1,966 @@
+    UniXcoder: Unified Cross-Modal Pre-training for Code Representation
+      Daya Guo1∗, Shuai Lu3 , Nan Duan3 , Yanlin Wang2 , Ming Zhou4 , and Jian Yin1
+           1
+             School of Computer Science and Engineering, Sun Yat-sen University.
+    Guangdong Key Laboratory of Big Data Analysis and Processing, Guangzhou, P.R.China
+                 2
+                   School of Software Engineering, Sun Yat-sen University.
+                         3
+                           Microsoft Research Asia, Beijing, China
+                           4
+                             Langboat Technology, Beijing, China
+
+
+                       Abstract                                of text data with self-supervised objectives, and
+                                                               can be fine-tuned to adapt to downstream tasks.
+     Pre-trained models for programming lan-                   Inspired by the success of pre-trained models in
+     guages have recently demonstrated great suc-
+                                                               NLP, pre-trained models for programming lan-
+     cess on code intelligence. To support both
+     code-related understanding and generation                 guages (PL) (Kanade et al., 2019; Feng et al.,
+     tasks, recent works attempt to pre-train uni-             2020; Svyatkovskiy et al., 2020) have been pro-
+     fied encoder-decoder models. However, such                posed to promote the development of code intelli-
+     encoder-decoder framework is sub-optimal for              gence. Svyatkovskiy et al. (2020) proposes GPT-C
+     auto-regressive tasks, especially code comple-            that employs a left-to-right Transformer (Vaswani
+     tion that requires a decoder-only manner for              et al., 2017) to support generation tasks such as
+     efficient inference. In this paper, we present            code completion, but the unidirectional framework
+     UniXcoder, a unified cross-modal pre-trained
+                                                               is sub-optimal for understanding tasks. In con-
+     model for programming language. The model
+     utilizes mask attention matrices with prefix              trast, other works (Kanade et al., 2019; Feng et al.,
+     adapters to control the behavior of the model             2020) pre-train a bidirectional Transformer encoder
+     and leverages cross-modal contents like AST               on source code, which significantly improves the
+     and code comment to enhance code represen-                performance of code-related understanding tasks.
+     tation. To encode AST that is represented as              However, its bidirectionality nature requires an ad-
+     a tree in parallel, we propose a one-to-one               ditional decoder when applied to generation tasks,
+     mapping method to transform AST in a se-
+                                                               where this decoder initializes from scratch and can-
+     quence structure that retains all structural in-
+     formation from the tree. Furthermore, we                  not benefit from the pre-training.
+     propose to utilize multi-modal contents to                   In this work, we present UniXcoder, a unified
+     learn representation of code fragment with                cross-modal pre-trained model for programming
+     contrastive learning, and then align represen-
+                                                               languages to support both code-related understand-
+     tations among programming languages using
+     a cross-modal generation task. We evaluate                ing and generation tasks. UniXcoder is based on
+     UniXcoder on five code-related tasks over nine            a multi-layer Transformer and follows Dong et al.
+     datasets. To further evaluate the performance             (2019) to utilize mask attention matrices with prefix
+     of code fragment representation, we also con-             adapters to control the access to context for each
+     struct a dataset for a new task, called zero-shot         token. Compared with current unified encoder-
+     code-to-code search. Results show that our                decoder models (Ahmad et al., 2021; Wang et al.,
+     model achieves state-of-the-art performance               2021) on code intelligence, UniXcoder can be bet-
+     on most tasks and analysis reveals that com-
+                                                               ter applied to auto-regressive tasks such as code
+     ment and AST can both enhance UniXcoder.
+                                                               completion that requires a decoder-only manner
+1    Introduction                                              to perform efficient inference in practice. Instead
+                                                               of taking code as the only input, we also consider
+Pre-trained models such as GPT (Radford et al.)                multi-modal contents like code comment and ab-
+and BERT (Devlin et al., 2018) have substantially              stract syntax tree (AST) to enhance code repre-
+advanced the state of the art across numerous nat-             sentation. Generally, user-written code comments
+ural language processing (NLP) tasks. These pre-               provide crucial semantic information about source
+trained models are pre-trained on large amounts                code like “Sort a given list” and AST contains rich
+    ∗
+      Work done while this author was an intern at Microsoft   syntax information like types of statements and
+Research. Contact: Daya Guo (guody5@mail2.sysu.edu.cn).        nested relationship among them, which helps the
+                                                           7212
+                  Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics
+                                         Volume 1: Long Papers, pages 7212 - 7225
+                           May 22-27, 2022 c 2022 Association for Computational Linguistics
+model better understand source code. To encode            2   Related Works
+AST that is represented as a tree in parallel, we pro-
+pose a one-to-one mapping method to transform             With the great success of pre-training in natural lan-
+AST in a sequence structure that retains all infor-       guage (NL) processing (Devlin et al., 2018; Lewis
+mation of the tree and then the sequence can be           et al., 2019; Raffel et al., 2019; Brown et al., 2020),
+used as the input to enhance code representation.         pre-trained models for programming languages
+                                                          have been proposed to promote the development
+   We pre-train UniXcoder using three types of            of code intelligence. These pre-trained models can
+language modeling tasks: masked language model-           be generally divided into three categories: encoder-
+ing (Devlin et al., 2018), unidirectional language        only, decoder-only, and encoder-decoder models.
+modeling (Radford et al.) and denoising objective            Encode-only models (Kanade et al., 2019; Bu-
+(Raffel et al., 2019), which can enable the model to      ratti et al., 2020; Feng et al., 2020; Guo et al., 2020;
+support various types of downstream tasks. Further-       Wang et al., 2022) pre-train a bidirectional Trans-
+more, we introduce two pre-training tasks to learn        former in which each token can attend to each other.
+a embedding that can represent semantics of a code        Kanade et al. (2019) pre-train CuBERT on a cor-
+fragment. One is multi-modal contrastive learning         pus of Python source codes by masked language
+that leverages AST to enhance semantics of code           modeling and next sentence prediction objectives.
+fragment embeddings, and the other is cross-modal         CodeBERT(Feng et al., 2020) is pre-trained on NL-
+generation that utilizes code comment to align em-        PL pairs in six programming languages with a new
+beddings among programming languages.                     pre-training task, namely replace token detection.
+   We evaluate UniXcoder on five tasks over nine          GraphCodeBERT (Guo et al., 2020) leverages data
+public datasets, including two understanding tasks:       flow to enhance code representation, while S YN -
+clone detection and code search, two generation           C O BERT (Wang et al., 2022) incorporates abstract
+tasks: code summarization and code generation,            syntax tree by AST edge prediction and contrastive
+and an auto-regressive task: code completion. To          learning. However, encoder-only models require an
+further test code fragment embeddings, we propose         additional decoder for generation tasks, where this
+a new task, called zero-shot code-to-code search,         decoder initializes from scratch and cannot benefit
+and construct a new dataset from CodeNet corpus           from the pre-training.
+(Puri et al., 2021) for this task. Experimental results      As for decoder-only pre-trained models, Svy-
+show that our model achieves state-of-the-art per-        atkovskiy et al. (2020) and Lu et al. (2021) re-
+formance on most tasks. Further analysis reveals          spectively propose GPT-C and CodeGPT, which
+that AST and code comment can both enhance                are both pre-trained using unidirectional language
+UniXcoder to better capture code semantics.               modeling that only allows tokens to attend the pre-
+   In summary, the contributions of this paper are:       vious tokens and itself to predict the next token.
+(1) We propose a unified cross-modal pre-trained          Decoder-only models are good at auto-regressive
+model that leverages multi-modal contents, i.e.           tasks like code completion, but the unidirectional
+code comment and AST, to support code-related un-         framework is sub-optimal for understanding tasks.
+derstanding, generation tasks and auto-regressive            Some recent works explore encoder-decoder
+tasks. (2) We propose a one-to-one mapping func-          models to support both understanding and genera-
+tion that converts AST into a sequence that retains       tion tasks. PLBART (Ahmad et al., 2021) is based
+all information of AST and can be encoded with            on the BART (Lewis et al., 2019) architecture and
+source code and comment in parallel. (3) We fur-          pre-trained on NL and PL corpus using denoising
+ther propose to utilize code comment to learn code        objectives. CodeT5 (Wang et al., 2021) adapts the
+fragment representation and construct a new dataset       T5 (Raffel et al., 2019) model that considers the
+for zero-shot code-code search to evaluate the qual-      crucial token type information from identifiers and
+ity of code fragment representation. (4) Experimen-       allow for multi-task learning on downstream tasks.
+tal results show that UniXcoder provides significant      TreeBERT (Jiang et al., 2021) follows the encoder-
+improvement on most downstream tasks.1                    decoder transformer framework but utilizes the tree
+                                                          structural information by modeling AST paths.
+                                                             Different from current unified models, UniX-
+  1
+    All the codes and data are available at https://      coder is based on a multi-layer Transformer and uti-
+github.com/microsoft/CodeBERT.                            lizes mask attention matrices with prefix adapters
+                                                      7213
+                Python code with a comment
+                                                                                                   can see that the comment “Return the sample arith-
+ # Return the sample arithmetic mean of data
+ def mean(data):                                                                                   metic mean of data” highly describes the function
+     n = len(data)
+     return sum(data) / n                                                                          of the source code, which provides crucial semantic
+                           AST Parser
+                                                               Non-terminal symbols (nodes)
+                                                                                                   information about the source code. Besides, AST
+                             module                            Terminal symbols (leaves)           provides rich syntax information, for example, the
+                                                               Parent-to-child relation
+                        function_definition
+                                                                                                   subtree “parameters → (data)” indicates the type
+                                                                                                   (i.e., parameters) of the term (data) in the
+    def                 parameters        :                          block
+            mean
+                                                                                                   function definition. Both of them can be used as ad-
+                                                  expression_statement       return_statement
+                    (     data        )                                                            ditional knowledge to enhance code representation
+                           assignment                       return           binary_operator
+                                                                                                   in pre-trained models. However, AST is usually
+                                                                                                   expressed as a tree and cannot be used directly as
+     n          =              call                               call               /     n
+                                                                                                   input to Transformer. In order to encode AST in
+                          argument_list                      argument_list
+          len                                 sum
+                                                                                                   parallel with code comments, we propose a one-to-
+                    (         data            )        (         data            )                 one mapping function F, described in Algorithm
+                                                                                                   1, to transform an AST into a sequence that retains
+ Figure 1: A Python code with its comment and AST.                                                 all structural information.
+                                                                                                   Algorithm 1 AST Mapping Function F
+to control the behavior of the model for supporting
+                                                                                                   Input: The root node root of AST
+both understanding and generation tasks. Com-
+                                                                                                   Output: A flattened token sequence
+pared with the encoder-decoder architecture, UniX-
+                                                                                                    1: function F(root)
+coder can be better applied to auto-regressive tasks
+                                                                                                    2:    seq = an empty list
+like code completion that is widely used in IDEs,
+                                                                                                    3:    name = the name of root
+since the task requires a decoder-only manner to
+                                                                                                    4:    if root is a leaf then
+perform efficient inference in practice. Liu et al.
+                                                                                                    5:        seq.append(name)
+(2020) also pre-train a similar model CugLM with
+                                                                                                    6:    else
+multi-task learning, but they only focus on code
+                                                                                                    7:        seq.append(name :: lef t)
+completion rather than various tasks. Besides, we
+                                                                                                    8:        for child in children of root do
+incorporate syntax information from AST by a one-
+                                                                                                    9:            seq.extend(F(child))
+to-one mapping function that converts an AST into
+                                                                                                   10:        end for
+a sequence to enhance code representation. Differ-
+                                                                                                   11:        seq.append(name :: right)
+ent from previous pre-trained models that utilize
+                                                                                                   12:    end if
+AST, the mapping function retains all structural
+                                                                                                   13: end function
+information from AST and does not require addi-
+tional pre-training tasks (such as edge prediction)
+to implicitly learn the AST structure.                                                                Specially, given a root node root of AST, the
+                                                                                                   algorithm recursively applies the same function
+3        UniXcoder                                                                                 F to its children and then add its name with two
+                                                                                                   special suffixes (i.e. lef t and right, respectively)
+In this section, we describe UniXcoder, a unified                                                  on both sides (line 6-11 of Algorithm 1). If the root
+cross-modal pre-trained model that leverages multi-                                                node is a leaf, we directly produce its name (line 4-
+modal data (i.e. code comment and AST) to pre-                                                     5). Taking “parameters → (data)” as an example,
+train code representation. The model is based on                                                   the mapping function F transforms the subtree to
+Transformer and utilizes mask attention matrices                                                  “<parameters,left> ( data ) <parameters,right>”.
+(Dong et al., 2019) with prefix adapters to control                                                   There can be various ways to transform a tree
+the behavior of the model. In the following, we                                                    to a sequence of tokens, e.g. pre-order traversal.
+first introduce how to unify multi-modal data as                                                   However, a particular transformation should be
+the input of UniXcoder (§3.1), and then the model                                                  a one-to-one mapping function. Otherwise, the
+architecture (§3.2) and pre-training tasks (§3.3).                                                 mapping may confuse a tree with another struc-
+                                                                                                   ture. Our mapping function F satisfies this re-
+3.1 Input Representation                                                                           quirement (see Appendix A for a proof). Fi-
+We give an example of a python code with its com-                                                  nally, given a source code C, we take its comment
+ment and AST in Figure 1. From the figure, we                                                      W = {w0 , w1 , ..., wm−1 } and the flattened AST
+                                                                                                7214
+token sequence F(T (C)) = {c0 , c1 , ..., ck−1 } as       3.3   Pre-training Tasks
+input, where T (C) is the root of the AST of the          We describe the pre-training tasks used in UniX-
+code. For input format, we concatenate them with a        coder in this section. As shown on the right side of
+prefix as an input sequence, as shown at the bottom       Figure 2, we first pre-train UniXcoder using three
+of Figure 2, where the prefix represents the work         tasks, including masked language modeling (De-
+mode of the model and will be discussed next.             vlin et al., 2018), unidirectional language modeling
+                                                          (Radford et al.) and denoising objective (Raffel
+3.2 Model Architecture                                    et al., 2019). These tasks are designed for differ-
+Figure 2 shows the model architecture of UniX-            ent modes, enabling UniXcoder to support various
+coder. The model applies N transformer layers over        types of code-related downstream tasks. We then
+code comment and flattened AST with a prefix to           propose to utilize multi-modal data to learn code
+produce hidden states H N = {hN        N         N        fragment embeddings through contrastive learning
+                                  0 , h1 , ..., hn−1 },
+where the prefix p ∈ {[Enc], [Dec], [E2D]} indi-          with cross-modal generation, as shown in Figure 3.
+cates the behavior of the model, e.g. [E2D] means         Masked Language Modeling For encoder-only
+that UniXcoder works as a encoder-decoder model.          mode, we follow Devlin et al. (2018) to apply
+Each transformer layer contains an architecturally        masked language modeling (MLM) pre-training
+identical transformer that uses a multi-headed self-      task. Specially, we sample 15% of the tokens Sm
+attention operation (Vaswani et al., 2017) followed       from the input sequence, and then replace 80%
+by a feed forward layer over the output of the previ-     (10%) of them with a [MASK] (random) token
+ous layer. For the l-th transformer layer, the output     and leave another 10% of them unchanged. The
+of the multi-headed self-attention is computed via:       task is to predict original tokens of masked tokens
+                                                          based on their bidirectional contextual tokens, as
+ Q = H l−1 W Q , K = H l−1 W K , V = H l−1 W V            illustrated in Figure 2 (a). In particular, the model
+                                            (1)           can leverage semantic information from comment
+                        QKT                               and syntax information from AST to infer masked
+         head = softmax( √    + M)V                (2)
+                           dk                             code tokens, which encourages the model to learn
+                                                          code representations from different knowledge re-
+where previous layer’s output H l−1 ∈ Rn×dh is            sources. The objective is calculated as Equation 3,
+linearly mapped to a triplet of queries, keys and         where X mask is the masked input sequence.
+values respectively. dk is the dimension of a head,                              X
+and M ∈ Rn×n is a mask matrix to control the                   lossM LM = −            logp(xi |X mask )    (3)
+context a token can attend to when computing its                               xi ∈Sm
+
+contextual representation, as shown in the middle         Unidirectional Language Modeling We use
+of Figure 2. If the i-th token is allowed to attend to    unidirectional language modeling (ULM) pre-
+the j-th token, then Mij is set to 0 otherwise −∞.        training task to pre-train decoder-only mode for
+   For encoder-only mode, we add a special token          supporting auto-regressive tasks like code comple-
+[Enc] as the prefix in front of the input and set         tion, as shown in Figure 2 (b). The task predicts the
+all elements of the mask matrix as 0 to allow all         next token xi one by one conditioned on previous
+tokens attend to each other. For decoder-only mode,       tokens and itself {x0 , x1 , .., xi−1 }, which can be
+a prefix [Dec] is used and the upper triangular part      done using a triangular matrix for attention mask.
+of the mask is set to −∞ to indicate that each token
+                                                                                   n−1
+can only attend to itself and previous tokens. For                                 X
+encoder-decoder mode, tokens in the source input                   lossU LM = −          logp(xi |xt<i )    (4)
+                                                                                   i=0
+are allowed to attend to each other, while tokens in
+the target input only attend to itself and previous       Denoising Objective DeNoiSing (DNS) pre-
+tokens in both source and target inputs. We use the       training objective has been shown to be quite effec-
+[E2D] prefix to indicate that UniXcoder works as          tive for encoder-decoder models like BART (Lewis
+an encoder-decoder model. During the pre-training         et al., 2019) and T5 (Raffel et al., 2019) in NLP. The
+phase, model parameters are shared in different           task randomly masks spans with arbitrary lengths
+modes and optimized with several objectives to            and then generates these masked spans in encoder-
+support various types of downstream tasks.                decoder mode. To better support generation tasks
+                                                      7215
+   UniXcoder with Shared Parameters                   Self-attention Masks                                     Pre-training Tasks
+                                                             Encoder-only                                        𝑥%                                𝑥&
+    ℎ!"         ℎ#"       … ℎ$%&
+                             "              "
+                                           ℎ$%#
+
+                                                                                                                      UniXcoder
+               Transformer Layer N                                                                  𝑥!        MASK         𝑥"        𝑥#         MASK         𝑥$
+
+
+
+                         …                                   Decoder-only
+                                                                                                   𝑥%
+                                                                                                         (a) Masked Language Modeling
+
+                                                                                                                 𝑥"        𝑥#       𝑥&             𝑥$      EOS
+
+
+               Transformer Layer 2                                                                                    UniXcoder
+                                                                                                   𝑥!            𝑥%        𝑥"        𝑥#            𝑥&        𝑥$
+               Transformer Layer 1
+                                                                                                       (b) Unidirectional Language Modeling
+                                                           Encoder-Decoder
+                                                                                                                                   𝑥%              𝑥"      EOS
+                 Position Embeddings
+                  Token Embeddings                                                                                    UniXcoder
+                                                                                                  𝑥!        MASK0          𝑥#    MASK0             𝑥%        𝑥"
+
+      Prefix          Comment      Flattened AST           Prevent from Attending                                (c) Denoising Objective
+
+Figure 2: Model architecture of UniXcoder. The model takes comment and flattened AST as the input (more
+specific input examples can be found in Figure 3). Model parameters are shared in different modes. We use
+different self-attention masks to control the behavior of the model and use various tasks to pre-train the model,
+including masked language modeling, unidirectional language modeling, and denoising objective.
+
+
+like code summarization, we utilize similar denois-
+ing objective as T5 for encoder-decoder mode, as                              !6
+                                                                              ℎ
+                                                                                         Different hidden dropout
+                                                                                        masks in two forward passes
+                                                                                                                           …              ℎ!7
+
+illustrated in Figure 2 (c). Specially, we first split                   Mean Pooling          𝑹𝒆𝒕𝒖𝒓𝒏 𝒕𝒉𝒆 𝒔𝒂𝒎𝒑𝒍𝒆 … [𝑬𝑶𝑺]            Mean Pooling        𝑹𝒆𝒕𝒖𝒓𝒏 𝒎𝒂𝒙𝒊𝒎𝒖𝒎 … [𝑬𝑶𝑺]
+
+
+the input sequence into max(b n×r    l c, 1) chunks and                            UniXcoder                               …                    UniXcoder
+then randomly mask a span of from 1 to 2l-1 tokens                    Parser & Mapping 𝒇       𝑩𝑶𝑺 𝑹𝒆𝒕𝒖𝒓𝒏 𝒕𝒉𝒆 𝒔𝒂𝒎𝒑𝒍𝒆 …           Parser & Mapping 𝒇     𝑩𝑶𝑺 𝑹𝒆𝒕𝒖𝒓𝒏 𝒎𝒂𝒙𝒊𝒎𝒖𝒎 …
+
+
+for each chunk, where n is the length of the input,                  𝒅𝒆𝒇 𝒎𝒆𝒂𝒏 𝒅𝒂𝒕𝒂 : 𝒏 …        Cross-modal Generation          𝒅𝒆𝒇 𝒎𝒂𝒙 𝒂, 𝒃 : 𝒊𝒇 𝒂 …    Cross-modal Generation
+
+
+r is corruption rate and l is the average length of                     Figure 3: Code fragment representation learning.
+masked spans. We set corruption rate as 15% and
+the average length as 5, respectively. The concate-
+nation {y0 , y1 , ..., yn−1 } of all masked spans with                 For multi-modal contrastive learning, we follow
+special tokens [M ASKk ] in front of the k-th span                  Gao et al. (2021) to forward the same input using
+will be used as the output:                                         different hidden dropout mask as a positive exam-
+                                                                        h+
+                                                                    ple e i and use other representations in the same
+                         n−1
+                         X                                          batch as negative examples. The loss is calculated
+   lossDN S = −                 logp(yi |X mask , yt<i )    (5)     as Equation 6, where b is batch size, τ is a tem-
+                         i=0                                        perature hyperparameter, and cos(·, ·) is the cosine
+                                                                    similarity between two vectors.
+Code Fragment Representation Learning In
+                                                                                                               b−1                              e e+
+addition to the above three pre-training tasks de-                                                             X                 ecos(hi ,hi )/τ
+                                                                        lossM CL = −                                     log P                                             (6)
+signed for different modes, we propose to utilize                                                                               b−1 cos(e   h+
+                                                                                                                                        hi ,e j )/τ
+                                                                                                               i=0              j=0 e
+multi-modal data to learn semantic embedding e    hi
+of a code fragment Ci . As shown in Figure 3, we                       For cross-modal generation, we ask the model
+first use UniXcoder to encode a mapped AST se-                      to generate its comment W = {w0 , w1 , ..., wm−1 }.
+quence and then apply a mean pooling layer over                     The comment describes the function of the code,
+the hidden states of the source input to obtain se-                 which can help the model not only understand the
+mantic embedding e hi . In order to learn the seman-                code semantics but align representations among
+tic embedding, we propose two pre-training tasks.                   different programming languages by a unified nat-
+One is multi-modal contrastive learning (MCL),                      ural language description as a fulcrum. Since the
+and another is cross-modal generation (CMG).                        generation of the comment is conditioned on the
+                                                               7216
+code, it will force the model to fuse semantic in-      et al., 2021) and CodeT5 (Wang et al., 2021).
+formation from the comment into the hidden states       PLBART is based on BART and pre-trained on
+of the code. The loss is calculated as Equation 7,      470M Python and 210M Java functions, and 47M
+where X is the flattened AST token sequence.            NL posts from StackOverflow using denoising ob-
+                      m−1
+                                                        jective. CodeT5, adapted from T5, considers the
+      lossCM G = −
+                      X
+                             logp(wi |X, wt<i )   (7)   crucial token type information from identifiers and
+                       i=0
+                                                        allows multi-task learning on downstream tasks.
+
+   In order to learn the semantic embedding of nat-     4.2   Understanding Tasks
+ural language, we randomly exchange the source          Clone Detection The task is to measure the simi-
+input and the target input with a probability of 50%.   larity between two code fragments. We conduct ex-
+   Considering that explicitly adding AST in down-      periments on POJ-104 (Mou et al., 2016) and Big-
+stream tasks will introduce extra costs like parsing    CloneBench (Svajlenko et al., 2014) datasets. The
+time and increasing input length (70% longer in-        first dataset is to predict whether two codes have the
+put length after tokenization), we implicitly learn     same semantics and uses F1-score as the evaluation
+knowledge from AST by pre-training and only keep        metric, while the second aims to retrieve semanti-
+leaves of AST (i.e. source code) in the fine-tuning     cally similar codes given a code as the query with
+phase. This gap can be alleviated by randomly drop      the Mean Average Precision (MAP) as the metric.
+all non-terminal symbols of AST with a probabil-
+ity of 50% in the pre-training phase. More details      Code Search The task aims to find the most rel-
+about pre-training dataset and settings can be found    evant code from a collection of candidates given a
+in the Appendix B.                                      natural language query. We conduct experiments
+                                                        on three datasets, namely CSN (Guo et al., 2020),
+4   Experiments                                         AdvTest (Lu et al., 2021) and CosQA (Huang et al.,
+                                                        2021). CSN dataset is constructed from Code-
+We evaluate UniXcoder on five tasks over nine
+                                                        SearchNet dataset of six programming languages,
+public datasets, including two understanding tasks
+                                                        and low-quality queries are filtered by handcrafted
+(§4.2), two generation tasks (§4.3) and an auto-
+                                                        rules. AdvTest normalizes python function and
+regressive task (§4.4). To further evaluate the per-
+                                                        variable names to better test the understanding and
+formance of code fragment embeddings, we also
+                                                        generalization capabilities of models. The code
+propose a new task called zero-shot code-to-code
+                                                        base of CosQA is also from CodeSearchNet corpus
+search (§4.5). More details about datasets and fine-
+                                                        but queries come from the search logs of Microsoft
+tuning can be found in the Appendix C.
+                                                        Bing search engine. We use Mean Reciprocal Rank
+4.1 Baselines                                           (MRR) evaluation metric for the task.
+We compare UniXcoder with state-of-the-art pre-         Results The results are shown in Table 1. Com-
+trained models, including encoder-only, decoder-        pared with encoder-only pre-trained models (i.e.
+only and encoder-decoder models.                        the first group) and encoder-decoder models (i.e.
+   For encoder-only models, we consider Roberta         the second group), UniXcoder outperforms them
+(Liu et al., 2019) pre-trained on text corpus with      and achieves state-of-the-art performance on two
+MLM, CodeBERT (Feng et al., 2020) pre-trained           tasks on all five datasets. By comparing with the
+on NL-PL pairs using both MLM and replaced to-          results of ablation studies in the last six rows, we
+ken detection, GraphCodeBERT (Guo et al., 2020)         can see that the improvement mainly comes from
+that leverages data flow to enhance code represen-      contrastive learning and the use of multi-modality.
+tation, and S YN C O BERT that incorporates AST
+by edge prediction and contrastive learning.            4.3   Generation Tasks
+   For decoder-only models, we consider GPT-2           Code Summarization The task aims to generate
+(Radford et al., 2019) and CodeGPT (Lu et al.,          an NL summary of a code snippet. We use the
+2021), where the former one is pre-trained on text      dataset provided by the CodeXGLUE team (Lu
+corpus and the latter one is pre-trained on Code-       et al., 2021) for this task. We use the smoothed
+SearchNet dataset. Both use ULM as the objective.       BLEU-4 (Lin and Och, 2004) as the evaluation
+   For encoder-decoder models, we mainly com-           metric and report overall score of six PLs, including
+pare the current unified models PLBART (Ahmad           Ruby, JavaScript, Go, Python, Java, and PHP.
+                                                    7217
+                                            Clone Detection                        Code Search
+             Model              POJ-104           BigCloneBench              CosQA AdvTest       CSN
+                                MAP@R      Recall Precision F1-score                  MRR
+             RoBERTa             76.67      95.1      87.8      91.3          60.3     18.3      61.7
+             CodeBERT            82.67      94.7      93.4      94.1          65.7     27.2      69.3
+             GraphCodeBERT       85.16      94.8      95.2      95.0          68.4     35.2      71.3
+             S YN C O BERT       88.24       -          -        -             -       38.3      74.0
+             PLBART              86.27      94.8      92.5      93.6          65.0     34.7      68.5
+             CodeT5-base         88.65      94.8      94.7      95.0          67.8     39.3      71.5
+             UniXcoder           90.52      92.9      97.6      95.2          70.1     41.3      74.4
+             -w/o contras        87.83      94.9      94.9      94.9          69.2     40.8      73.6
+             -w/o cross-gen      90.51      94.8      95.6      95.2          69.4     40.1      74.0
+             -w/o comment        87.05      93.6      96.2      94.9          67.9     40.7      72.6
+             -w/o AST            88.74      92.9      97.2      95.0          68.7     40.3      74.2
+             -using BFS          89.44      93.4      96.7      95.0          69.3     40.1      74.1
+             -using DFS          89.74      94.7      94.6      94.7          69.0     40.2      74.2
+
+Table 1: Results on understanding tasks. contras is contrastive learning, cross-gen indicates cross-modal genera-
+tion, and BFS (DFS) means that our mapping function is replaced by breath-first (deep-first) search algorithm.
+
+
+Code Generation The task is to generate a code            we cannot use it to pre-train UniXcoder for fair
+snippet based on an NL description. we use CON-           comparison. Anothor reason is the model size.
+CODE (Iyer et al., 2018) dataset, where the input         CodeT5-base uses a 12-layer encoder and a 12-
+consists of an NL description and code environ-           layer decoder, which is twice larger than other base-
+ments. For this task, we use exact match (EM) and         lines and UniXcoder. Therefore, we also list the
+BLEU-4 as evaluation metrics.                             results of CodeT5-small using a 6-layer encoder
+                                                          and a 6-layer decoder. We can see that UniXcoder
+                   Summarization       Generation
+  Model                                                   outperforms CodeT5-small.
+                     BLEU-4         EM      BLEU-4
+  RoBERTa             16.57          -          -
+  CodeBERT            17.83          -          -         4.4   Code Completion
+  GPT-2                 -          17.35     25.37
+  CodeGPT               -          20.10     32.79        We use PY150 (Raychev et al., 2016) and
+  PLBART              18.32        18.75     36.69        Github Java Corpus (Allamanis and Sutton,
+  CodeT5-small        19.14        21.55     38.13        2013) datasets in CodeXGLUE (Lu et al., 2021) for
+  CodeT5-base         19.55        22.30     40.73
+  UniXcoder           19.30        22.60     38.23        line-level code completion tasks. The task entails
+  -w/o contras        19.20        22.10     37.69        the completion of a whole-line of code, and is eval-
+  -w/o cross-gen      19.27        22.20     35.93        uated using exact match accuracy and Levenshtein
+  -w/o comment        18.97        21.45     37.15
+  -w/o AST            19.33        22.60     38.52        edit similarity (Svyatkovskiy et al., 2020).
+  -using BFS          19.24        21.75     38.21
+  -using DFS          19.25        22.10     38.06                                  PY150           JavaCorpus
+                                                            Model
+                                                                                EM    Edit Sim    EM     Edit Sim
+Table 2: Results on two generation tasks, including         Transformer        38.51    69.01    17.00    50.23
+                                                            GPT-2              41.73    70.60    27.50    60.36
+code summarization and code generation.
+                                                            CodeGPT            42.37    71.59    30.60    63.45
+                                                            PLBART             38.01    68.46    26.97    61.59
+                                                            CodeT5-base        36.97    67.12    24.80    58.31
+Results From Table 2, UniXcoder achieves com-               UniXcoder          43.12    72.00    32.90    65.78
+parable performance on generation tasks compared            -w/o contras       43.02    71.94    32.77    65.71
+                                                            -w/o cross-gen     42.66    71.83    32.43    65.63
+with CodeT5-base and brings a 0.3% improvement              -w/o comment       42.18    71.70    32.20    65.44
+in code generation accuracy. However, UniXcoder             -w/o AST           42.56    71.87    32.63    65.66
+has slightly worse BLEU-4 scores on both code               -using BFS         42.83    71.85    32.40    65.55
+                                                            -using DFS         42.61    71.97    32.87    65.75
+summarization and generation tasks. The main
+reasons may come from two aspects. One is the                    Table 3: Results of code completion task.
+amount of NL-PL pairs in the pre-training data. As
+shown in the ablation study (see w/o comment) in             In practice, the task requires a decoder-only man-
+the table, NL-PL pairs bring significant improve-         ner to perform efficient inference. Therefore, we
+ment on two tasks. Wang et al. (2021) collect             first compare our UniXcoder with decoder-only
+50% more NL-PL pairs from Github to pre-train             models (the first group) in Table 3. As we can see,
+CodeT5. Since the collected data is not public,           UniXcoder achieves comparable performance on
+                                                     7218
+                                Ruby                    Python                      Java
+     Model                                                                                         Overall
+                       Ruby    Python    Java   Ruby    Python     Java   Ruby    Python    Java
+     CodeBERT          13.55     3.18   0.71    3.12     14.39    0.96    0.55      0.42    7.62   4.94
+     GraphCodeBERT     17.01     9.29   6.38    5.01     19.34    6.92    1.77      3.50   13.31   9.17
+     PLBART            18.60    10.76   1.90    8.27     19.55    1.98    1.47      1.27   10.41   8.25
+     CodeT5-base       18.22    10.02   1.81    8.74     17.83    1.58    1.13      0.81   10.18   7.81
+     UniXcoder         29.05    26.36   15.16   23.96    30.15    15.07   13.61    14.53   16.12   20.45
+     -w/o contras      24.03    17.35    7.12   15.80    22.52     7.31   7.55      7.98   13.92   13.73
+     -w/o cross-gen    28.73    24.16   12.92   21.52    26.66    12.60   11.14    10.82   13.75   18.03
+     -w/o comment      22.24    15.90    7.50   15.09    19.88     6.54   7.84      7.12   13.20   12.81
+     -w/o AST          27.54    23.37   10.17   21.75    27.75     9.94   9.79      9.21   14.06   17.06
+     -using BFS        26.67    23.69   13.56   21.31    27.28    13.63   11.90    12.55   14.92   18.39
+     -using DFS        27.13    22.65   11.62   20.21    25.92    11.85   9.59     10.19   13.30   16.94
+
+                   Table 4: MAP score (%) of zero-shot setting on code-to-code search task.
+
+
+both datasets and brings absolute 2.3% gain of accu-     4.6     Model Analysis
+racy on java corpus, which demonstrates the effec-
+                                                         The Effect of Representation Pre-training We
+tiveness of our model for code completion. Besides,
+                                                         conduct ablation study to analyze the effect of code
+we also compare with current unified models (the
+                                                         fragment representation pre-training tasks by re-
+second group). Since they are based the encoder-
+                                                         moving contrastive learning task (w/o constras)
+decoder framework, we fine-tune their decoders
+                                                         and cross-modal generation task (w/o cross-gen).
+by feeding a placeholder into the encoder. Results
+                                                         As we can see in Table 1 and 4, two pre-training
+show that UniXcoder outperforms PLBART and
+                                                         tasks significantly improve understanding tasks.
+CodeT5, which demonstrates our model framework
+                                                         Taking zero-shot code-code search task as an ex-
+is better applied to code completion tasks.
+                                                         ample, after removing contrastive learning, the per-
+4.5 Zero-shot Code-to-Code Search                        formance drops from 20.45% to 13.73%. Besides,
+                                                         the two pre-training tasks also bring a small im-
+To further evaluate the performance of code frag-
+                                                         provement on generation tasks, as shown in Table
+ment embeddings, we also propose a new task
+                                                         2 and 3. Overall, the ablation study demonstrates
+called zero-shot code-to-code search. Given a
+                                                         the effectiveness of the two pre-training tasks.
+source code as the query, the task aims to retrieve
+codes with the same semantics from a collection of       The Effect of Multi-modal Data We also study
+candidates in zero-shot setting. The task can help       the effect of multi-modal data. By removing com-
+users translate from one PL to another by retrieving     ment (w/o comment), the results from Tables in-
+source codes with the same semantics. We collect         dicate that code comment plays an important role
+11,744/15,594/23,530 functions from the CodeNet          in both understanding and generation tasks. For
+corpus (Puri et al., 2021) in Ruby/Python/Java PL.       AST (w/o AST), we observe that injecting AST can
+Each function solves one of 4,053 problems. We           boost the performance on all code understanding
+take each function as a query and retrieve all func-     tasks. However, AST does not bring improvements
+tions that solve the same problem from each PL.          on generation tasks, which may require a better way
+We use average MAP score as the evaluation met-          to incorporate AST for generation tasks. Overall,
+ric. More details about the dataset and an example       AST and comment can both improve UniXcoder.
+can be found in Appendix C.6.
+   We re-implement the publicly released pre-            Comparison of Traversal Algorithms We com-
+trained models on this task using the mean vec-          pare our mapping function with other mapping
+tor or CLS vector of last hidden states and report       functions used to map a tree into a sequence,
+the results in Table 4. The first row is the query       namely BFS and DFS algorithms. As we can see,
+PL and the second row is the target PL. From the         after replacing our mapping function by BFS or
+table, we can see that UniXcoder achieves state-of-      DFS algorithms, the performance of UniXcoder
+the-art performance and about 11 points improve-         drops on both understanding and generation tasks,
+ment on the overall score compared with Graph-           which demonstrates the effectiveness of our map-
+CodeBERT. Ablation studies further show that both        ping function. In particular, using BFS or DFS al-
+multi-modal data and code fragment representation        gorithms even hurt the performance of UniXcoder
+pre-training tasks can enhance UniXcoder.                on some tasks by comparing w/o BFS (DFS) with
+                                                    7219
+w/o AST. The main reason may be that BFS and                                     code representation, we propose a new downstream
+DFS algorithms are not one-to-one mapping func-                                  task of zero-shot code-to-code search and create a
+tions and can confuse a tree with another structure.                             dataset for this task. Experiments show that UniX-
+                                                                                 coder significantly outperforms previous works on
+Case Study We also conduct a case study to intu-
+                                                                                 most tasks. Further ablation studies also show that
+itively demonstrate the effectiveness of UniXcoder,
+                                                                                 both AST and code comment can enhance UniX-
+as shown in Figure 4. We give an example for
+                                                                                 coder and reveal the effectiveness of our proposed
+code search task on CosQA dataset and output pre-
+                                                                                 mapping function and pre-training tasks.
+dictions from different models. The input query
+from the search logs of Microsoft Bing search en-                                Acknowledgments
+gine is “python dict rank by value”. We know
+                                                                                 Yanlin Wang is the corresponding author. Daya
+that the intent of the user is to sort a dictionary by
+                                                                                 Guo and Jian Yin are supported by the National
+its value in Python language. Although the pre-
+                                                                                 Natural Science Foundation of China (U1811264,
+diction from PLBART has higher lexical overlap
+                                                                                 U1811262, U1811261, U1911203, U2001211),
+than UniXcoder like “rank” and “value”, the func-
+                                                                                 Guangdong Basic and Applied Basic Research
+tion is incorrect since the input of the ground truth
+                                                                                 Foundation (2019B1515130001), Key-Area Re-
+should be a dictionary. We can see that UniXcoder
+                                                                                 search and Development Program of Guangdong
+retrieves a correct function whose input is a dictio-
+                                                                                 Province (2018B010107005, 2020B0101100001).
+nary. Besides, although the “value” in the query is
+expressed as the statement “key=lambda t: t[1]” in
+the function definition, UniXcoder can understand
+                                                                                 References
+the code semantics and successfully retrieves the
+ground truth, which demonstrates the effectiveness                               Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray, and
+of UniXcoder.                                                                      Kai-Wei Chang. 2021. Unified pre-training for pro-
+                                                                                   gram understanding and generation. In Proceedings
+Query:                                                                             of the 2021 Conference of the North American Chap-
+python dict rank by value                                                          ter of the Association for Computational Linguistics:
+CodeBERT:
+def rank(self):
+                                                                                  Human Language Technologies, pages 2655–2668.
+    r = np.empty(self.size, np.int)
+    r[self.sorter] = np.arange(self.size)
+    return r                                                                     Miltiadis Allamanis and Charles Sutton. 2013. Mining
+GraphCodeBERT:                                                                     source code repositories at massive scale using lan-
+def ranks(self, key, value):
+    return [normalize_rank(el) for el in force_list(value.get('a'))]
+                                                                                   guage modeling. In 2013 10th Working Conference
+PLBART:
+                                                                                   on Mining Software Repositories (MSR), pages 207–
+def zrank(self, name, value):                                                      216. IEEE.
+    with self.pipe as pipe:
+    value = self.valueparse.encode(value)
+    return pipe.zrank(self.redis_key(name), value)
+                                                                                 Tom B Brown, Benjamin Mann, Nick Ryder, Melanie
+CodeT5:
+def sort_key(x):                                                                   Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+    name, (r, u) = x
+    return - len(u) + u.count('}') * 100
+                                                                                   Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+UniXcoder:
+                                                                                   Askell, et al. 2020. Language models are few-shot
+def revrank_dict(dict, key=lambda t: t[1], as_tuple=False):                        learners. arXiv preprint arXiv:2005.14165.
+    sorted_list = sorted(dict.items(), key=key, reverse=True)
+    return OrderedDict(sorted_list) if not as_tuple else tuple(sorted_list)
+
+                                                                                 Luca Buratti, Saurabh Pujar, Mihaela Bornea, Scott
+Figure 4: An examples for code search task on CosQA                                McCarley, Yunhui Zheng, Gaetano Rossiello,
+dataset and predictions from different models. Key                                 Alessandro Morari, Jim Laredo, Veronika Thost, Yu-
+clues are marked in yellow.                                                        fan Zhuang, et al. 2020. Exploring software natural-
+                                                                                   ness throughneural language models. arXiv preprint
+                                                                                   arXiv:2006.12641.
+5    Conclusion                                                                  Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+To support both code-related understanding and                                      Kristina Toutanova. 2018. Bert: Pre-training of deep
+                                                                                    bidirectional transformers for language understand-
+generation tasks, we present UniXcoder, a unified                                   ing. arXiv preprint arXiv:1810.04805.
+pre-trained model that incorporates semantic and
+syntax information from code comment and AST.                                    Li Dong, Nan Yang, Wenhui Wang, Furu Wei,
+We propose a one-to-one mapping method to trans-                                   Xiaodong Liu, Yu Wang, Jianfeng Gao, Ming
+                                                                                   Zhou, and Hsiao-Wuen Hon. 2019.           Unified
+form AST to a sequence structure and two new                                       language model pre-training for natural language
+pre-training tasks to learn code fragment represen-                                understanding and generation.     arXiv preprint
+tation. To further investigate the performance of                                  arXiv:1905.03197.
+
+                                                                              7220
+Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xi-            Roberta: A robustly optimized bert pretraining ap-
+  aocheng Feng, Ming Gong, Linjun Shou, Bing Qin,            proach. arXiv preprint arXiv:1907.11692.
+  Ting Liu, Daxin Jiang, et al. 2020. Codebert: A
+  pre-trained model for programming and natural lan-      Shuai Lu, Daya Guo, Shuo Ren, Junjie Huang, Alexey
+  guages. arXiv preprint arXiv:2002.08155.                  Svyatkovskiy, Ambrosio Blanco, Colin Clement,
+                                                            Dawn Drain, Daxin Jiang, Duyu Tang, et al. 2021.
+Tianyu Gao, Xingcheng Yao, and Danqi Chen. 2021.            Codexglue: A machine learning benchmark dataset
+   Simcse: Simple contrastive learning of sentence em-      for code understanding and generation.     arXiv
+   beddings. arXiv preprint arXiv:2104.08821.               preprint arXiv:2102.04664.
+Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng, Duyu
+                                                          Lili Mou, Ge Li, Lu Zhang, Tao Wang, and Zhi Jin.
+  Tang, LIU Shujie, Long Zhou, Nan Duan, Alexey
+                                                             2016. Convolutional neural networks over tree struc-
+  Svyatkovskiy, Shengyu Fu, et al. 2020. Graphcode-
+                                                             tures for programming language processing. In Pro-
+  bert: Pre-training code representations with data
+  flow. In International Conference on Learning Rep-         ceedings of the Thirtieth AAAI Conference on Artifi-
+  resentations.                                              cial Intelligence, pages 1287–1293.
+
+Junjie Huang, Duyu Tang, Linjun Shou, Ming Gong,          Ruchir Puri, David S Kung, Geert Janssen, Wei
+  Ke Xu, Daxin Jiang, Ming Zhou, and Nan Duan.              Zhang, Giacomo Domeniconi, Vladmir Zolotov, Ju-
+  2021. Cosqa: 20,000+ web queries for code                 lian Dolby, Jie Chen, Mihir Choudhury, Lindsey
+  search and question answering. arXiv preprint             Decker, et al. 2021. Project codenet: A large-scale
+  arXiv:2105.13239.                                         ai for code dataset for learning a diversity of coding
+                                                            tasks. arXiv preprint arXiv:2105.12655.
+Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit, Miltiadis
+  Allamanis, and Marc Brockschmidt. 2019. Code-           Alec Radford, Karthik Narasimhan, Tim Salimans, and
+  searchnet challenge: Evaluating the state of seman-       Ilya Sutskever. Improving language understanding
+  tic code search. arXiv preprint arXiv:1909.09436.         by generative pre-training.
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and       Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+   Luke Zettlemoyer. 2018. Mapping language to code         Dario Amodei, Ilya Sutskever, et al. 2019. Lan-
+   in programmatic context. In Proceedings of the           guage models are unsupervised multitask learners.
+   2018 Conference on Empirical Methods in Natural          OpenAI blog, 1(8):9.
+   Language Processing, pages 1643–1652.
+Xue Jiang, Zhuoran Zheng, Chen Lyu, Liang Li, and         Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+  Lei Lyu. 2021. Treebert: A tree-based pre-trained         Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+  model for programming language. arXiv preprint            Wei Li, and Peter J Liu. 2019. Exploring the limits
+  arXiv:2105.12485.                                         of transfer learning with a unified text-to-text trans-
+                                                            former. arXiv preprint arXiv:1910.10683.
+Aditya Kanade, Petros Maniatis, Gogul Balakrish-
+  nan, and Kensen Shi. 2019. Pre-trained contex-          Veselin Raychev, Pavol Bielik, and Martin Vechev.
+  tual embedding of source code. arXiv preprint             2016. Probabilistic model for code with decision
+  arXiv:2001.00059.                                         trees. ACM SIGPLAN Notices, pages 731–747.
+
+Mike Lewis, Yinhan Liu, Naman Goyal, Mar-                 Rico Sennrich, Barry Haddow, and Alexandra Birch.
+  jan Ghazvininejad, Abdelrahman Mohamed, Omer              2015. Neural machine translation of rare words with
+  Levy, Ves Stoyanov, and Luke Zettlemoyer. 2019.           subword units. arXiv preprint arXiv:1508.07909.
+  Bart: Denoising sequence-to-sequence pre-training
+  for natural language generation, translation, and       Jeffrey Svajlenko, Judith F Islam, Iman Keivanloo,
+  comprehension. arXiv preprint arXiv:1910.13461.            Chanchal K Roy, and Mohammad Mamun Mia.
+                                                             2014. Towards a big data curated benchmark of
+Chin-Yew Lin and Franz Josef Och. 2004. Orange: a            inter-project code clones. In 2014 IEEE Interna-
+  method for evaluating automatic evaluation metrics         tional Conference on Software Maintenance and
+  for machine translation. In COLING 2004: Proceed-
+                                                             Evolution, pages 476–480. IEEE.
+  ings of the 20th International Conference on Compu-
+  tational Linguistics, pages 501–507.
+                                                          Alexey Svyatkovskiy, Shao Kun Deng, Shengyu Fu,
+Fang Liu, Ge Li, Yunfei Zhao, and Zhi Jin. 2020. Multi-     and Neel Sundaresan. 2020. Intellicode compose:
+  task learning based pre-trained language model for        Code generation using transformer. arXiv preprint
+  code completion.       In Proceedings of the 35th         arXiv:2005.08025.
+  IEEE/ACM International Conference on Automated
+  Software Engineering, pages 473–485.                    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+                                                            Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-         Kaiser, and Illia Polosukhin. 2017. Attention is all
+  dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,             you need. In Advances in neural information pro-
+  Luke Zettlemoyer, and Veselin Stoyanov. 2019.             cessing systems, pages 5998–6008.
+
+                                                      7221
+Xin Wang, Fei Mi Yasheng Wang, Pingyi Zhou, Yao             Let the leftmost subtree of T1 and T2 as Ts1
+  Wan, Xiao Liu, Li Li, Hao Wu, Jin Liu, and Xin         and Ts2 , respectively. We prove Ts1 = Ts2
+  Jiang. 2022. Syncobert: Syntax-guided multi-modal
+                                                         now. According to the Algorithm, we know that
+  contrastive pre-training for code representation.
+                                                         F(Ts1 ) and F(Ts2 ) start with x2 and end with
+Yue Wang, Weishi Wang, Shafiq Joty, and Steven CH        one element. Suppose F(Ts1 ) = {x2 , .., xi } and
+  Hoi. 2021.      Codet5: Identifier-aware unified       F(Ts2 ) = {x2 , .., xj }. According to Lemma 1 and
+  pre-trained encoder-decoder models for code un-
+  derstanding and generation.       arXiv preprint       2, S = {x3 , .., xi } has one more element with a
+  arXiv:2109.00859.                                      right suffix. Therefore, x0 must match one element
+                                                         xk (3 ≤ k ≤ i) in S, otherwise there will be an
+A    Proof for Mapping Function                          element with a right suffix that cannot match any
+In this section, we show that the function F de-         element. If i 6= j (suppose j > i), x0 will match
+scribed in Algorithm 1 is a one-to-one mapping           xj according to Lemma 1. However, the root node
+function. using a proof by induction.                    occurs three times x0 , xk and xj , which will con-
+                                                         tradict Lemma 2. Therefore, we get that i = j and
+Lemma 1: Given a tree T and the mapped se-               F(Ts1 ) = F(Ts2 ). According to the hypothesis,
+quence F(T ) = {x1 , x2 , ..., xm }, the first element   we get that Ts1 = Ts2 , since the depth of F(Ts1 ) is
+x0 is the root of T with a left suffix and the last      less than n + 1. In the same way, it can be proved
+element xm is the root of T with a right suffix.         that other subtrees of T1 and T2 are also the same.
+Lemma 2: An internal node only occurs twice in           Thus, we get that T1 = T2 .
+the mapped sequence F(T ). One is with left suffix,      Conclusion: By the principle of induction, it fol-
+and the other is with right suffix. Therefore, the       lows that the hypothesis is true for all h ≥ 2 and
+sequence has the same number of elements with            our mapping function is one-to-one.
+left suffix and right suffix.
+                                                         B   Pre-training Setting
+Lemma 3: Since a node with a left suffix occurs
+before the same node with a right suffix (see line       UniXcoder uses 12 layers of Transformer with 768
+7 and 11 of the Algorithm), an element xi with a         dimensional hidden states and 12 attention heads.
+right suffix must match another element xj with a        We follow Liu et al. (2019) to train a byte-pair
+left suffix (i.e. coming from the same node in the       encoding vocabulary (Sennrich et al., 2015) with
+tree) in the left side, i.e. j < i.                      50K subword units for programming languages
+                                                         and add 1,416 additional special tokens into the
+Proof: In order to prove F is a one-to-one func-
+                                                         vocabulary to represent non-terminal symbols in
+tion, given two trees T1 and T2 , we need to prove
+                                                         AST. The pre-training multi-modal data we use in-
+that F(T1 ) 6= F(T2 ) if T1 6= T2 . For easier proof,
+                                                         cludes 2.3M functions paired with comments from
+we prove its equivalent contrapositive statement,
+                                                         CodeSearchNet dataset (Husain et al., 2019) for six
+i.e. T1 = T2 if F(T1 ) = F(T2 ).
+                                                         programming languages (i.e. ruby, java, python,
+Base case: When the depth h of T1 is 1, T1 only          php, go and javascript). We leverage tree-sitter2 as
+has a node r and F(T1 ) = {r}. Since F(T2 ) =            the parser to extract AST from PL.
+F(T1 ), T2 contains one node, otherwise the length          We pre-train the model on 4 DGX-2 machines,
+of F(T2 ) will be more than 2. Since F(T2 ) = {r},       each having 16 NVIDIA Tesla V100 with 32GB
+the root of T2 is also r. Therefore, T1 = T2 and F       memory. During pre-training, we set both the max
+is a one-to-one function for h = 1.                      length of input sequence and batch size as 1024,
+                                                         and use the Adam optimizer to update model pa-
+Inductive hypothesis: When h = 2, 3, .., n, sup-
+                                                         rameters with 2e-4 learning rate. As proven in
+pose F is a one-to-one function.
+                                                         Feng et al. (2020), unimodal data like text is also
+Inductive step: Now, we prove that the hypothe-          useful for code-related downstream tasks. There-
+sis is true for h = n + 1 ≥ 2.                           fore, we first pre-train our UniXcoder with MLM,
+   We let F(T1 ) = {x1 , x2 , ..., xm }, where xj is a   ULM and denoising objective on C4 dataset (Raffel
+leaf or a node with a left (or right) suffix. Since      et al., 2019) and 4.1M unimodal code from Code-
+F(T1 ) = F(T2 ), the first elements of two mapped        SearchNet for 500k and 200k steps, respectively.
+sequences are same as each other. According to             2
+                                                             https://github.com/tree-sitter/
+Lemma 1, T1 and T2 have the same root.                   tree-sitter
+
+                                                     7222
+                   Model             Ruby     Javascript    Go    Python    Java      Php    Overall
+                   RoBERTa           58.7        51.7      85.0    58.7     59.9      56.0    61.7
+                   CodeBERT          67.9        62.0      88.2    67.2     67.6      62.8    69.3
+                   GraphCodeBERT     70.3        64.4      89.7    69.2     69.1      64.9    71.3
+                   S YN C O BERT     72.2        67.7      91.3    72.4     72.3      67.8    74.0
+                   PLBART            67.5        61.6      88.7    66.3     66.3      61.1    68.5
+                   CodeT5-base       71.9        65.5      88.8    69.8     68.6      64.5    71.5
+                   UniXcoder         74.0        68.4      91.5    72.0     72.6      67.6    74.4
+                   -w/o contras      73.4        67.0      91.3    71.3     71.7      66.7    73.6
+                   -w/o cross-gen    73.0        67.8      91.3    71.9     72.4      67.3    74.0
+                   -w/o comment      72.0        65.7      91.1    70.4     70.6      65.5    72.6
+                   -w/o AST          73.8        68.0      91.4    72.3     72.3      67.4    74.2
+                   -using BFS        73.4        68.2      91.3    72.2     72.2      67.3    74.1
+                   -using DFS        73.5        68.3      91.2    72.3     72.1      67.6    74.2
+
+                     Table 5: Results of code search task over six programming languages.
+
+
+We further pre-train on the multi-modal data with           a binary classification to fine-tune UniXcoder. The
+all pre-training objectives for 100k steps. The total       true clone probability of two inputs is calculated
+time for pre-training UniXcoder is about 8 days.            by cosine similarity between the mean vectors of
+At each iteration, we alternate each objective to           last hidden states. In the fine-turning step, we set
+pre-train the model and follow Guo et al. (2020)            the learning rate as 5e-5, the batch size as 16, and
+to sample each batch from the same programming              the max sequence length as 512. We update model
+language according to a distribution {qi }i=1...N as        parameters using the Adam optimizer and perform
+Equation 8, where ni is number of examples for              early stopping on the development set.
+i-th programming language and α=0.7. Sampling
+with this distribution could alleviates the bias to-        C.2    Code Search
+wards high-resource languages.                              Code search aims to search the most relevant code
+                pαi                ni                       from a collection of candidates given a natural lan-
+         qi = Pj=1    ,     pi = Pk=1               (8)     guage query. We conduct experiments on three
+                    α                    nk
+               N pj                  N                      datasets, namely CSN (Guo et al., 2020), AdvTest
+C    Fine-tuning Setting                                    (Lu et al., 2021) and CosQA (Huang et al., 2021).
+
+C.1 Clone Detection                                           Language     Training       Dev    Testing   Candidates
+                                                              Go           167,288       7,325    8,122     28,120
+Clone detection aims to measure the similarity be-            Java         164,923       5,183   10,955     40,347
+tween two code fragments. We conduct experi-                  JavaScript    58,025       3,885    3,291     13,981
+                                                              PHP          241,241      12,982   14,014     52,660
+ments on POJ-104 (Mou et al., 2016) and Big-                  Python       251,820      13,914   14,918     43,827
+CloneBench (Svajlenko et al., 2014) datasets.                 Ruby          24,927       1,400    1,261      4,360
+   For POJ-104 dataset, it consists of 104 prob-
+lems and includes 500 C/C++ programs for each               Table 6: Data statistics about CSN dataset provided by
+                                                            Guo et al. (2020). Training/Dev/Testing means the
+problem. The datasets are splited into 64/16/24
+                                                            number of query for training/validation/testing dataset.
+problems for training, validation, and testing, and
+the task aims to retrieve other programs that solve
+the same problem given a program. The probabil-                For CSN dataset, it is constructed from Code-
+ity of true clone is calculated by cosine similarity        SearchNet dataset for six languages but filter
+between two mean vectors of last hidden states of           lowquality queries by handcrafted rules. We list
+UniXcoder. We set the learning rate as 2e-5, the            data statistics about the dataset in Table 6. We
+batch size as 8, and the max sequence length as             set the learning rate as 2e-5, the batch size as 64,
+400. We use the Adam optimizer to fine-tune the             and the max sequence length of PL and NL as 256
+model for 2 epochs.                                         and 128, respectively. We use the Adam optimizer
+   For BigCloneBench dataset, we use the dataset            to fine-tune the model for 10 epochs and perform
+provided by Lu et al. (2021), which includes                early stopping on the development set. In Table
+901,724/416,328/416,328 examples from 10 dif-               5, we also give more detailed results of different
+ferent functionalities for training/validation/testing.     models for each programming language.
+Following previous works, we also treat the task as            For AdvTest dataset, it comes form Python lan-
+                                                       7223
+                Model             Ruby    Javascript     Go     Python    Java      Php     Overall
+                RoBERTa           11.70     11.90       17.72    18.14   16.47     24.02     16.57
+                CodeBERT          12.16     14.90       18.07    19.06   17.65     25.16     17.83
+                GraphCodeBERT     12.39     14.81       18.41    18.06   19.00     25.59     18.04
+                PLBART            14.11     15.56       18.91    19.30   18.45     23.58     18.32
+                CodeT5-base       15.24     16.16       19.56    20.01   20.31     26.03     19.55
+                UniXcoder         14.87     15.85       19.07    19.13   20.31     26.54     19.30
+                -w/o contras      14.72     15.41       19.16    19.01   20.30     26.60     19.20
+                -w/o cross-gen    14.90     15.96       18.60    19.06   20.50     26.62     19.27
+                -w/o comment      14.25     15.50       18.80    18.83   20.25     26.17     18.97
+                -w/o AST          15.09     15.97       19.04    19.16   20.07     26.67     19.33
+                -using BFS        14.74     15.69       18.97    19.03   20.58     26.45     19.24
+                -using DFS        14.81     15.88       18.98    19.15   20.26     26.40     19.25
+
+                Table 7: Results of code summarization task over six programming languages.
+
+
+guage of CSN dataset but Lu et al. (2021) normal-                 Language       Training     Dev     Testing
+                                                                  Go             167,288     7,325     8,122
+izes python function and variable names to better                 Java           164,923     5,183    10,955
+test the understanding and generalization abilities               JavaScript      58,025     3,885     3,291
+of models. We use the same hyper-parameters as                    PHP            241,241    12,982    14,014
+                                                                  Python         251,820    13,914    14,918
+CSN dataset but fine-tune the model for 2 epochs.                 Ruby            24,927     1,400     1,261
+   For CosQA dataset, Huang et al. (2021) use
+20,604 search logs of the Microsoft Bing search           Table 8: Data statistics about the dataset for the code
+engine as queries and each log is annotated by at         summarization task.
+least 3 human annotators. We use the same hyper-
+parameters as CSN dataset but fine-tune the model.
+   For the three datasets, we all use cosine similar-     is provided by the rest of the class, including mem-
+ity between two mean vectors of last hidden states        ber variables and member functions in the class.
+as relevant scores and take other vectors in the same     We set the learning rate as 5e-5, the batch size as
+batch as negative examples.                               32, and the max sequence length of source and tar-
+                                                          get as 350 and 150, respectively. We use the Adam
+C.3 Code Summarization                                    optimizer to fine-tune the model for 30 epochs and
+Code summarization aims to generate an NL sum-            perform early stopping on the development set. For
+mary of a code snippet. We use the dataset provided       inference, we set beam size as 3.
+by CodeXGLUE team (Lu et al., 2021) for this task.
+                                                          C.5    Code Completion
+The dataset includes six programming languages,
+including Ruby, JavaScript, Go, Python, Java, and         In this paper, we mainly focus on line-level code
+PHP. We list data statistics about the dataset in Ta-     completion. We use PY150 (Raychev et al., 2016)
+ble 8. We set the learning rate as 5e-5, the batch        and Github Java Corpus (Allamanis and Sutton,
+size as 48, and the max sequence length of source         2013) provided by CodeXGLUE (Lu et al., 2021).
+and target as 256 and 128, respectively. We use              PY150 is a Python dataset (Raychev et al., 2016)
+the Adam optimizer to fine-tune the model for 10          containing 150,000 Python source files collected
+epochs and perform early stopping on the develop-         from Github. Lu et al. (2021) create 10,000 exam-
+ment set. For inference, we set beam size as 10.          ples from different files in the test set of PY150 for
+In Table 7, we also give more detailed results of         testing and select lines to be predicted at random.
+different models for each programming language.           The average number of tokens in input and output
+                                                          are 489.11 and 6.56, respectively.
+C.4 Code Generation                                          Github Java Corpus is collected by Allamanis
+Code generation aims to generate a code snippet           and Sutton (2013) over 14 thousand Java projects
+based on an NL description. We use CONCODE                from Github. Lu et al. (2021) create 3,000 exam-
+(Iyer et al., 2018) dataset, which is collected from      ples for testing from different files in the test set
+about 33k Java projects on GitHub. It contains            of the corpus. The average numbers of tokens are
+100k/2k/2k examples for training/validation/testing.      350.62 and 10.49 in input and output, respectively.
+Each example consists of an NL description, code             For two datasets, we both follow Lu et al. (2021)
+environments and code snippets. The environment           to use the same CodeSearchNet dataset to fine-tune
+                                                       7224
+  Problem Statement:
+  We have N cards. A number 𝑎! is written on the 𝑖-th card.
+  Alice and Bob will play a game using these cards. In this game, Alice and Bob Alternately take one card. Alice goes first.
+  The game ends when all the cards are taken by the two players, and the score of each player is the sum of the number written on the cards he/she has taken.
+  When both players take the optimal strategy to maximize their scores, find Alice’s score minus Bob’s score.
+
+  Input:
+  𝑁
+  𝑎" 𝑎# … 𝑎$
+
+  Output:
+  Print Alice’s score minus Bob’s score when both players take the optimal strategy to maximize their scores.
+
+  A Ruby code that solves the problem:                                       A Java code that solves the problem:
+  n = gets.to_i                                                              import java.util.*;
+  as = gets.strip.split.map(&:to_i).sort.reverse
+  alice = 0                                                                  class Main {
+  bob = 0                                                                        public static void main(String[] args) {
+                                                                                     Scanner sc = new Scanner(System.in);
+  until as.empty? do                                                                 int n = sc.nextInt();
+      alice += as.shift                                                              int[] array = new int[n];
+      break if as.empty?                                                             for(int i = 0 ; i < n ; i ++){
+      bob += as.shift                                                                  array[i] = sc.nextInt();
+  end                                                                                }
+                                                                                     Arrays.sort(array);
+  puts(alice-bob)                                                                    int a = 0 ;
+                                                                                     int b = 0 ;
+  A Python code that solves the problem:
+  N = int(input())                                                                     for(int i = 1 ; i <= n ; i ++){
+  a = list(map(int,input().split()))                                                     if(i % 2 != 0){
+                                                                                           a += array[n-i];
+  a.sort(reverse=True)                                                                   }else{
+                                                                                           b += array[n-i];
+  ans = 0                                                                                }
+                                                                                       }
+  for i in range(0,N):                                                                System.out.print(a-b);
+    ans = ans + a[i]*(-1)**i
+                                                                                  }
+  print(ans)                                                                 }
+
+
+
+Figure 5: An example for zero-shot code-to-code search. Three codes for Ruby, Python and Java all solve the same
+problem mentioned in the Figure. Therefore, they have same semantics in different programming languages.
+
+
+UniXcoder for 10 epochs. We set the learning rate
+for PY150 as 2e-4 and for Java Corpus as 2e-5.
+The batch size is 32 and the max sequence length
+is 1024. For inference, we set beam size as 5.
+
+C.6 Zero-shot Code-to-Code Search
+To evaluate the performance of code fragment em-
+beddings, we propose a new task, called zero-shot
+code-to-code search. Given a source code as the
+query, the task aims to retrieve codes with the same
+semantics from a collection of candidates in zero-
+shot setting. We give an example in Figure 5.
+   We collect 11,744/15,594/23,530 functions
+from CodeNet corpus (Puri et al., 2021) for
+Ruby/Python/Java PL. Each function solves one
+of 4,053 problems. The task is to take each func-
+tion as the query and retrieve functions that solves
+the same problem from each PL. In zero-shot test-
+ing, we set the max sequence length as 512 and use
+cosine similarity between two mean vectors of last
+hidden states as relevant scores. We then sort the
+candidates by the scores to calculate MAP score.
+
+
+
+
+                                                                             7225
+

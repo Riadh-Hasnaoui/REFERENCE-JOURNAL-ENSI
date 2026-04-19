@@ -1,0 +1,1082 @@
+                                           SAINT: Service-level Integration Test Generation with Program
+                                                          Analysis and LLM-based Agents
+                                                             Rangeet Pan                                           Raju Pavuluri                                   Ruikai Huang
+                                                     rangeet.pan@ibm.com                                        pavuluri@us.ibm.com                             rkh@gatech.edu
+                                                         IBM Research                                              IBM Research                          Georgia Institute of Technology
+                                                   Yorktown Heights, NY, USA                                 Yorktown Heights, NY, USA                         Atlanta, GA, USA
+
+                                                           Rahul Krishna                                          Tyler Stennett∗                                Alessandro Orso
+                                                         rkrsn@ibm.com                                         tstennett3@gatech.edu                      alessandro.orso@cc.gatech.edu
+                                                          IBM Research                                      Georgia Institute of Technology                    University of Georgia
+arXiv:2511.13305v1 [cs.SE] 17 Nov 2025
+
+
+
+
+                                                   Yorktown Heights, NY, USA                                      Atlanta, GA, USA                               Athens, GA, USA
+
+                                                                                                                   Saurabh Sinha
+                                                                                                                 sinhas@us.ibm.com
+                                                                                                                    IBM Research
+                                                                                                             Yorktown Heights, NY, USA
+
+                                         Abstract                                                                             ACM Reference Format:
+                                         Enterprise applications are typically tested at multiple levels, with                Rangeet Pan, Raju Pavuluri, Ruikai Huang, Rahul Krishna, Tyler Stennett,
+                                                                                                                              Alessandro Orso, and Saurabh Sinha. 2026. SAINT: Service-level Integration
+                                         service-level testing playing an important role in validating appli-
+                                                                                                                              Test Generation with Program Analysis and LLM-based Agents. In 2026
+                                         cation functionality. Existing service-level testing tools, especially               IEEE/ACM 48th International Conference on Software Engineering (ICSE ’26),
+                                         for RESTful APIs, often employ fuzzing and/or depend on Ope-                         April 12–18, 2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 13 pages.
+                                         nAPI specifications which are not readily available in real-world                    https://doi.org/10.1145/3744916.3773185
+                                         enterprise codebases. Moreover, these tools are limited in their
+                                         ability to generate functional tests that effectively exercise mean-
+                                         ingful scenarios. In this work, we present saint, a novel white-box
+                                                                                                                              1    Introduction
+                                         testing approach for service-level testing of enterprise Java ap-                    Enterprise applications are large, multi-tiered systems with com-
+                                         plications. saint combines static analysis, large language models                    plex business logic. To gain confidence in their correctness, such
+                                         (LLMs), and LLM-based agents to automatically generate endpoint                      applications are tested at multiple levels, each focusing on different
+                                         and scenario-based tests. The approach builds two key models:                        validation goals. Unit testing checks individual implementation
+                                         an endpoint model, capturing syntactic and semantic information                      units (e.g., methods, functions, or classes) in isolation, whereas end-
+                                         about service endpoints, and an operation dependency graph, cap-                     to-end testing exercises functional flows across application tiers.
+                                         turing inter-endpoint ordering constraints. saint then employs                       Between these levels, service-level testing works at the service layer
+                                         LLM-based agents to generate tests. Endpoint-focused tests aim to                    of the application, with the goal of validating the service endpoints
+                                         maximize code and database interaction coverage. Scenario-based                      and server-side logic. It is typically guided by coverage goals over
+                                         tests are synthesized by extracting application use cases from code                  service operations, their parameters, and reachable code, as well as
+                                         and refining them into executable tests via planning, action, and                    operation sequences that reflect functional flows or use cases.
+                                         reflection phases of the agentic loop. We evaluated saint on eight                      In this work, we focus on improving service-level (or API-level)
+                                         Java applications, including a proprietary enterprise application.                   testing of enterprise Java applications. Our goal is two-fold: to gen-
+                                         Our results illustrate the effectiveness of saint in coverage, fault                 erate high-coverage tests for individual service operations or end-
+                                         detection, and scenario generation. Moreover, a developer survey                     points, and to create scenario-based tests that exercise sequences
+                                         provides strong endorsement of the scenario-based tests generated                    of operations corresponding to coherent use cases. Although many
+                                         by saint. Overall, our work shows that combining static analysis                     service-level testing techniques exist—targeting RESTful APIs [3, 4,
+                                         with agentic LLM workflows enables more effective, functional, and                   9, 20–22, 24, 28, 29, 32, 33, 42, 52, 54], GraphQL APIs (e.g., [7, 19])
+                                         developer-aligned service-level test generation.                                     and the older WSDL-based services (e.g. [6])—they have key limita-
+                                                                                                                              tions that restrict their applicability for functional test generation
+                                         ∗ Author was an intern at IBM Research at the time of this work.
+                                                                                                                              on enterprise Java applications. First, most REST API testing tools
+                                                                                                                              function as fuzzers and do not produce test cases. Second, tech-
+                                                                                                                              niques that generate tests focus on maximizing code coverage [3]
+                                         This work is licensed under a Creative Commons Attribution-NonCommercial-            or infer sequences from producer-consumer or resource-based de-
+                                         NoDerivatives 4.0 International License.                                             pendencies [42]. However, meaningful operation sequences can
+                                         ICSE ’26, Rio de Janeiro, Brazil                                                     exist without such dependencies. Finally, most approaches rely on
+                                         © 2026 Copyright held by the owner/author(s).
+                                         ACM ISBN 979-8-4007-2025-3/2026/04                                                   formal service specifications—typically OpenAPI [36]—which are
+                                         https://doi.org/10.1145/3744916.3773185                                              often not available for enterprise applications.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                               Pan et al.
+
+
+                 Java App.
+                                                                                      implements a plan-act-reflect loop, with a suitable set of tools for
+                                                      Model-Construction Phase
+                                                                                      executing actions. The output of the agent consists of Java test
+                                                  Operation                           code fragments corresponding to the atomic blocks, which are then
+            Endpoint model       /endpoi
+                                /endpoi
+                                /endpoi
+                                    nt
+                                   nt
+                                   nt         dependency graph
+             construction                                                             assembled, via another LLM call, into the final scenario-based test.
+                                                construction
+
+           LLM      SA
+                              Endpoint                              Operation             We evaluated saint on eight Java applications, including a pro-
+                               model                             dependency graph
+                                                                                      prietary enterprise application. Four of these applications have
+                                                          Test-Generation Phase       OpenAPI specifications; for these applications, we compared saint
+                                                   Endpoint-
+                                                                                      against EvoMaster, a state-of-the-art white-box test generation tool
+            Scenario-based
+            test generation
+                                                  focused test                        for RESTful APIs [3]. We assessed saint’s effectiveness through
+                                 Scenario-         generation           Endpoint-
+                                based tests                           focused tests
+                                                                                      coverage metrics and fault detection by server failure measurement.
+           LLM     Agent                        LLM    Agent                          We evaluated the scenario-based tests for coverage, characteristics
+                  Figure 1: Overview of our approach.                                 of the extracted scenarios, and developer perception, collected via a
+                                                                                      user survey. Finally, we analyzed saint’s key components through
+   We present a new white-box technique, called saint, for service-
+                                                                                      an ablation study. Our results show that saint matches or con-
+level testing that combines static program analysis with the power
+                                                                                      siderably outperforms EvoMaster on code coverage achieved with
+of large language models (LLMs)—leveraging their planning, rea-
+                                                                                      the endpoint-focused tests, but is not as effective as EvoMaster in
+soning, and reflection capabilities through agentic workflows to
+                                                                                      triggering server failures, with scope for improvement. In terms of
+enhance test generation effectiveness. Our approach (shown in
+                                                                                      scenario-based tests, saint effectively extracts scenarios that span
+Figure 1) generates endpoint-focused tests that exercise each ser-
+                                                                                      multiple endpoints and are rated highly by developers, with more
+vice endpoint with the goal of maximizing code coverage, and
+                                                                                      than 90% of the survey participants stating that they would test
+scenario-based tests that focus on covering meaningful use cases of
+                                                                                      application scenarios similar to the extracted ones. The ablation
+the application for functional testing. The approach consists of two
+                                                                                      study highlights the contributions of saint’s key components.
+phases: model-construction and test-generation.
+                                                                                          The main contributions of the work are:
+   The model-construction phase analyzes the application under
+                                                                                      • A novel technique that combines static analysis with LLM prompt-
+test to identify service endpoints of the application and constructs
+                                                                                         ing and agentic workflows to generate endpoint-focused and
+an endpoint model that incorporates (1) syntactic information for
+                                                                                         scenario-based service-level tests that aim to maximize coverage
+an endpoint that consists of endpoint path, parameter names, and
+                                                                                         while also exercising meaningful use cases for functional testing.
+parameter types, and (2) semantic information for an endpoint with
+                                                                                      • Empirical results showing saint’s effectiveness in code coverage,
+inter-parameter dependencies [31] and parameter value constraints.
+                                                                                         fault detection, and scenario extraction, with developer feedback
+Additionally, we construct an operation dependency graph (ODG)
+                                                                                         highlighting the value of saint-generated scenario-based tests.
+that captures ordering constraints between endpoints resulting
+                                                                                      • An artifact consisting of experiment scripts, data, and LLM prompts
+from different types of dependencies. Both these models are con-
+                                                                                         that is publicly available [49].
+structed using a combination of static analysis and carefully crafted
+LLM prompts, with suitable in-context learning examples.
+   The test-generation phase of saint uses the endpoint model and                     2   Motivation
+the ODG to create two test types based on user intent: endpoint-
+                                                                                      In this section, we ground our discussion by presenting a reference
+focused tests and scenario-based tests. The endpoint-focused tests
+                                                                                      example from Spring PetClinic [44], a multi-tier application that ex-
+explore each service endpoint with varied inputs to maximize code
+                                                                                      poses multiple service endpoints requiring coordinated inputs, busi-
+coverage, with emphasis on covering database interaction points
+                                                                                      ness rule enforcement across entities, and dynamic state-dependent
+in code. To create these tests, saint constructs an LLM prompt for
+                                                                                      database access. This example highlights some of the challenges for
+each endpoint using syntactic, semantic, and ordering constraints
+                                                                                      test generation. We then present an example test case generated
+from the ODG, sends it to the LLM, and extracts parameter value
+                                                                                      by our tool, demonstrating how captures a realistic multi-endpoint
+sets from the received LLM response. It then builds concrete HTTP
+                                                                                      sequence and validates non-trivial state-dependent behaviors.
+requests and executes them against the deployed APIs, while mon-
+                                                                                      Service-level testing challenges for a PetClinic endpoint. We
+itoring coverage of application code. saint incorporates a repair
+                                                                                      consider the .../ownerId/.../petId/visits/new endpoint from
+agent that attempts to fix invalid requests (i.e., requests for which
+                                                                                      PetClinic, shown in Figure 2. This example illustrates several chal-
+the server returns 4xx response codes) and a coverage-augmentation
+                                                                                      lenges: 1 a value constraint on the owner parameter to ensure
+agent that attempts to increase coverage of reachable code for an
+                                                                                      the provided petId belongs to the specified ownerId; 2 a temporal
+endpoint; both these agents implement an iterative planning, action
+                                                                                      check to assert that the visit date is not in the past; 3 an implicit
+execution (with an available set of tools), and reflection workflow.
+                                                                                      dependency that exists between the description text and the date
+   To create scenario-based tests, which exercise meaningful appli-
+                                                                                      (i.e., emergency visits must be within a day); 4 a condition that
+cation use cases, saint performs a sequence of LLM prompting to
+                                                                                      ties the surgery type to the date and the description. All the above
+first extract test scenarios (in Gherkin-like syntax [12]) from the
+                                                                                      clauses span entity relations, involving various inter-parameter
+application code and then refine the scenarios into atomic blocks
+                                                                                      dependencies, which cannot be adequately captured or represented
+or test steps. These atomic blocks are input to a test-generation
+                                                                                      using OpenAPI specifications or static analysis alone.
+agent that attempts to reify a test scenario into an executable test
+                                                                                      An illustrative test synthesized by our approach. The test
+case. This agent, like the repair and coverage-augmentation agents,
+                                                                                      shown in Figure 3 demonstrates how our approach addresses the
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                                   ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+
+
+Figure 2: Real-world endpoint from PetClinic with hard-to-                            Figure 3: A test synthesized by saint capturing these con-
+test constraints                                                                      straints in a realistic scenario.
+                                                                                              Symbol   Type                             Description
+challenges in scenario-based testing. It constructs a coherent multi-
+                                                                                                              API endpoint (E) ≡ (c, m, p, H, Π, I, D, R)
+endpoint test that maintains semantic consistency across endpoints                              𝑐      Σ+     Fully qualified name of the class containing the endpoint method.
+with consistent use of owner ID 1 across the test (as seen in 1 ). It                           𝑚      Σ+     Signature of the API endpoint method
+                                                                                                𝑝      Σ∗     Endpoint path
+also enforces state-dependent constraints (as seen in 2 , where the                             𝐻      H      HTTP method. H = {𝐺𝐸𝑇 , 𝑃𝑂𝑆𝑇 , 𝑃𝑈𝑇 , 𝐷𝐸𝐿𝐸𝑇 𝐸, 𝑃𝐴𝑇𝐶𝐻 }
+                                                                                                Π      P∗     List of endpoint parameters
+edit operations assume that the pet was successfully created be-                                𝐼      I∗     List of inter-parameter dependencies
+forehand), and embeds realistic validation logic (e.g., via valid form                          𝐷      D∗     List of database operations
+                                                                                                       Σ∗     Response schema as dictionary or string reference
+data entries on lines labeled 3 ). In summary, the example exposes                              𝑅
+                                                                                                              Endpoint Parameter (P) ≡ (n, T, K, V, C, M, A)
+cross-endpoint dependencies and produces a test case with valid                                 𝑛      Σ∗     Name of the parameter
+inputs and assertions (e.g., final check on line 4 ), illustrating how                          𝑇      Σ∗     Datatype of the parameter
+                                                                                                𝐾      K      Parameter kind. K = {𝑞𝑢𝑒𝑟𝑦, 𝑝𝑎𝑡ℎ, 𝑏𝑜𝑑𝑦, ℎ𝑒𝑎𝑑𝑒𝑟 }
+our approach can perform effective service-level test generation.                               𝑉      Σ∗     Value constraints (e.g., allowed strings, enum options)
+                                                                                                𝑀      Σ∗     Enclosing method for the parameter
+                                                                                                𝐶      Σ∗     Enclosing class for the parameter
+3     Methodology                                                                               𝐴      Σ∗     List of annotations applied to the parameter
+                                                                                                              Inter-parameter dependency (I) ≡ (R, Π, Γ)
+saint operates in two phases where Phase 1 constructs the endpoint                              𝑅      I      Inter-parameter dependency relation type.
+model and the ODG and Phase 2 performs endpoint-based and                                       Π      P+     List of involved parameters
+                                                                                                Γ      Σ∗     Constraint logic associated with the relation
+scenario-based test generation.
+                                                                                                              Database operation (D) ≡ (F, C, L, M, O)
+                                                                                                𝐹      F      Database framework. F = {𝐽 𝐷𝐵𝐶, 𝐽 𝑃𝐴, 𝐽𝑇 𝐴, ...}
+                                                                                                𝐶      Σ∗     Enclosing class name of the operation
+3.1     Endpoint Model Construction                                                             𝑀      Σ∗     Method signature where the DB access occurs
+                                                                                                𝐿      𝑖      Line number where operation has been taken
+Figure 5 illustrates the construction our endpoint model using static                           𝑂      O      CRUD operation type. O = {𝐶𝑟𝑒𝑎𝑡𝑒, 𝑅𝑒𝑎𝑑, 𝑈 𝑝𝑑𝑎𝑡𝑒, 𝐷𝑒𝑙𝑒𝑡𝑒}
+analysis and LLM prompting. First, we identify endpoint methods in                            Figure 4: The endpoint model constructed by saint.
+the application written in various Java frameworks. saint currently
+supports five Java frameworks: Jakarta [15], Spring [43], Struts [48],                 method 𝐻 , endpoint parameters Π, inter-parameter dependencies
+Stripes [47], and JDK HttpServer [17]. For Jakarta, Spring, and                        (IPDs) [31] I, reachable database operations D, and the response
+Struts, we rely on CLDK [8]. CLDK is a multi-language program                          schema R, representing the structure of the server response. The
+analysis library that is built upon well-vetted static analysis tools,                 figure also shows the data type of each field in the model: a field is
+such as WALA [53], JavaParser [16], and Tree-sitter [51], and pro-                     either a custom type defined within the model (e.g., H for HTTP
+vides various analysis capabilities via Python APIs. We use these                      methods), a string type (Σ), or an integer type (𝑖).
+APIs to extract symbol table, call graph, and endpoint and database                    Extracting endpoint path and HTTP method. Java frameworks
+information and build custom analysis for this work. To identify                       use various patterns for declaring paths and operation types. Typi-
+endpoints, CLDK relies on a pattern-matching technique that was                        cally, these are class or method annotations that can be extracted
+proposed in a previous work [1]. For Stripes and HttpServer, saint                     via code parsing. However, in the case of HttpServer, a legacy frame-
+implements custom static analyses and LLM prompts to identify                          work that lacks annotation-based conventions, endpoint paths are
+endpoints. These analyses leverage the symbol table information                        specified in code, as shown in this example from LanguageTool [25]:
+(e.g., method implementations, annotations, parameter details, etc.)
+and the call graph (constructed with Rapid Type Analysis [5]) ob-
+tained using the CLDK APIs. After identifying the endpoints, saint
+extracts detailed syntactic and semantic information for each end-
+point to populate the endpoint model.                                                     In this case, saint relies on LLMs to extract the paths. Although
+   Figure 4 formally defines the endpoint model. An endpoint E,                        complex static analysis could, in principle, support applications
+corresponding to a method, is represented as an 8-tuple consisting                     built on HttpServer, we deemed such an effort unwarranted due to
+of service class name 𝑐, method signature 𝑚, endpoint path 𝑝, HTTP                     the framework’s limited usage.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                    Pan et al.
+
+
+      Java Application                    Path: {base path, endpoint path}
+                            LLM SA                                                       Parameter value constraints. Parameters can have value constraints
+    Identify  LLM                         Parameters : [{name, type, kind, value }, …]
+    endpoints SA                          HTTP method : GET, POST, …
+                                                                                         enforced by code checks or annotations. In some frameworks, de-
+                         Extract endpoint Database operations : {framework, }            velopers provide natural language examples to aid in generating
+       /endpoint(s)           details     Response schema : { . . . }                    corresponding values.
+                                                            LLM SA      Extract IPDs
+                                                           Requires : [ . . . ]
+                                                           AllOrNone: [ . . . ]
+                    LLM      /endp
+                            /endp            Populate      Or : [ . . . ]
+                            /endp
+                              oint
+                 Create ODG oint
+                              oint       endpoint model    OnlyOne : [ . . . ]
+                                                           ZeroOrOne : [ . . . ]
+                                                           Arithmetic: [ . . . ]
+                                                                                            In other cases, value constraints are specified in code, as seen in
+Figure 5: Construction of the endpoint model and ODG via                                 a DayTrader [10] fragment below: the action parameter supports
+static analysis (SA) and LLM prompting (LLM).                                            specific values for request processing, while an invalid action value
+Extracting endpoint parameter details. The parameter infor-                              triggers a 4xx or 5xx response, depending on server settings.
+mation in the model (Figure 4) consists of the parameter name 𝑛,
+the parameter type 𝑇 , the parameter kind 𝐾, value constraints 𝑉 ,
+enclosing method 𝑀 and class 𝐶, and the associated annotations 𝐴.
+Parameter names and types. In Spring and JAX-RS, parameters are
+declared in the endpoint method, allowing easy extraction of names
+and types (unless we encounter complex patterns @ModelAttribute                             saint extracts the context for an endpoint parameter, including
+in Spring). In other cases, such as Jakarta Servlets, more advance                       its annotations, type, and method body, and incorporates it into
+processing is required as shown in the below snippet. Here, the pa-                      an LLM prompt to extract value constraints, instructing the LLM
+rameter OrderProcessingMode stored as a String and then converted                        to produce the output in a structured format illustrated with an
+to int. Here, getParameter() calls on HttpRequest are analyzed (see                      in-context example.
+highlighted lines) where the parameter values are String typed                           Enclosing method and class. These represent the method and class for
+(return type of getParameter()) and are subsequently typecast to                         parameter declaration. In most frameworks, they are the endpoint
+int. These processes can happen anywhere in the call chain starting                      class and method. For Servlets, they indicate the method and its class
+at the endpoint method.                                                                  from which a parameter is extracted from an HttpServletRequest
+                                                                                         instance, which could occur anywhere in the call chain starting at
+                                                                                         the endpoint method.
+                                                                                         Extracting inter-parameter dependencies. API endpoints of-
+                                                                                         ten have parameter dependencies that restrict valid request com-
+To handle such cases, saint performs a call-chain analysis, scoping                      binations. Prior work [31] identifies seven IPD types: AllOrNone,
+it to the methods to which the HttpRequest object flows via param-                       Requires, OnlyOne, Or, ZeroOrOne, Arithmetic, and Complex. For in-
+eter passing. Within this scope, it identifies parameter names and                       stance, the OnlyOne relation requires only one parameter, while
+types via LLM prompting, including relevant code fragments from                          the AllOrNone relation require all or none of the parameters to be
+the call graph and a simple in-context example in the prompt.                            present in a valid requst. To extract IPDs, saint prompts an LLM
+    The following example from JPetStore [18] (a Stripes applica-                        prompt with the relevant endpoint context, consisting of parameter
+tion [47]) illustrates how parameters can be declared as class fields                    names, types, and relevant method bodies. The prompt also includes
+linked via getter-setter methods. The lines highlighted show how                         IPD definitionsa and examples to teach the LLM about the relations
+the editAccount() method passes an account object to setAccount().                       and output formats. The LLM identifies the IPDs, determining the
+As AccountService is annotated with @Service, its fields become pa-                      relation type 𝑅, the involved parameters Π, and the code constraints
+rameters. In the signon() method, parameters are inferred from                           Γ, which are stored in the endpoint model (Figure 4).
+getters for username and password.                                                       Extracting database operation details. CLDK extracts database
+                                                                                         operations based on known APIs and supported database frame-
+                                                                                         works. It maps these APIs to their corresponding CRUD operations
+                                                                                         and records the location of each call in the analysis metadata. We
+                                                                                         leverage this information to identify lines of code that contain data-
+                                                                                         base interactions and prioritize their coverage while testing the
+                                                                                         individual endpoints, as such operations represent an important
+                                                                                         component of the functionality provided by the endpoints.
+
+                                                                                         3.2    ODG Construction
+                                                                                         The endpoint model captures syntactic and semantic details of
+Parameter kind. Parameter kind can be path, query, header, or body,                      each endpoint without considering inter-endpoint dependencies.
+indicating whether the parameter is included in the resource path,                       For instance, in PetClinic [44], to add a pet, an owner ID must
+the request query string, or the request body. saint extracts this                       first be obtained via the endpoint listing all owners (GET /owner)
+information using static analysis.                                                       or by adding a new owner (POST /owner/{ownerid}), demonstrating
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                         ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+resource-based dependency. saint constructs the ODG to represent                       incorrect request along with an explanation generated by the LLM
+such dependencies. Moreover, saint creates a functional summary                        while selecting an action. Additionally, if the LLM determines that
+for each endpoint, used in Phase 2 to extract testing scenarios, and                   more code context is necessary, we include it in the prompt. For the
+these summaries are linked to ODG nodes.                                               coverage-augmentation, we supply the LLM with uncovered lines.
+    Formally, the ODG 𝐺 = (𝑉 , 𝐸) constitutes a directed graph,                        (2) Modify parameter type. This action is designed for handling ap-
+wherein the nodes are representative of endpoints (or service op-                      plication frameworks (e.g., Servlet) for which we obtain parameter
+erations) and the edges delineate the dependencies among these                         types via LLM calls. If during the planning step, the agent reasons
+endpoints. Each node 𝑣 ∈ 𝑉 corresponding to an endpoint encom-                         that the assigned type of a parameter causes an invalid request
+passes the model and a comprehensive functional summary of that                        or uncovered lines, it can rectify that mistake via this action. The
+endpoint. An edge (𝑣 1, 𝑣 2 ) ∈ 𝐸 signifies the dependency of 𝑣 2 on                   output of this action consists of new requests with parameter values
+𝑣 1 through one of three distinct relational types: (1) resource de-                   generated in accordance with modified parameter types.
+pendency, where two endpoints are connected via path resources,                        (3) Modify IPD. Similar to the parameter-type-update action, this ac-
+exemplified by the PetClinic scenario; (2) producer-consumer depen-                    tion updates an IPD that was initially obtained via LLM prompting.
+dency, involving an endpoint that produces a value and another                         Based on the new IPD, a new request is formed.
+endpoint that can take that value as input; and (3) database depen-                    (4) Update value constraint. This action updates a previously ex-
+dency, where one endpoint executes a write operation to a database                     tracted value constraint for a parameter, and forms a new HTTP
+and another endpoint retrieves data from the same database.                            request based on that.
+    We use a RAFT-like approach [42] to analyze path parameters                        (5) Generate requests. With this action, the agent generates more
+and HTTP methods (GET, POST, DELETE, etc.) for resource dependen-                      requests for the same endpoint or another endpoint, whose invoca-
+cies. For two other relations, we create prompts with endpoint and                     tion may be a prerequisite for fixing an invalid request or covering
+database details, and code fragments for LLMs to identify these                        more code in the endpoint under consideration.
+relations. LLM calls also generate operation summaries based on                        (6) Extract additional code context. Often fixing an HTTP request
+provided endpoint code and other details.                                              or covering additional code requires code-related details that may
+                                                                                       not be available in the initial prompt. With this action, the agent
+3.3     Endpoint-focused Test Generation                                               can request more code context by selecting a CLDK API [8] to be
+                                                                                       invoked (from a list of APIs provided to the agent). For instance, the
+Figure 6 shows the endpoint-focused test generation workflow,
+                                                                                       agent can request information about callees of an endpoint method.
+which includes: (1) generating and executing HTTP requests with
+parameters on services, (2) fixing invalid requests, (3) enhancing                     3.3.3 Repair agent. The repair agent attempts to fix invalid HTTP
+code coverage, and (4) converting requests into Java tests. All steps                  requests. During the planning step, the agent is presented with the
+use LLMs, with steps 2 and 3 also using agentic workflows.                             request details, along with LLM-generated problem summary of the
+3.3.1 Generation and execution of HTTP requests. To generate end-                      error response from the server. As the raw server response can be
+point parameter values, a prompt with endpoint model details                           overly verbose, making it hard to pinpoint the issue, we use an LLM
+(path, HTTP method, parameter names/types, constraints, and                            to summarize the response, which makes the agent’s planning step
+IPDs) and related code from the call graph is created. The LLM                         easier. Based on the presented information, the agent selects the
+outputs parameter-to-value mappings, forming concrete HTTP                             next actions to execute (we limit this to two actions to control the
+requests. These requests are executed by saint against services                        computational cost). Along with the actions, the agent also gener-
+monitored for coverage changes.                                                        ates the rationale for its decision. After executing a selected action,
+   For each executed request, the technique checks the response                        the agent reflects on the outcome by comparing the summarized
+code. For 4xx responses (indicating invalid requests), it invokes                      server responses before and after the action to determine whether
+saint’s repair agent to fix the request. For 2xx and 3xx responses,                    the action addresses the problem with the original invalid request.
+the technique invokes the coverage-augmentation agent to increase                      For instance, upon receiving a 4xx response and the corresponding
+coverage of uncovered code reachable from the endpoint method.                         server message, the repair agent selects suitable tools to regenerate
+Both agents implement a plan-act-reflect loop consisting of a plan-                    the request and re-evaluates the response. This process continues
+ning step where the LLM decides on the next course of action based                     until a 200 status code is obtained or a predefined upper bound on
+on available information about the task at hand, an action step                        the number of attempts is reached. A scoring mechanism guides the
+where the agent performs an action using an available set of tools,                    agent’s decisions at each iteration when the goal remains unmet.
+and a reflection step where the agent ranks the outcome of the action                  3.3.4 Coverage-augmentation agent. This agent is tasked with gen-
+and sends feedback for the next iteration of the loop.                                 erated HTTP requests targeted at covering specific (uncovered)
+3.3.2 Tools for agents. We designed and implemented six tools                          lines of code. During the planning step, the agent is provided with
+that are suitable for the tasks to be performed by the repair and                      the uncovered reachable lines of code and other relevant informa-
+coverage agents (shown under “Available tools” in Figure 6).                           tion about the tested endpoint. The agent selects up to two actions
+(1) Modify parameter value. One of the common modifications                            to execute next, along with the reasoning behind its choices. After
+needed to fix an invalid HTTP request or increase code coverage                        performing the action, which results in execution of newly gen-
+is adjusting parameter values. Selecting this action results in an                     erated HTTP requests against the endpoint, the agent reflects on
+LLM call with a prompt that includes relevant parameter details                        the outcome by comparing the previously uncovered lines with the
+for the endpoint. When fixing HTTP requests, we also include the                       newly covered lines after the execution of the new requests.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                                                                                                Pan et al.
+
+
+
+                                                                            Select endpoint               Generate scenarios &
+                              LLM                             /endpoint                                 corresponding endpoints
+                                           Generate
+                                       parameter values                                                ODG         LLM                                                                                         Given When Then
+
+
+
+
+                                                                                                                                                                        Given
+                                                                                                                                                                   When Given
+                                                                                                                                                                        Given
+                                                                                                                                                                                    /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                                                 /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                                                  /endpoint
+                                                                                                                                                                                /endpoint                         Description
+                                                                                                                                                                                                                 Description
+                                                                                                                                                                                                       LLM       Description
+                               user: {age: 10,    Generate and       Coverage          LLM    Error details  : This                     Scenario name : ..
+                                                                                      4xx                                                                                                             Atomic        /endpoint
+                                                                                                                                                                                                                   /endpoint
+
+
+
+
+                                                                                                                                                                   When
+                                                                                                                                                                                                                  /endpoint
+
+
+
+
+                                                                                                                                                                   When
+                              f_name: “John”,      run HTTP          monitor                  error is related to..                      Scenario details
+                                                                                                                                                        :                           /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                                                 /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                               +                  /endpoint
+                                                                                                                                                                                /endpoint
+                              l_name: “Doe”},    request against                   Summarize Root cause: Incorrect                         {When: … ,                                                 blocks
+                                  “id”: 1                           Application                parameter choice                         Given: …, Then: …  }                                                      Description
+                                                   application                     responses                                                                                                                     Description
+                                                                                                                                                                                                                 Description
+
+
+
+
+                                                                                                                                                                    Then
+                                                                                                                                                                   Then
+                                                                                                                                                                   Then
+                                                                                                                                                                                    /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                                                 /endpoint
+                                                                                                                                                                                   /endpoint
+                                                                                                                                                                                  /endpoint
+                                                                                                                                                                                /endpoint
+                                                                              2xx         Identify non -                                                                                                           /endpoint
+                                                                                                                                                                                                                  /endpoint
+                                                                                                                                                                                                                 /endpoint
+                             Bug revealing requests 5xx                       3xx         covered code
+
+
+
+
+                                                                                                                                                                                                                                  Reify scenario
+                                                                                              Available tools
+                                                                                                                                                                                                                Available tools
+                                                                                       Modify         Modify
+                                                                                                                                           Planning            Decide next
+                                                                                                                                                                 action
+                                                                                                                                                                                      Action
+                                              Next                                                                                                                                                               Generate
+                                    Planning Action                Action             Parameter      Parameter
+                                                                                                                                         Score outcome                                          Select
+                                                                                        Value          Type                                                                                                      request
+                                 Score outcome                                                                                                                                                   tool
+                                                                       Select                         Modify                                                   Reflection
+                                                                        tool        Modify IPD         value                                                                             LLM judges             Fix request
+                                                 Reflection                                          constraint
+                                                                                                                                                                                         whether the
+                                                                                                                                                                                         outcome is
+                                                                                                                                                                                          coherent                Modify
+                                                                                      Generate         Extract                                                                                                     next
+                                                                                                                                                                                                LLM
+                                                                                       HTTP             code                                                                                                      atomic
+                                          Repair and coverage-
+                                                                                      request          context                                                                                                    blocks
+                                          augmentation agents                                                                            Test generation agent
+
+
+                                                                            2xx-3xx                                                                                                              Repeat for each atomic block
+                                                                            Achieved agent goal           Endpoint
+                                                                                                         Endpoint
+                                                                                                        Endpoint
+                                                                                                       Endpoint
+                                                                                                                      model,
+                                                                                                                    model,
+                                                                                                                   model,
+                                                                                                                  models,         LLM
+                                                                                                           HTTP
+                                                                                                          HTTP
+                                                                                                         HTTP     Requests,
+                                                                                                                 Requests,
+                                                                                                                Requests,
+                                                                                                        HTTP   Requests,
+                                                                                                          Server  response,
+                                                                                                         Server
+                                                                                                        Server   response,
+                                                                                                               response,        Generate
+                                                                                                       Server responses,
+                                                                                                          Assertion
+                                                                                                         Assertion
+                                                                                                        Assertion
+                                                                                                       Assertion
+                                                                                                                      details
+                                                                                                                     details
+                                                                                                                    details
+                                                                                                                   details       tests                                                  Endpoint Test Generation
+                                                                                         *
+                                                                                        5xx                                                                                              Scenario-based Test Generation
+
+                               Figure 6: The workflow for generating endpoint-focused and scenario-based tests.
+
+   All the tools (or actions), except the code-context action, generate
+one or more HTTP requests. The code-context action produces
+code-related details returned from the CLDK API chosen. During
+reflection for this action, the agent evaluates whether it contributes
+meaningfully to facilitating future request generation in subsequent
+iterations. As part of reflection, the agent computes a score in the
+range [0, 1], indicating the effectiveness of the action, and creates a
+comment explaining the rationale for the score. These are used in
+the next iteration to guide the selection of the next action.
+3.3.5 Test generation step. In this step, we convert selected re-                                                                              Figure 7: Sample test scenario extracted by saint.
+quests into executable test cases. Specifically, we focus on two                                                                  the generated information for a block to process subsequent blocks.
+types of requests: (a) those that contribute to code coverage and                                                                 The final step composes the test fragments together to create an
+(b) those that reveal potential bugs, such as requests resulting in                                                               executable JUnit test case for the scenario.
+5xx response codes. For identifying coverage-contributing requests,
+we rely on a coverage monitoring agent deployed alongside the                                                                     3.4.1 Generation of test scenarios and related endpoints. To gener-
+application. Once these requests are identified, we extract endpoint                                                              ate test scenarios, our approach constructs an LLM prompt that in-
+information and generate corresponding test cases using a code                                                                    cludes endpoint information and functional summaries. The prompt
+skeleton defined through Jinja templates [49]. We ensure that the                                                                 instructs the model to produce scenarios aligned with business use
+generated tests include appropriate package declarations and are                                                                  cases using Gherkin-like syntax [12]. Each scenario follows a struc-
+organized according to the application’s source code directory struc-                                                             tured format with a scenario name, a given clause (preconditions),
+ture. This design choice aids developers in easily mapping each                                                                   a when clause (actions), and a then clause (expected outcomes). We
+test to its corresponding endpoint class, improving traceability and                                                              experimented with various formats and found the Gherkin-like
+maintainability.                                                                                                                  style most effective, even enabling smaller models to generate co-
+                                                                                                                                  herent, meaningful scenarios. Figure 7 shows an example generated
+3.4      Scenario-based Test Generation
+                                                                                                                                  for the PetClinic application [44].
+Scenario-based test generation focuses on creating meaningful se-
+quences of API calls for exercising application use cases, as illus-
+trated by the PetClinic test case in Listing ??. The right side of                                                                3.4.2 Decomposing scenarios into atomic blocks. Each clause of a
+Figure 6 illustrates the workflow for generating scenario-based                                                                   scenario can be associated with one or more endpoints. If a given,
+tests, which consists of four steps. In the first step, saint extract                                                             when, or then clause has more than one endpoint, saint decomposes
+test scenarios from the application code and map each scenario to a                                                               it into more granular tasks, or atomic block, so that processing a
+sequence of endpoints via an LLM call. The second step decomposes                                                                 single endpoint can help achieve that task. The prompt instructs
+a scenario into a sequence of atomic blocks, where each atomic                                                                    the LLM to divide a scenario into atomic blocks and provide details
+block achieves a specific step of a test scenario and is associated                                                               on how the blocks are related. For the example scenario in Figure 7,
+with one endpoint. In the third step, saint employs an agentic                                                                    the when can be divided into more granular tasks of retrieving vet
+approach to generate the test fragment for each atomic block, using                                                               information, initializing a new visit form, and creating a new visit,
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                                    ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+where the last two tasks share the same pet and owner ID. The infor-                          Table 1: Java applications used in the evaluation.
+                                                                                                                              Java     OpenAPI
+mation about decomposed blocks is then fed to the test-generation                             Dataset           Framework    version    spec?    NCLOC
+                                                                                                                                                            # of
+                                                                                                                                                          classes
+                                                                                                                                                                      # of
+                                                                                                                                                                    endpoints
+agent to create concrete HTTP requests and test case.                                         DayTrader          Servlet        8        X       11409     141         113
+                                                                                              PetClinic           Spring       17        X        790       24          17
+                                                                                              JPetStore          Stripes        8        X        1409      24          21
+3.4.3 Test-generation agent. The agent processes each atomic block                            Restcountries       Jax-rs        8        ✓        1619      23          27
+of a scenario to generate concrete requests, and uses the responses                           Feature-service     Jax-rs        8        ✓        1688      21          18
+                                                                                              Genome-Nexus        Spring        8        ✓       22143      74          48
+from those requests to process the subsequent blocks. In the plan-                            Languagetool      HttpServer      8        ✓       113170     37          6
+                                                                                              App X              Servlet       11        X        1255      24          23
+ning step, the agents decide on the next course of action and selects
+from a set of available tools. We designed three tools tailored to the                 • RQ3: (Developer survey) How do developers perceive the scenario-
+task of converting a sequence of atomic blocks for a scenario to a                       based tests generated by saint in terms of their usefulness?
+sequence of test fragments.                                                            • RQ4: (Fault Triggering) How does saint compare with EvoMas-
+(1) Generate requests. With this tool, the agent generates HTTP                          ter in terms of server failures triggered?
+requests for the endpoint corresponding to an atomic block. The                        • RQ5: (Ablation) How do ODG construction, IPDs and value
+relevant context in the LLM prompt includes endpoint details, the                        constraints extraction, repair agent, and coverage-augmentation
+scenario description, the task for the particular block, the outcomes                    agent contribute to saint’s effectiveness in code coverage?
+of preceding blocks (requests and corresponding responses), and
+in-content examples. The generated requests are executed against
+the deployed application to obtain the responses.
+                                                                                       4.1     Experiment Setup
+(2) Fix request. With this tool, the agent attempts to modify the                      We evaluated our approach on two categories of service-oriented
+parameter values of a previously generated request so that the                         applications: (1) REST APIs with OpenAPI specifications and (2)
+request aligns with the task description for an atomic block.                          enterprise Java applications without OpenAPI specifications. The
+(3) Modify subsequent atomic blocks. The outcome of one block                          first group includes four applications (Feature-Service, Genome
+can require modifications to subsequent blocks. Consider again the                     Nexus, LanguageTool, and RestCountries) from the EvoMaster
+scenario in Figure 7. Suppose that while processing the task for the                   benchmark [55]. The second group comprises three open-source
+given clause, the agent finds that there exists a vet with ID 2; this                  Java applications (DayTrader [10], JPetStore [18], and PetClinic [39])
+ID can also be used for the scenario, but it requires the descriptions                 and one proprietary enterprise application. These three open-source
+of the subsequent blocks to be updated. The agent uses the scenario                    applications were also analyzed in prior studies [35, 38], which ex-
+description, the current block being processed, and its requests                       amined six Java EE applications; we added three applications in our
+and outcomes to modify descriptions of the subsequent blocks (if                       evaluation dataset after excluding those that could not be deployed
+required) such that the overall goal of the scenario is preserved                      or crashed frequently. Table 1 shows the dataset characteristics.
+while minor details (e.g., vet ID) are updated.                                        Testing Tools. We compare saint with EvoMaster, a state-of-the-art
+   After executing an action, the agent reflects on the outcome                        white-box test generation tool [2]. Although EvoMaster operates in
+of the executed requests to determine whether it aligns with the                       white-box mode, it still requires an OpenAPI specification as input.
+description of the current block under processing. If it determines                    As a result, our comparison is limited to applications for which
+that the requests are unrelated to the block, it provides a justification              OpenAPI specifications are available. For the remaining applica-
+for its decision. If the outcome aligns, the agent also determines                     tions in our dataset, we evaluated several off-the-shelf specification
+whether any subsequent blocks in the scenario need modifications.                      generation tools (e.g., springdoc-openapi [45], SpringFox [40]); how-
+The information from this step then feeds into the next iteration of                   ever, these tools consistently produced incomplete specifications
+planning to select action to be performed.                                             and required substantial manual effort to make them usable with
+                                                                                       EvoMaster. In the case of EvoMaster, each application was exe-
+3.4.4 Generate Tests. After the test-generation agent completes,
+                                                                                       cuted for one hour using a randomly chosen seed. In white-box
+saint collects all relevant information—including the scenario de-
+                                                                                       mode, EvoMaster attaches its own JVM agent to instrument the
+scription, the atomic block sequences, the HTTP requests, and the
+                                                                                       application under test, which is known to conflict with the JaCoCo
+responses—and prompts an LLM to generate a test using the Rest-
+                                                                                       agent [56]. Although EvoMaster also reports code coverage, its mea-
+Assured framework [41]. Given the structured nature of this data
+                                                                                       surement approach differs from that of JaCoCo. To ensure a reliable
+and the simplicity of Rest-Assured’s syntax, the LLM consistently
+                                                                                       comparison, we first used EvoMaster to generate tests for each ap-
+produces compilable tests. Finally, saint appends the scenario de-
+                                                                                       plication. We then executed those generated tests with the JaCoCo
+scription and Java package information to produce the complete
+                                                                                       agent enabled, allowing us to collect consistent and comparable
+scenario-based test.
+                                                                                       code-coverage data across all the applications.
+                                                                                       LLMs. We selected models based on size, cost, model family, and
+4    Evaluation                                                                        popularity, categorizing them as small (IBM Granite 3.1–8B, Meta
+Our evaluation focuses on the following five research questions:                       Llama 3.1–8B), medium (Devstral-24B, DeepSeek-R1-distill-Qwen-
+• RQ1: (Coverage) How does saint compare with EvoMaster [2]                            32B), and large (GPT o1). Due to the high computational cost of
+  in terms of code coverage, operation coverage, and database                          evaluating multiple models across datasets, each was run twice
+  interaction coverage achieved?                                                       using parameters from prior work [38], with a temperature setting
+• RQ2: (Scenario Effectiveness) How effective is saint in generat-                     of 0.2 to ensure stable yet diverse outputs. saint uses 25 unique
+  ing scenario-based tests?                                                            prompts in its pipeline (these are available in our artifact [49]).
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                  Pan et al.
+
+
+Metrics. To evaluate our approach, we used various coverage and           The tests simulate a user updating the details of an existing pet.
+quality metrics. For code coverage, we measured line and branch        saint generates multiple tests covering both positive and negative
+coverage, as well as database line coverage, using CLDK [8] to         paths. In the first scenario, it uses valid owner and pet IDs to update
+identify database interaction points. To measure code coverage, we     pet information, resulting in a successful 200 response. In contrast,
+use the JaCoCo agent [14], attaching it to the running application     the second scenario uses invalid (non-existent) IDs, which leads to a
+instance to record coverage in real time as requests are executed.     500 server error. All tests generated by saint are directly compilable
+We also computed reachability coverage by analyzing static call        and executable without requiring manual edits.
+chain starting from each endpoint and identifying all reachable
+methods, which let us measure coverage within the effective execu-      Finding 1: saint can generate tests for applications without
+tion scope—the portion of the code that is statically reachable from    OpenAPI specifications with high code coverage (10%–80%). Also,
+the endpoint. In addition, we report operation coverage, represent-     with saint, smaller models (8B parameters) can achieve similar
+ing the proportion of distinct API operations (i.e., the combination    or better coverage compared to bigger models such as GPT-o1.
+of endpoint resource path and HTTP operation or an endpoint
+method) exercised. For scenario quality, we computed scenario          Applications with OpenAPI Specification. Among all the applications
+length, number of scenarios, and other structural indicators.          under this category, Restcountries and Languagetool do not in-
+                                                                       teract with any database, while Genome-Nexus uses MongoDB,
+                                                                       which is currently unsupported by CLDK. Consequently, database
+4.2      Experiment Results                                            coverage is only reported for Feature-service. In this case, saint
+4.2.1 RQ1: Code and operation coverage of individual endpoint test     achieves notably higher database coverage, successfully exercis-
+generation. In this RQ, we evaluate saint’s capability to generate     ing multiple database interaction points. We also found that saint
+endpoint-focused tests against two sets of applications: those with    can identify more endpoints than those defined in the OpenAPI
+and without OpenAPI specifications. Figure 8 presents the results.     specification—most notably in Genome-Nexus, where the specifi-
+Applications without OpenAPI Specifications. In this category, we      cation lists 23 endpoints, but saint detected 48. In terms of line
+analyzed four applications—three open-source projects (PetClinic,      and branch reachability coverage, saint outperforms EvoMaster
+DayTrader, and JPetStore) and one closed-source application (App-      for Feature-service and Genome-Nexus (+50.5% and + 22.0% in line
+X). saint was able to capture database coverage for all except App-    coverage). For Restcountries, saint’s performance is slightly lower
+X, which uses DB2—a database currently unsupported by CLDK.            (-0.9% in branch coverage). However, for Languagetool, saint’s
+In terms of database line coverage, the o1 model performed best        performance is worse compared (-19.3%) to EvoMaster in case of
+overall. However, for PetClinic and JPetStore, all models achieved     application coverage. However, when compared on reachability
+comparable coverage. A manual inspection of JPetStore identified       coverage, they are comparable. The discrepancies observed in Lan-
+four database call sites, three of which involve complex conditional   guageTool arise from an incomplete API specification: the OpenAPI
+logic—posing challenges for all models. Interestingly, in Spring-      specification lists only two endpoints, while more endoints exist
+PetClinic, all models achieved similar line, branch, and database      in the implementation. This is not uncommon, as OpenAPI spec-
+coverage. Further analysis revealed that gaining additional coverage   ifications are primarily written for external users and often omit
+would require solving intricate constraints, which saint currently     internal endpoints.
+does not support. Overall, model performance was comparable,            Finding 2: Compared to EvoMaster, saint achieves similar or
+with the smaller Granite-8B often matching or outperforming larger      considerably better coverage, with the coverage difference rang-
+models like o1. The generated tests are implemented in Java using       ing from -0.9% to +50.5%.
+the Rest-assured framework [41]. An example is shown below:
+
+                                                                       4.2.2 RQ2: Effectiveness of scenario-based test generation. Besides
+                                                                       testing individual endpoints, a key feature of saint is extracting
+                                                                       test scenarios and converting them into Java tests. First, saint
+                                                                       employs an LLM to generate a brief summary of each endpoint’s
+                                                                       behavior. We use the ODG to extract and convert application use
+                                                                       cases into Java tests. To assess their quality, we evaluate the number,
+                                                                       length, endpoint class diversity, and good-path versus bad-path dis-
+                                                                       tribution of scenarios, as shown in Table 2. We classify scenarios as
+                                                                       good-path if they result in a 2xx status code, and as bad-path if they
+                                                                       result in a 5xx status code. On average, the LLM generated 6, 11, 7, 8,
+                                                                       10, 10, and 9 scenarios for PetClinic, DayTrader, JPetStore, Feature-
+                                                                       service, RestCountries, Genome-Nexus, and App-X, respectively.
+                                                                       No scenarios were generated for LanguageTool, which contains only
+                                                                       one valid endpoint. Most LLM-generated scenarios span multiple
+                                                                       endpoints, with larger models like o1 generally producing longer
+                                                                       sequences—observed in 6 of the 7 applications. Notably, 42.6% of
+                                                                       scenarios span multiple endpoint classes, underscoring the need for
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                                                                  ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                          Granite-3.1-8B                 Llama-3.1-8B                 Devstral-24B        DeepSeek-R1-Distil-Qwen-32B               o1              EvoMaster
+    Application Coverage         Reachability Coverage          Application Coverage         Reachability Coverage   Application Coverage   Reachability Coverage        Application Coverage     Reachability Coverage
+
+
+
+
+                      DayTrader                                                Spring-PetClinic                                      JPetStore                                      Feature-Service
+    Application Coverage         Reachability Coverage          Application Coverage         Reachability Coverage   Application Coverage   Reachability Coverage        Application Coverage     Reachability Coverage
+
+
+
+
+                   Restcountries                                               Genome-Nexus                                       Languagetool                                            App-X
+
+                                                                        Figure 8: Application and reachability coverage.
+Table 2: Effectiveness of scenarios and scenario-based tests.
+                   # of   Sequence Scenarios w/       Coverage (%)         (good, bad)
+     App Models scenarios
+                           length >1 class (%) Line Branch DB Operation path scenario (%)
+          G-8B         4.0        2.8         87.5       57.5   41.7    47.5     52.9       (87.5, 12.5)
+          L-8B         7.0        2.4         14.3       64.3   53.2    47.9     61.8       (71.4, 28.6)
+     PC DV-24B         7.0        2.3          5.6       68.4   48.1    50.5     82.4       (78.9, 21.1)
+         DS-32B        4.5        2.4         32.5       61.6   50.6    55.5     52.9       (90.0, 10.0)
+           o1          6.0        3.2         50.0       61.2   37.2    42.1     85.3       (66.7, 33.3)
+          G-8B         6.5        1.5         18.1        7.8    6.4     7.4     23.2       (100.0, 0.0)
+          L-8B          8         2.4         60.0        8.1    6.9     5.6     25.6       (90.0, 10.0)
+     DT DV-24B          18        2.1         25.3        8.0    6.4     7.4     43.9       (68.2, 31.8)
+         DS-32B         14        2.0         13.9        8.1    6.4     7.4     42.7        (92.2, 7.8)
+           o1           8         4.2         62.5       10.2   10.1     5.6     80.5        (93.7, 6.3)
+          G-8B         4.5         4          90.0        7.8    5.3      -      45.2       (35.0, 65.0)              Finding 3: Larger models tend to focus on more complex scenar-
+          L-8B          10        2.5         31.2        8.0    5.3      -      69.0       (43.8, 56.2)
+      JP DV-24B         10        4.4         65.0        8.1    5.3      -      97.2       (25.0, 75.0)              ios in an application, generating scenarios with longer sequence.
+         DS-32B        7.5        3.2         42.0        8.1    5.3      -      85.7       (45.5, 54.5)
+           o1           5         5.2         20.0        8.1    5.3      -      100        (60.0, 40.0)
+          G-8B         5.5        2.6         60.7       21.2   11.3     0.0     61.1       (21.4, 78.6)             Scenario code coverage. In terms of code coverage, scenario-based
+          L-8B         14.5       2.3         46.1       26.6   16.1     3.7     80.6       (28.4, 71.6)
+      FS DV-24B        11.5       2.0         31.5       19.0    9.5     1.5     83.3       (20.4, 79.6)
+                                                                                                                     test generation does not achieve the same level of performance as
+         DS-32B        4.0        5.9         70.0       13.4    8.3     5.9     77.8       (36.7, 63.3)             individual endpoint testing. While scenario-based test generation
+           o1          3.5        4.9         70.0       36.5   33.9    19.8     75.0       (65.0, 35.0)
+          G-8B         5.0        2.1         10.0       38.7   30.0      -      33.9       (70.0, 30.0)             is well-suited for validating complex, end-to-end use cases, individ-
+          L-8B         11.0       3.0         20.0       30.0   20.2      -      26.8       (29.2, 70.8)             ual endpoint testing remains more effective for maximizing code
+     RC DV-24B         15.5       1.5         12.5       63.8   63.6      -      51.8       (61.2, 38.8)
+         DS-32B        10.5       1.4         16.7       44.9   43.6      -      42.8       (59.7, 40.3)             and operation coverages. For the DayTrader application, where
+           o1          7.5        3.9         100.0      65.4   59.3      -      94.6       (80.0, 20.0)
+          G-8B         7.5        1.9         81.3       49.0    1.9      -      19.8       (72.3, 27.7)             both code and operation coverage were particularly low during
+          L-8B
+     GN DV-24B
+                       13.0
+                       14.0
+                                  1.7
+                                  1.8
+                                               0.0
+                                              36.4
+                                                         54.2
+                                                         53.1
+                                                                 1.9
+                                                                 7.7
+                                                                          -
+                                                                          -
+                                                                                45.83
+                                                                                 41.7
+                                                                                            (69.3, 30.8)
+                                                                                            (74.6, 25.4)
+                                                                                                                     scenario-based test generation. This is largely due to the nature of
+         DS-32B        6.0        2.3         95.0       49.1    1.9      -      19.8       (100.0, 0.0)             the application’s endpoints—many of which are designed to send
+           o1          8.0        2.5         25.0       54.5    7.7      -      39.6       (75.0, 25.0)
+          G-8B         8.0        2.2         48.4       24.1   11.6      -      28.3       (56.3, 43.7)             pings to various services or perform status checks, making them
+          L-8B         16.5       2.7         73.3       27.9   14.4      -      56.5       (61.7, 38.3)             unsuitable candidates for meaningful scenario construction.
+     A-X DV-24B        10.0       2.2         35.0       30.9   18.1      -      50.0       (65.0, 35.0)
+         DS-32B        4.0        3.1         80.0       26.0   13.9      -      32.6       (90.0, 10.0)
+ * G-8B: Granite-3.1.-8B, L-8B: Llama-3.1.-8B, DS-32B: DeepSeek-R1-Distil-Qwen-32B, DV-24B: Devstral Small, PC:       Finding 4: While scenario-based test generation is well-suited
+ PetClinic, DT: DayTrader, JP: JPetStore, FS: Feature-Service, RC: Restcountries, GN: Genome-Nexus, A-X: App-X
+                                                                                                                      for validating complex application use cases, individual endpoint
+                                                                                                                      testing is more effective for maximizing code coverage.
+                                                                                                                        Another interesting observation is that these scenarios can go
+                                                                                                                     beyond the conventional endpoint dependencies. For example, in
+                                                                                                                     Genome-Nexus, we observed a scenario related to fetching and
+                                                                                                                     analyzing cancer hotspot annotations. This scenario involves three
+                                                                                                                     endpoints that are not directly connected through traditional end-
+                                                                                                                     point relationships. However, the endpoints are semantically re-
+                                                                                                                     lated through the variant and genome location they reference. This
+                                                                                                                     indicates that an LLM-based approach can detect functional rela-
+                                                                                                                     tionships beyond explicit structural dependencies.
+
+                                                                                                                     4.2.3 RQ3: Developer’s preference about scenario-based test gener-
+                                                                                                                     ation. We conducted a survey on 41 employees of organization X
+                                                                                                                     (removed for anonymity) to get the qualitative feedback on the test
+more than isolated endpoint testing. As an example, a scenario gen-                                                  scenarios and corresponding tests generated by saint.
+erated by o1 for Feature-service begins with adding a new product                                                    Survey design. Table 3 presents the survey questionnaire. Broadly,
+(Laptop), followed by features (TouchScreen, Stylus), setting con-                                                   it is divided into four major sections.
+straints, and adding multiple configurations. The complete code for                                                  Professional Background. This section presents seven questions
+this scenario is provided in the supplementary material [49].                                                        about participants’ professional backgrounds, covering their roles,
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                                                                                Pan et al.
+
+
+                                          Table 3: Survey questionnaire.                                                                       Scenario Quality                  Test Quality
+                                                                                                                                                                                                                                  Yes, after
+                                                                                                                                                                                                                             significant changes
+    Type                                                        Question                                         Format                                                                                                No,
+                                                                                                                                                                                                                    I will not
+                             Q1. Current Role                                                                    Open
+
+
+
+
+                                                                                                                          percentage (%)
+                                                                                                                                                                                                             Yes, without
+                             Q2. Years of experience in software engineering (incl. education)                   MCQ
+    Professional
+    Background
+
+
+
+
+                                                                                                                                                                                                             any changes
+                             Q3. Years of experience in industry                                                 MCQ
+                             Q4. Level of expertise in Java                                                      MCQ
+                             Q5. Prior experience with automated API-level test generator                        MCQ
+                             Q6. How often do you write API-level tests for your codebase?                       MCQ                                                                                              Yes, after
+                             Q7. On average, how long do you spend writing API-level tests for an appli-         MCQ                                                                                            minor changes
+                             cation use case (i.e., tests that exercise a functional scenario)?
+                                                                                                                                           Strongly Agree   Agree   Neutral   Disagree   Strongly Disagree
+                             Q8. I understand what this scenario describes                                       Likert
+    Scenario
+    Quality
+
+
+
+
+                             Q9. The scenario covers a meaningful functionality of the application               Likert   Figure 9: Scenario and test quality assessment (left) and test
+                             Q10. Testing such scenarios is valuable for validating the application              Likert
+                             Q11. I would test such scenarios if this were my application under test             Likert   acceptance (right) by developers.
+    Generated Test Quality
+
+
+
+
+                             Q12. I understand what the test does                                                Likert   the potential productivity gains from generating high-quality API
+                             Q13. The test is well structured                                                    Likert
+                             Q14. The test feels natural (in terms of variable, method, and class names)         Likert   tests. Full details are available in the supplementary material [49].
+                             Q15. This test correctly implements the test scenario                               Likert
+                             Q16. The input values (e.g., string literals, integer constants), if any, used in   Likert
+                             the test case are meaningful
+                                                                                                                               Finding 5: 42% of the participants indicated that writing high-
+                             Q17. The test sequence (i.e., the sequence of API calls) makes sense                Likert        quality API tests is time-consuming, often requiring more than
+                             Q18. The test assertions are meaningful                                             Likert
+                             Q19. Would you add the test case to your service-level test suite?                  MCQ           30 minutes to complete.
+    Comment
+
+
+
+
+                             Q20. What are your thoughts on the strengths and weaknesses of the extracted Open
+                             scenarios and the generated tests? Do you believe they are suitable as outputs               Test scenario quality. For test scenarios, participants reviewed the
+                             from a fully automated process?                                                              natural language descriptions and answered questions about their
+experience in SE and Java, and involvement in API testing. It also                                                        quality and relevance. The feedback indicated that saint-generated
+assesses their familiarity with automated API test generators, the                                                        scenarios were highly rated for understandability, meaningfulness,
+frequency of API testing tasks, and the time typically spent writing                                                      and alignment with real application use cases. Over 90% of partic-
+high-quality tests involving multiple API calls.                                                                          ipants agreed that they would test similar scenarios, while fewer
+Test scenario quality. For this section, we selected three relatively                                                     than 5% expressed a preference against using them.
+easy-to-understand applications—PetClinic, Feature-service, and                                                                Finding 6: More than 90% participants agreed that they would
+App-X. Participants could select one of the applications based on                                                              test application scenarios similar to the ones extracted automati-
+their preference. They were then shown three LLM-generated test                                                                cally by saint.
+scenarios with corresponding Java code. The scenarios were se-
+lected from top-performing model–application pairs (as identified                                                         Generated test quality. In this phase, developers evaluated the rei-
+in RQ2): o1 for PetClinic and Feature-service, and DeepSeek-R1-                                                           fied test scenarios and the corresponding generated code, focusing
+32B for App-X. From multiple runs, three scenarios were randomly                                                          on understandability, formatting, and naturalness—particularly in
+sampled for each case. Contextual information about the applica-                                                          method, class, and variable names, as well as input values. They also
+tion and relevant endpoints was provided to aid comprehension.                                                            assessed the clarity of test sequences, the quality of assertions, and
+Participants evaluated each scenario based on understandability,                                                          alignment with the described scenarios. Over 70% of participants
+functional relevance, and whether they would include it in the test                                                       found the tests easy to understand and natural. However, more than
+suite for the application.                                                                                                20% noted room for improvement in assertion quality and scenario
+                                                                                                                          alignment. Still, over 60% agreed the tests were correctly imple-
+Generated test quality. For each test scenario, participants re-
+                                                                                                                          mented and included meaningful assertions. Notably, 66% indicated
+viewed the corresponding generated code and assessed its clar-
+                                                                                                                          they would include the generated tests in their suite with minor or
+ity and quality. They evaluated whether the test’s purpose was
+                                                                                                                          no changes, 29% would do so with significant modifications, and
+clear, the structure logical, and naming conventions (e.g., variables,
+                                                                                                                          only 5% would not use them at all (reported in Figure 9).
+methods, classes) felt natural. They also judged whether the test
+accurately implemented the described scenario, whether the API                                                                 Finding 7: Participants responded positively to various aspects
+call sequence was meaningful, and whether the assertions were                                                                  of the generated tests, with approximately 66% indicating that
+appropriate and relevant.                                                                                                      they would add the tests to their regression test suites with little
+Overall feedback. In this section, participants could provide more                                                             to no modification.
+detailed feedback regarding the strengths and weaknesses of saint,                                                        Overall strengths and weaknesses. Participant feedback highlighted
+as well as suggestions for tool improvement.                                                                              one of saint’s key strengths: its ability to generate well-structured
+Participant background. Participants in the survey came from di-                                                          and readable tests. As one participant noted, “there are things to
+verse professional roles, including developers, architects, QA en-                                                        make it easier to read. . . like a central definition of certain variables
+gineers, product managers, and researchers. Most had a strong                                                             (BASE_URI).” Several participants also suggested improvements to
+software engineering background—79% reported over 15 years of                                                             enhance the practicality of saint. A common request was to make
+experience (including education), and 66% had more than 10 years                                                          tests more self-contained. Currently, tests rely on hardcoded values
+in industry. Additionally, 76% had Java expertise, and 78% actively                                                       and modify application state without handling setup or cleanup.
+performed API testing. Notably, 42% said writing high-quality API                                                         High-quality tests, however, should create necessary resources at
+tests takes over 30 minutes. More than half of the participants re-                                                       runtime and perform cleanup afterward—an important direction
+sponded that they never used any automated test generation tools.                                                         for future development. Another suggested improvement was en-
+These findings underscore both the participants’ qualifications and                                                       hancing assertion quality. Currently, saint generates assertions
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                         ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                            Table 4: Fault detection.                                     Benefits and drawbacks of using hybrid approach. Beyond cost,
+     Application       Granite-8B   Llama-8B   Devstral   DeepSeek   o1   EvoMaster    hybrid approaches offer several additional advantages. For exam-
+       DayTrader               10          2          7          6    2           -
+    Spring-PetClinic            4          5          5          4   10           -
+                                                                                       ple, in terms of HTTP call efficiency, saint performs significantly
+        JPetStore               9          7          6          6    6           -    fewer requests compared to EvoMaster. On average, saint issues
+     Feature-service           76        179         67         65   84          37
+      Restcountries             1          1          1          1    1           1
+                                                                                       fewer than 500 HTTP requests per application, whereas EvoMaster
+    Genome-Nexus                0          0          0          0    0           0    generates over 10k+ requests for the same applications, resulting
+      Languagetool              0          0          0          0    0           6
+         App-X                  0          0          0          0    -           -
+                                                                                       in a more focused and efficient testing process. Another key ad-
+                                                                                       vantage is scalability—saint can support major Java versions and
+based on response codes and raw server output. Participants noted                      frameworks, while conventional tools often struggle to maintain
+that validating more success and failure paths—would significantly                     compatibility as the scope expands. Although saint continues to
+improve the tests’ effectiveness.                                                      rely on static analysis, it leverages well-established and actively
+                                                                                       maintained analysis tools that provide broad language support.
+4.2.4 RQ4: saint’s effectiveness in triggering faults. We evaluated
+saint ’s ability to trigger faults using the methodology from prior                    6      Related Work
+work [22]. We also reused the regex patterns from a prior work [33]                    Automated REST API testing techniques are categorized into black-
+to identify unique request–response pairs. To improve generality,                      box and white-box approaches [29, 34]; former relies on API specs
+we enhanced the implementation so it can parse requests and re-                        and the latter on source code inspection and runtime monitoring.
+sponses and automatically learn new regex patterns for unseen                          Black-box API testing. Early black-box techniques use fuzzing and
+cases. We found that in most cases, saint mostly found faults in                       model-based strategies to generate request sequences from the Ope-
+applications, except for Genome-Nexus and App-X, which likely                          nAPI Specification. Tools such as RESTler [4], RestTestGen [52],
+did not show faults due to lack of 5xx errors. saint triggered more                    MoREST [28], and RAFT [42] conduct stateful fuzzing via graph
+faults compared to EvoMaster for Feature-service but not able to                       traversals and HTTP method differentiation. Recent LLM-enhanced
+trigger any failure for LanguageTool. The high number of faults                        tools, like KAT [26] and LogiAgent [54](arXiv), infer semantic rela-
+in the Feature-service occurs because it returns an entire HTTP                        tionships, outperforming heuristic methods. Other LLM-augmented
+page as the response—along with the stack trace—whenever a fault                       API testing systems, including RESTGPT [23], AutoRestTest [24, 46],
+is triggered. This makes the errors difficult to distinguish using                     and LlamaRestTest [22], improve parameter generation and IPD
+simple string-based operations.                                                        extraction. AutoRestTest and LogiAgent also use agents for iterative
+                                                                                       test refinement. However, these methods are limited by inaccura-
+4.2.5 RQ5: Effectiveness of saint components. Our ablation study
+                                                                                       cies in OpenAPI specifications [11, 30], affecting their use in poorly
+evaluates the key components of saint. Due to the high computa-
+                                                                                       documented real-world applications.
+tional demands of testing multiple models, we chose Granite-8B,
+our smallest effective model and performed the study on four appli-                    White-box API testing. White-box techniques use internal system
+cations with and without OpenAPI: DayTrader, PetClinic, Feature-                       knowledge to enhance coverage and fault detection. EvoMaster [2]
+service, and Genome-Nexus. Table 5 presents the ablation results.                      applies evolutionary algorithms based on code coverage and muta-
+Partial orderings from the ODG had the greatest positive effect on                     tions, while MioHint [27] uses LLMs to improve inputs for challeng-
+test coverage, followed by IPD extraction, value constraint extrac-                    ing branches through static analysis. However, both face difficulties
+tion, the coverage-augmentation agent, and the repair agent.                           in creating semantically meaningful request sequences.
+                                                                                       Scenario-based testing. Scenario-based testing simulates real-world
+                                                                                       workflows through dependent API sequences. Traditional black-box
+5     Discussion                                                                       tools, such as RESTler [4], MoREST [28], and RestTestGen [52], infer
+   Cost of using saint. One major concern with LLM-based ap-                           dependencies heuristically. Recent tools like RAFT [42], KAT [26],
+proaches is their operational cost, as excessive token consumption                     and LogiAgent [54] integrate LLMs, with LogiAgent generating
+can substantially increase overall expenses and limit practical us-                    scenarios from endpoint descriptions. However, these approaches
+age. To evaluate this aspect, we measured the token usage for                          rely solely on OpenAPI specs and overlook hidden code-level and
+both endpoint-level and scenario-based test generation, and trans-                     database dependencies.
+lated these values into monetary cost using the pricing of different                   Positioning saint. saint is the first white-box, LLM-based agen-
+models. Our analysis demonstrates that saint is significantly cost-                    tic framework for REST API testing. It extends model-based tech-
+efficient, both in terms of total expenditure and the number of LLM                    niques (e.g., RESTler, RestTestGen, KAT) by leveraging static analy-
+invocations. Specifically, with Devstral (via OpenRouter [37]) the                     sis to identify dependencies and sequence operations beyond the
+average cost is $0.24 for endpoint-focused and $0.22 for scenario-                     OpenAPI specification, enabling accurate, meaningful scenarios.
+based generation, whereas for o1 (on the OpenAI platform), it is                       End-to-end LLM integration generates semantic tests that surpass
+$6.17 and $4.42, respectively. The detailed result in present in the                   fuzzing-based white-box methods like EvoMaster. Compared to
+supplementary material [49]. We believe this efficiency primarily                      LogiAgent—the closest counterpart—saint incorporates code un-
+because of the integration of static analysis, which enables saint                     derstanding for request sequencing and generation, overcoming
+to perform targeted pre-processing and invoke the LLM only when                        reliance on incomplete external resources. Moreover, saint’s com-
+necessary, rather than feeding the entire application context to an                    prehensive tool-chain for static analysis, IPD extraction, and gener-
+off-the-shelf model.                                                                   ation enhances autonomy and adaptive reasoning.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                  Pan et al.
+
+
+                Table 5: Results of the ablation study.                                 information extracted through static analysis with semantic reason-
+                                 Value               Partial   Request     Coverage
+         Coverage Metric       constraints   IPD     order      fixing   augmentation
+                                                                                        ing capabilities of LLMs, supported by agents that repair, augment,
+                    Line             +9.0    +12.0    +17.1       +2.2           +0.4
+                                                                                        and compose tests. Evaluation across eight applications demon-
+      Application   Branch          +33.2    +26.0    +34.2       +8.4          +13.6   strates that saint outperforms prior approaches in test coverage
+                    Database         +7.2    +35.0    +14.0       -1.3           +5.2
+                                                                                        and scenario realism, with favorable feedback from developers and
+                    Line            +15.4    +17.0    +27.0       +5.5           +1.9
+     Reachability   Branch          +31.7    +31.0    +36.6      +12.8          +14.9
+                                                                                        supporting ablation analyses. We identify several future research
+                    Database         +5.7    +38.0    +16.3       -1.2           +6.3   directions: extending saint to support more backends (e.g., Python
+REST API specification generation. To address missing or incomplete                     Flask, Node.js Express) and interfaces (e.g., GraphQL, gRPC), im-
+application specifications, several techniques have been proposed                       proving the generated scenario-based tests to be self-contained,
+to automatically generate REST API specifications for use in test                       and developing human-in-the-loop variants of saint for interac-
+generation. Commercial tools such as SpringFox [40], springdoc-                         tive scenario generation and domain-specific test refinement.
+openapi [45], and Swagger Core [50] generate OpenAPI specifica-
+tions through runtime inspection and reflection, but they are tied
+                                                                                        References
+to specific frameworks and often produce incomplete specifications                       [1] Anastasios Antoniadis, Nikos Filippakis, Paddy Krishnan, Raghavendra Ramesh,
+that require substantial engineering effort to integrate with test gen-                      Nicholas Allen, and Yannis Smaragdakis. 2020. Static analysis of Java enterprise
+erators. Research tools like Respector [13] provide higher-quality                           applications: frameworks and caches, the elephants in the room. In Proceed-
+                                                                                             ings of the 41st ACM SIGPLAN conference on programming language design and
+specifications but support only Spring and JAX-RS applications                               implementation. 794–807.
+on specific Java versions. In contrast, saint requires no OpenAPI                        [2] Andrea Arcuri. 2018. EvoMaster: Evolutionary Multi-context Automated System
+specification and goes beyond testing individual endpoints.                                  Test Generation. In 2018 IEEE 11th International Conference on Software Test-
+                                                                                             ing, Verification and Validation (ICST). 394–397. doi:10.1109/ICST.2018.00046
+                                                                                             arXiv:1901.04472 [cs].
+7     Threats to Validity                                                                [3] Andrea Arcuri. 2019. RESTful API Automated Test Case Generation with Evo-
+                                                                                             Master. ACM Transactions on Software Engineering and Methodology (TOSEM) 28,
+To evaluate saint, we used line and branch coverage with server-                             1, Article 3 (jan 2019), 37 pages. doi:10.1145/3293455
+side error detection. However, these metrics may not fully capture                       [4] Vaggelis Atlidakis, Patrice Godefroid, and Marina Polishchuk. 2019. RESTler:
+                                                                                             Stateful REST API Fuzzing. In 2019 IEEE/ACM 41st International Conference on
+the application’s behavioral and business validity. Therefore, our                           Software Engineering (ICSE). IEEE, Montreal, QC, Canada, 748–758. doi:10.1109/
+test generation includes scenario-based tests that replicate func-                           ICSE.2019.00083
+tional workflows. We used both quantitative and qualitative mea-                         [5] David F Bacon and Peter F Sweeney. 1996. Fast static analysis of C++ virtual
+                                                                                             function calls. In Proceedings of the 11th ACM SIGPLAN conference on Object-
+sures to assess the quality of these scenarios, including developer                          oriented programming, systems, languages, and applications. 324–341.
+feedback via a survey.                                                                   [6] Cesare Bartolini, Antonia Bertolino, Eda Marchetti, and Andrea Polini. 2009.
+                                                                                             WS-TAXI: A WSDL-based Testing Tool for Web Services. In Proceedings of the
+   The use of LLMs and agents derived from LLMs exposes saint                                2009 International Conference on Software Testing Verification and Validation. IEEE
+to an inherent stochasticity and sensitivity to prompt structure that                        Computer Society, 326–335. doi:10.1109/ICST.2009.28
+may affect repeatability of our results. To limit this, we used temper-                  [7] Asma Belhadi, Man Zhang, and Andrea Arcuri. 2024. Random Testing and
+                                                                                             Evolutionary Testing for Fuzzing GraphQL APIs. ACM Trans. Web 18, 1, Article
+ature as low as 0.2 and performed two runs with each LLM. However,                           14 (Jan. 2024), 41 pages. doi:10.1145/3609427
+to mitigate the impact of running fewer trials on the reported cov-                      [8] cldk 2025. CodeLLM-Devkit. https://github.com/codellm-devkit/python-sdk
+erage, we repeated the experiment with Devstral (due to its lower                        [9] Davide Corradini, Zeno Montolli, Michele Pasqua, and Mariano Ceccato. 2024.
+                                                                                             DeepREST: Automated Test Case Generation for REST APIs Exploiting Deep
+inference cost) ten times. We found that the standard deviation                              Reinforcement Learning. In Proceedings of the 39th IEEE/ACM International Confer-
+of both line and branch coverage was very low (for branch cover-                             ence on Automated Software Engineering. Association for Computing Machinery,
+                                                                                             1383–1394. doi:10.1145/3691620.3695511
+age, 0.0–5.2% for individual endpoints and 0.0–7.6% for scenario-                       [10] daytrader 2025. DayTrader8 Sample. https://github.com/OpenLiberty/sample.
+based tests; for line coverage, 0.1–1.3% for individual endpoints and                        daytrader8
+1.4–5.1% for scenario-based tests). These results are available in our                  [11] Sida Deng, Rubing Huang, Man Zhang, Chenhui Cui, Dave Towey, and Rongcun
+                                                                                             Wang. 2025. LRASGen: LLM-based RESTful API Specification Generation. arXiv
+artifact [49].                                                                               preprint arXiv:2504.16833 (2025).
+   Our evaluation included eight applications built on different                        [12] gherkinsyntax 2025. Gherkin Reference. https://cucumber.io/docs/gherkin/
+frameworks with and without OpenAPI specifications. We specifi-                              reference
+                                                                                        [13] Ruikai Huang, Manish Motwani, Idel Martinez, and Alessandro Orso. 2024. Gen-
+cally target REST API synchronous request/response models within                             erating REST API Specifications through Static Analysis. In Proceedings of the
+Java. The results may not extend to applications that employ differ-                         IEEE/ACM 46th International Conference on Software Engineering (ICSE ’24). Arti-
+                                                                                             cle 107, 13 pages. doi:10.1145/3597503.3639137
+ent communication methods (e.g., message queues or event-driven                         [14] JaCoCo. 2025. JaCoCo Agent. https://www.eclemma.org/jacoco/trunk/doc/agent.
+architectures) or to applications implemented in other languages.                            html. [Online; accessed Nov-2025].
+Another limitation of saint, similar to EvoMaster, is its inability                     [15] jakarta 2025. Jakarta EE. https://jakarta.ee/
+                                                                                        [16] JavaParser. 2025. JavaParser. https://github.com/javaparser/. [Online; accessed
+to mock external services. We plan to address these shortcomings                             Nov-2025].
+in future work.                                                                         [17] jdkhttpserver 2025. JDK HttpServer. https://docs.oracle.com/en/java/javase/21/
+                                                                                             docs/api/jdk.httpserver/com/sun/net/httpserver/HttpServer.html
+                                                                                        [18] jpetstore 2025. MyBatis JPetStore. https://github.com/mybatis/jpetstore-6
+8     Conclusion                                                                        [19] Stefan Karlsson, Adnan Čaušević, and Daniel Sundmark. 2021. Automatic
+                                                                                             Property-based Testing of GraphQL APIs. In 2021 IEEE/ACM International Confer-
+We presented saint, a white-box approach for service-level test-                             ence on Automation of Software Test (AST). 1–10. doi:10.1109/AST52587.2021.00009
+ing of enterprise Java applications combining static analysis with                      [20] Myeongsoo Kim, Davide Corradini, Saurabh Sinha, Alessandro Orso, Michele
+LLM-driven agentic workflows. saint generates both endpoint-                                 Pasqua, Rachel Tzoref-Brill, and Mariano Ceccato. 2023. Enhancing REST API
+                                                                                             Testing with NLP Techniques. In Proceedings of the 32nd ACM SIGSOFT Interna-
+focused and scenario-based test cases, targeting high code coverage                          tional Symposium on Software Testing and Analysis. Association for Computing
+and realistic use-case execution. Our technique integrates symbolic                          Machinery, 1232–1243. doi:10.1145/3597926.3598131
+SAINT: Service-level Integration Test Generation with Program Analysis and LLM-based Agents                                 ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+[21] Myeongsoo Kim, Saurabh Sinha, and Alessandro Orso. 2023. Adaptive REST                   on Automated Software Engineering. 1–12.
+     API Testing with Reinforcement Learning. In Proceedings of the 38th IEEE/ACM        [36] openapispec 2025. OpenAPI Specification. https://spec.openapis.org/oas/latest.
+     International Conference on Automated Software Engineering. IEEE Press, 446–458.         html
+     doi:10.1109/ASE56229.2023.00218                                                     [37] OpenRouter. 2025. OpenRouter. https://openrouter.ai. [Online; accessed Nov-
+[22] Myeongsoo Kim, Saurabh Sinha, and Alessandro Orso. 2025. LlamaRestTest:                  2025].
+     Effective REST API Testing with Small Language Models. doi:10.48550/arXiv.          [38] Rangeet Pan, Myeongsoo Kim, Rahul Krishna, Raju Pavuluri, and Saurabh Sinha.
+     2501.08598 arXiv:2501.08598 [cs].                                                        2025. ASTER: Natural and Multi-language Unit Test Generation with LLMs. In
+[23] Myeongsoo Kim, Tyler Stennett, Dhruv Shah, Saurabh Sinha, and Alessandro                 ACM/IEEE International Conference on Software Engineering.
+     Orso. 2024. Leveraging Large Language Models to Improve REST API Testing.           [39] petclinic 2025. Spring PetClinic Sample Application. https://github.com/spring-
+     doi:10.48550/arXiv.2312.00894 arXiv:2312.00894 [cs].                                     projects/spring-petclinic
+[24] Myeongsoo Kim, Tyler Stennett, Saurabh Sinha, and Alessandro Orso. 2025. A          [40] Marty Pitt, Dilip Krishnan, and Adrian Kelly. 2020. SpringFox. https://github.
+     Multi-Agent Approach for REST API Testing with Semantic Graphs and LLM-                  com/springfox/springfox. [Online; accessed Nov-2025].
+     Driven Inputs. doi:10.48550/arXiv.2411.07098 arXiv:2411.07098 [cs].                 [41] restassured 2025. REST-assured. https://rest-assured.io
+[25] languagetool 2025. LanguageTool.            https://github.com/languagetool-org/    [42] Diptikalyan Saha, Devika Sondhi, Swagatam Haldar, and Saurabh Sinha. 2025.
+     languagetool                                                                             REST API Functional Tester. In Proceedings of the 18th Innovations in Software
+[26] Tri Le, Thien Tran, Duy Cao, Vy Le, Tien Nguyen, and Vu Nguyen. 2024. KAT:               Engineering Conference. Association for Computing Machinery, Article 8, 11 pages.
+     Dependency-aware Automated API Testing with Large Language Models. In 2024               doi:10.1145/3717383.3717388
+     IEEE Conference on Software Testing, Verification and Validation (ICST). 82–92.     [43] spring 2025. Spring. https://spring.io/
+     doi:10.1109/ICST60714.2024.00017 arXiv:2407.10227 [cs].                             [44] Spring Team. 2013. Spring PetClinic. https://github.com/spring-projects/spring-
+[27] Jia Li, Jiacheng Shen, Yuxin Su, and Michael R. Lyu. 2025. LLM-assisted Mutation         petclinic A sample Spring-based application.
+     for Whitebox API Testing. doi:10.48550/arXiv.2504.05738 arXiv:2504.05738 [cs].      [45] springdoc. 2025. springdoc-openapi. https://github.com/springdoc/springdoc-
+[28] Yi Liu, Yuekang Li, Gelei Deng, Yang Liu, Ruiyuan Wan, Runchao Wu, Dandan                openapi. [Online; accessed Nov-2025].
+     Ji, Shiheng Xu, and Minli Bao. 2022. Morest: Model-based RESTful API Testing        [46] Tyler Stennett, Myeongsoo Kim, Saurabh Sinha, and Alessandro Orso. 2025.
+     with Execution Feedback. doi:10.48550/arXiv.2204.12148 arXiv:2204.12148 [cs].            AutoRestTest: A Tool for Automated REST API Testing Using LLMs and MARL.
+[29] Alberto Martin-Lopez, Andrea Arcuri, Sergio Segura, and Antonio Ruiz-Cortés.             doi:10.48550/arXiv.2501.08600 arXiv:2501.08600 [cs].
+     2021. Black-box and white-box test case generation for RESTful APIs: Enemies        [47] stripes 2025. Stripes Framework. https://github.com/StripesFramework/stripes
+     or allies?. In 2021 IEEE 32nd International Symposium on Software Reliability       [48] struts 2025. Apache Struts. https://struts.apache.org/
+     Engineering (ISSRE). IEEE, 231–241.                                                 [49] supplementary 2025. Supplementary Material. https://github.com/aster-test-
+[30] Alberto Martin-Lopez, Sergio Segura, Carlos Müller, and Antonio Ruiz-Cortés.             generation/saint
+     2021. Specification and automated analysis of inter-parameter dependencies in       [50] Swagger. 2025. Swagger Core. https://github.com/swagger-api/swagger-core.
+     web APIs. IEEE Transactions on Services Computing 15, 4 (2021), 2342–2355.               [Online; accessed Nov-2025].
+[31] Alberto Martin-Lopez, Sergio Segura, and Antonio Ruiz-Cortés. 2019. A Cata-         [51] treesitter 2025. Tree-sitter. https://tree-sitter.github.io/tree-sitter
+     logue of Inter-parameter Dependencies in RESTful Web APIs. In Service-Oriented      [52] Emanuele Viglianisi, Michael Dallago, and Mariano Ceccato. 2020. RESTTEST-
+     Computing: 17th International Conference, ICSOC 2019, Toulouse, France, October          GEN: Automated Black-Box Testing of RESTful APIs. In 2020 IEEE 13th Interna-
+     28–31, 2019, Proceedings (Toulouse, France). Springer-Verlag, Berlin, Heidelberg,        tional Conference on Software Testing, Validation and Verification (ICST). IEEE,
+     399–414. doi:10.1007/978-3-030-33702-5_31                                                Porto, Portugal, 142–152. doi:10.1109/icst46399.2020.00024
+[32] Alberto Martin-Lopez, Sergio Segura, and Antonio Ruiz-Cortés. 2021. RESTest:        [53] WALA. 2025. WALA. https://github.com/wala/WALA. [Online; accessed Nov-
+     Automated Black-Box Testing of RESTful Web APIs. In Proceedings of the 30th              2025].
+     ACM SIGSOFT International Symposium on Software Testing and Analysis. Associ-       [54] Ke Zhang, Chenxi Zhang, Chong Wang, Chi Zhang, YaChen Wu, Zhenchang Xing,
+     ation for Computing Machinery, 682–685. doi:10.1145/3460319.3469082                      Yang Liu, Qingshan Li, and Xin Peng. 2025. LogiAgent: Automated Logical Testing
+[33] Alberto Martin-Lopez, Sergio Segura, and Antonio Ruiz-Cortés. 2022. Online               for REST Systems with LLM-Based Multi-Agents. doi:10.48550/arXiv.2503.15079
+     Testing of RESTful APIs: Promises and Challenges. In Proceedings of the 30th             arXiv:2503.15079 [cs].
+     ACM Joint European Software Engineering Conference and Symposium on the             [55] Man Zhang and Andrea Arcuri. 2021. Adaptive hypermutation for search-based
+     Foundations of Software Engineering. Association for Computing Machinery,                system test generation: A study on REST APIs with EvoMaster. ACM Transactions
+     408–420. doi:10.1145/3540250.3549144                                                     on Software Engineering and Methodology (TOSEM) 31, 1 (2021), 1–52.
+[34] Srinivas Nidhra and Jagruthi Dondeti. 2012. Black box and white box testing         [56] Man Zhang and Andrea Arcuri. 2023. Open Problems in Fuzzing RESTful APIs:
+     techniques-a literature review. International Journal of Embedded Systems and            A Comparison of Tools. ACM Trans. Softw. Eng. Methodol. 32, 6, Article 144 (Sept.
+     Applications (IJESA) 2, 2 (2012), 29–50.                                                 2023), 45 pages. doi:10.1145/3597205
+[35] Vikram Nitin, Shubhi Asthana, Baishakhi Ray, and Rahul Krishna. 2022. Cargo:
+     Ai-guided dependency analysis for migrating monolithic applications to microser-
+     vices architecture. In Proceedings of the 37th IEEE/ACM International Conference
+

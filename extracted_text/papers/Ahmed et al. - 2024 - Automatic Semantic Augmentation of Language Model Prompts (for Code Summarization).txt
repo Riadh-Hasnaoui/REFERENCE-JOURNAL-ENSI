@@ -1,0 +1,961 @@
+                               2024 IEEE/ACM 46th International Conference on Software Engineering (ICSE)
+
+
+
+
+Automatic Semantic Augmentation of Language Model Prompts
+                 (for Code Summarization)
+                               Toufique Ahmed                                                                       Kunal Suresh Pai
+                       University of California, Davis                                                        University of California, Davis
+                          Davis, California, USA                                                                 Davis, California, USA
+                          tfahmed@ucdavis.edu                                                                     kunpai@ucdavis.edu
+
+                           Premkumar Devanbu                                                                            Earl T. Barr
+                       University of California, Davis                                                University College London & Google Brain
+                          Davis, California, USA                                                                     London, UK
+                         ptdevanbu@ucdavis.edu                                                                    e.barr@ucl.ac.uk
+
+ABSTRACT                                                                                       have also found that including semantic facts yields a substantial
+Large Language Models (LLM) are a new class of computation                                     enhancement in LLMs’ line completion performance.
+engines, “programmed” via prompt engineering. Researchers are
+still learning how to best “program” these LLMs to help developers.                            KEYWORDS
+We start with the intuition that developers tend to consciously and                            LLM, Code Summarization, Program Analysis, Prompt Engineering
+unconsciously collect semantics facts, from the code, while working.                           ACM Reference Format:
+Mostly these are shallow, simple facts arising from a quick read. For                          Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr.
+a function, such facts might include parameter and local variable                              2024. Automatic Semantic Augmentation of Language Model Prompts (for
+names, return expressions, simple pre- and post-conditions, and                                Code Summarization). In 2024 IEEE/ACM 46th International Conference on
+basic control and data flow, etc.                                                              Software Engineering (ICSE ’24), April 14–20, 2024, Lisbon, Portugal. ACM,
+    One might assume that the powerful multi-layer architecture                                New York, NY, USA, 13 pages. https://doi.org/10.1145/3597503.3639183
+of transformer-style LLMs makes them implicitly capable of doing
+this simple level of “code analysis” and extracting such information,                          1    INTRODUCTION
+while processing code: but are they, really? If they aren’t, could                             Large language models (LLMs) often outperform smaller, custom-
+explicitly adding this information help? Our goal here is to investi-                          trained models on tasks, especially when prompted with a "few-
+gate this question, using the code summarization task and evaluate                             shot" set of exemplars. LLMs are pre-trained on a self-supervised
+whether automatically augmenting an LLM’s prompt with semantic                                 (masking or de-noising) task, using vast amounts of data, and ex-
+facts explicitly, actually helps.                                                              hibit surprising emergent behaviour as training data and parameter
+    Prior work shows that LLM performance on code summarization                                counts are scaled up. They excel at many tasks with few-shot (or
+benefits from embedding a few code & summary exemplars in the                                  even zero-shot) learning: with just a few exemplar input-output
+prompt, before the code to be summarized. While summarization                                  pairs inserted first in the prompt, the models can generate very
+performance has steadily progressed since the early days, there                                good outputs for a given input! Few-shot learning works so well
+is still room for improvement: LLM performance on code summa-                                  with LLMs that it is unclear whether sufficient task-specific data
+rization still lags its performance on natural-language tasks like                             can ever be gathered to train a customized model to rival their
+translation and text summarization.                                                            performance [3, 12]. LLMs are ushering in a new era, where prompt
+    We find that adding semantic facts to the code in the prompt                               engineering, to carefully condition the input to an LLM to tailor its
+actually does help! This approach improves performance in several                              massive, but generic capacity, to specific tasks, will become a new
+different settings suggested by prior work, including for three differ-                        style of programming, placing new demands on software engineers.
+ent Large Language Models. In most cases, we see improvements,                                    We propose Automatic Semantic Augmentation of Prompts (A𝑆𝐴𝑃),
+as measured by a range of commonly-used metrics; for the PHP lan-                              a new method for constructing prompts for software engineering
+guage in the challenging CodeSearchNet dataset, this augmentation                              tasks. The A𝑆𝐴𝑃 method rests on an analogy: an effective prompt
+actually yields performance surpassing 30 BLEU1 . In addition, we                              for an LLM, for a task, relates to the facts a developer thinks about
+1 Scores of 30-40 BLEU are considered “Good" to "Understandable" for natural language
+                                                                                               when manually performing that task. In other words, we hypothe-
+translation; see https://cloud.google.com/translate/automl/docs/evaluate.                      size that prompting an LLM with the syntactic and semantic facts a
+                                                                                               developer considers when manually performing a task will improve
+                                                                                               LLM performance on that task. To realise this hypothesis, A𝑆𝐴𝑃
+                                                                                               augments prompts with semantic facts automatically extracted
+                                                                                               from the source code using semantic code analysis.
+This work is licensed under a Creative Commons Attribution International 4.0 License.             We illustrate the A𝑆𝐴𝑃 methodology first on code summariza-
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                                  tion. This task takes code, usually a function, and summarizes it
+© 2024 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-0217-4/24/04.                                                              using natural language; such summaries can support code under-
+https://doi.org/10.1145/3597503.3639183                                                        standing to facilitate requirements traceability and maintenance.
+
+
+
+
+                                                                                        2720
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                                           Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+A𝑆𝐴𝑃 uses a few-shot prompting because its effectiveness. A𝑆𝐴𝑃                                  2.1     Few-shot Learning in Software Engineering
+finds relevant shots using BM25, the current state of the art in find-                          LLMs are now widely used in Software Engineering for many dif-
+ing few-shot exemplars that are “semantically close” to the target                              ferent problems: code generation [14, 34], testing [38, 42], mutation
+function [48], in our case, the function-to-summarize, by querying                              generation [10], program repair [18, 35, 36, 48], incident manage-
+the LLM’s training data. When instantiating A𝑆𝐴𝑃 for the summa-                                 ment [6], and even code summarization [3]. Clearly, tools built on
+rization task, we equipped it to extract the following semantic facts:                          top of pre-trained LLM are advancing the state of the art. Beyond
+the repository name, the fully qualified name of the name of the                                their raw performance at many tasks, two key factors govern the
+target function, its signature, the AST tags of its identifiers, and its                        growing dominance of pretrained LLM, both centered on cost. First,
+data flow graph (Section 3.4). These facts are presented to the LLM                             training one’s own large model, or even extensively fine-tuning a
+as separate, labelled, fields2 . The model is then provided with the                            pre-trained LLM, requires expensive hardware. Second, generat-
+function-to-summarize, exemplars (along with facts extracted from                               ing a supervised dataset for many important software engineering
+each), and asked to emit a summary. We confirm our hypothesis                                   tasks is difficult and time-consuming, often beyond the sources of
+that augmenting prompts with semantic facts can improve LLM                                     all but the largest organizations.
+performance on the code completion task. We evaluated A𝑆𝐴𝑃’s                                        In contrast to overall LLM trends, there are some smaller models,
+benefits on the high-quality (carefully de-duplicated, multi-project)                           specialized for code, that have gained popularity, e.g., Polycoder [67]
+CodeSearchNet [32] dataset.                                                                     or Codegen [49]. Despite these counterpoints, we focus on LLM
+   In summary, we find that in all cases, our approach of automatic                             rather than small models, because, while small models can be fine-
+semantic augmentation improves average performance on several                                   tuned, they don’t do very well at few-shotting, and thus are not
+commonly-used metrics. For almost all languages,the average im-                                 helpful when only small amounts of data are available. The few-shot
+provement comfortably surpasses the 2-BLEU threshold noted by                                   approach is key because it brings into reach many problems, like
+Roy et al. [57], below which BLEU results are unreliable predic-                                code summarization, for which collecting sufficient, high-quality,
+tors of human preference. For Go, gains are still significant, and                              project- or domain-specific training data to train even small models
+just slightly less than 2; for PHP, we see an improvement of 4.6                                from scratch is challenging.
+BLEU, reaching a SOTA high-point of 32.73 on the well-curated,                                      With few-shot learning, the actual model parameters remain
+de-duplicated, CodeSearchNet dataset.                                                           unchanged. Instead, we present a few problem instances along
+   Our principal contributions follow:                                                          with solutions (i.e., problem-solution pairs as “the exemplars") to
+     • The A𝑆𝐴𝑃 approach for software engineering tasks using                                   a model and ask it to complete the answer for the last instance
+       facts derived from code.                                                                 ("the test input"), for which we do not provide a solution. Thus
+     • We evaluate A𝑆𝐴𝑃 on the code summarization task on the                                   with each 𝑒𝑥𝑒𝑚𝑝𝑙𝑎𝑟 consisting of an ⟨input, output⟩ pair, and just a
+       code-davinci-002, text-davinci-003. and GPT-3.5-turbo mod-                               test-input input𝑡 (without the corresponding, desired output𝑡 ), the
+       els against a few-shot prompting baseline built using vanilla                            final prompt looks like:
+       BM25 (Section 4.1).
+     • We find that the A𝑆𝐴𝑃 approach statistically significantly                                     prompt ← exemplar 1 || exemplar 2 || exemplar 3 || 𝑖𝑛𝑝𝑢𝑡𝑡
+       improves LLM performance on the code summarization task.
+       In almost all cases, we observe statistically significant im-
+       provements of almost, or in excess of, 2 BLEU; and, for PHP,                             With this prompt, the LLM generates 𝑜𝑢𝑡𝑝𝑢𝑡𝑡 , mimicking the input-
+       we break 30 BLEU for the first time (to our knowledge) on                                output behavior illustrated by the exemplars in the prompt. In
+       this challenging dataset.                                                                practice, this approach performs quite well.
+     • We find that A𝑆𝐴𝑃 also leads to improved performance on                                     When it works, few-shotting allows us to automate even purely
+       the code-completion task.                                                                manual problems, since generating a few exemplar samples is rela-
+                                                                                                tively easy. In this paper, we experiment with the code-davinci-002
+  All the data, evaluation scripts, and code needed to reproduce this
+                                                                                                model. We discuss models in more detail in Section 3.2.
+work will be available at https://doi.org/10.5281/zenodo.7779196,
+and can be reproduced on any available language models. Our
+experiments suggest that A𝑆𝐴𝑃 works well with any language                                      2.2     Prompting LLMs to Reason
+model powerful enough to leverage few-shot prompting.                                           Human Reasoning involves using evidence, logical thinking, and
+                                                                                                arguments to make judgments or arrive at conclusions [31, 51].
+2     BACKGROUND & MOTIVATION                                                                   Natural language processing (NLP) researchers have developed
+Large Language Models (LLM) are a transformative technology:                                    approaches to reason about specific scenarios and improve per-
+they are essentially a new kind of computation engine, requiring a                              formance. Approaches like "Chain of thought" [66] and "step-by-
+new form of programming, called prompt engineering. We first con-                               step" [40] require generating intermediate results (“lemmas") and
+textualise A𝑆𝐴𝑃, our contribution to prompt engineering. Finally,                               utilizing them in the task at hand. Such approaches appear to work
+we discuss code summarization as a sample problem to demonstrate                                on simpler problems like school math problems even without pro-
+A𝑆𝐴𝑃’s effectiveness.                                                                           viding them with “lemmas" , because, for these problems, models
+                                                                                                are powerful enough to generate their own “lemmas"; in some cases
+2 A full example is rather long, and is included in the repository due to paper length          just adding “let’s think step by step" seems sufficient (Kojima et
+limitations.                                                                                    al. [40]).
+
+
+
+
+                                                                                         2721
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                          ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+    We tried an enhanced version of the “step-by-step” prompt, with
+few-shots, on code summarization. We found that the model under-
+performed (getting about 20.25 BLEU), lower even than our vanilla
+BM25 baseline (24.97 BLEU). With zero-shot Kojima-style “step by
+step” prompt, the models perform even worse. To induce the model
+to generate steps, and finally a summary, we framed the problem as
+chain of thought, and included few-shot samples containing both
+intermediate steps (“lemmas") and final comments. The reasoning
+is that, on the (usually challenging) code-related tasks, models need
+to explicitly be given intermediate “lemmas", derived from code, to
+be able to reason effectively about most software engineering tasks,
+which tend to be more complex and varied than school maths.
+    Fortunately, mature tools for code analysis are available. We can
+readily derive “lemmas", viz., analysis products, using code analysis            Figure 1: Different steps of A𝑆𝐴𝑃. (1) Input code and (2)
+tools, rather than expecting the models to (perhaps implicitly) de-              Pool of samples are given the BM25 engine, which matches
+rive them, during on-task performance. We directly embed analysis                the given input code against the pool and (3) retrieves best-
+products into the prompt we give the language model, and eval-                   matching samples, viz. 3 input+output pairs. These examples
+uate the benefits of such analysis products. The information we                  are processed by A𝑆𝐴𝑃 to produce a prompt (4) including
+derive and add are based on our own intuitions about the kinds of                3 exemplars. Each exemplar includes a function definition,
+“lemmas" that developers consciously or unconsciously consider as                the results of analyzing that definition, and its associated
+they seek to understand and summarize code.                                      comment; the input code is finally appended, along with its
+    We find that providing such information improves LLM per-                    analysis product. Exemplar details are in Figure 2. The final
+formance. We remind the reader that most work involving large                    prompt is sent via API call (5) to the GPT-3.x model; the re-
+language models (LLMs) usually uses some form of prompt engi-                    turned output, e.g., summary (6) is returned by GPT-3x.
+neering to boost performance. In this paper, we show that the A𝑆𝐴𝑃
+                                                                                 However, Large Language Models (LLMs) now typically outper-
+approach, which augments prompts with code analysis products,
+                                                                                 form smaller pre-trained models on many problems. Ahmed & De-
+improves on previous prompting approaches.
+                                                                                 vanbu [3] report that LLMs can outperform pre-trained language
+                                                                                 models with a simple prompt consisting of just a few samples al-
+                                                                                 ready in the same project; this work illustrates the promise of careful
+                                                                                 construction of prompt structures (c.f. “prompt engineering”). We
+2.3    Summarizing Code                                                          present A𝑆𝐴𝑃 here as another general principle of prompt engi-
+                                                                                 neering. We emphasize, again, that progress in code summarization
+Well-documented code is much easier to maintain; thus, expe-
+                                                                                 (and other applications of AI to SE, such as code patching, defect
+rienced developers usually add, e.g., function summary headers.
+                                                                                 detection, testing etc) has been incremental, as in the field of NMT,
+However, summary comments may become outdated, as projects
+                                                                                 where practical, usable translation systems took decades to emerge.
+evolve [11, 22]. Automated code summarization is thus a well-
+                                                                                 Thus incremental advances are still needed, and helpful, and we
+motivated task, which has attracted a great deal of attention; and
+                                                                                 contribute our work to this long-term enterprise.
+considerable progress (albeit incremental, over many years) has
+been made. Initially, template-based approaches were popular [17,
+26, 27, 56, 61]; however, creating a list of templates with good cover-
+                                                                                 3     DATASET & METHODOLOGY
+age is very challenging. Later, researchers focused on the retrieval-            We now discuss our dataset, models, and methodology.
+based (IR) approach [17, 26, 27, 56], where existing code (with a
+summary) is retrieved based on similarity-based metrics. However,                3.1    Dataset
+this promising approach only worked if a similar code-comment                    Our experiments use the widely used CodeSearchNet [32] dataset;
+pair could be found in the available pool.                                       CodeSearchNet was constructed by extracting the first paragraph of
+   Meanwhile, the similarity of code summarization to Neural Ma-                 the function prefix documentation, subject to some restrictions (e.g.
+chine Translation (NMT), (one can think of generating an English                 length). It is a carefully de-duplicated, multi-project dataset, which
+summary of code as producing a representation of “the same mean-                 allows (more demanding) cross-project testing. De-duplication is
+ing in a different language”) led to research that adapted Neural Ma-            key: Code duplication in machine learning models can deceptively
+chine Translation (NMT) to code summarization. Numerous studies                  inflate performance metrics a lot, when compared to de-duplicated
+have been conducted in this area [1, 30, 33, 41]. Some have combined             datasets [7, 46, 59].
+previous approaches, such as template-based and retrieval-based                     It is part of the CodeXGLUE [47] benchmark, which comprises
+approaches, using neural models [69], and have reported promising                14 datasets for 10 software engineering tasks. Many models have
+results. Such neural methods for NLP have vastly improved, due to                been evaluated on this dataset. CodeSearchNet contains thousands
+the Transformer architectural style.                                             of samples from six different programming languages (i.e., Java,
+   Until recently, pre-trained language models such as CodeBERT,                 Python, JavaScript, Ruby, Go, PHP). However, we did not use the
+CodeT5, and CodeT5+ performed best for code summarization.                       entire test dataset, which would have been prohibitively expensive
+
+
+
+
+                                                                          2722
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                              Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+                                                                                  modifications to BERT. Using only MLM training, it outperforms
+                                                                                  BERT. CodeBERT [21] and GraphCodeBERT [25] introduced these
+                                                                                  ideas to Software Engineering. Although CodeBERT and Graph-
+                                                                                  CodeBERT are encoder-only models, they can be applied to code
+                                                                                  summarization after fine-tuning, cascaded to a decoder trained dur-
+                                                                                  ing fine-tuning. Ahmed & Devanbu report that polyglot models,
+                                                                                  which are fine-tuned with multilingual data, outperform their mono-
+                                                                                  lingual counterparts [4]. They also report that identifiers play a
+                                                                                  critical role in code summarization tasks. PLBART [2], CodeT5 [64],
+                                                                                  and CodeT5+ [63] also include pre-trained decoders and are reported
+                                                                                  to work well for code summarization tasks. More recently, very
+                                                                                  large scale (decoder-only) auto-regressive LLMs (with 175B+ param-
+                                                                                  eters) have been found to be successful at code summarization with
+                                                                                  few-shot learning, without any explicit training. In the next section,
+Figure 2: Components of an A𝑆𝐴𝑃 Exemplar. Source Code                             we will briefly introduce the three OpenAI models we considered
+and Output Comment are extracted from the retrieved pool                          for our experiments.
+sample. The Repo info is derived from the source code using
+GitHub; the Dataflow Info and tagged Identifiers with labels                         Decoder-only model. In generative pre-training, the task is to
+is obtained from an analysis using Treesitter.                                    auto-regressively predict the next token given the previous tokens
+                Language    #of Training Samples    #of Test Samples
+                                                                                  moving from earlier to later. This unidirectional auto-regressive
+                                                                                  training prevents the model from pooling information from future
+               Java                       164,923              1000
+                                                                                  tokens. The newer generative models such as GPT [52], GPT-2 [53]
+               Python                     251,820              1000
+               Ruby                        24,927              1000
+                                                                                  and GPT-3 [12], are also trained in this way, but they have more
+               JavaScript                  58,025              1000               parameters, and are trained on much larger datasets. Current large
+               Go                         167,288              1000               language models, such as GPT-3, have around (or more than) 175B
+               PHP                        241,241              1000               parameters. These powerful models perform so well, with few-shot
+                                                                                  prompting, that interest on task-specific parameter-adjustment via
+         Table 1: Number of training and test samples.                            fine-tuning has reduced.
+and slow using ours models API endpoints; instead, we selected                       Codex is a GPT-3 variant, intensively trained on code and natural
+1000 samples3 uniformly at random from each language. Since the                   language comments. The Codex family consists of two versions:
+original dataset is cross-project and we sampled it uniformly, our                Codex-Cushman, which is smaller, with 12B parameters, and Codex-
+subsample includes cross-project data. In addition, we subsetted                  Davinci, the largest, with 175B parameters. The Codex model is
+this dataset for same-project few-shotting, following Ahmed and                   widely used, for various tasks. Our experiments mostly target the
+Devanbu [3]: we sort same-project data by creation date (using git                Code-Davinci model, particularly Code-Davinci-002, which excels
+blame). Now, we use the temporal order to make sure that only                     at translating natural language to code [14] and supports code
+temporally earlier samples are used the few-shot exemplars; this is               completion as well as code insertion4 . Some new variants, Text-
+realistic, since only older, already existing data is available for use.          Davinci-003 & GPT-3.5-turbo, are also available; unlike the Codex
+We will delve deeper into this same-project dataset in Section 4.3.               variants, these models understand and generate both natural lan-
+   As mentioned earlier, we don’t use any parameter-changing                      guage and code. Although optimized for chat, GPT-3.5-turbo also
+training on the model; we just insert a few exemplars selected from               performs well on traditional completion tasks. Text-Davinci-003
+the training subset into the few-shot prompt. Table 1 lists the count             is a completion model like Code-Davinci-002. We study how our
+of training & test samples used in our experiments.                               prompt enhancement works using the Text-Davinci-003 & GPT-3.5-
+                                                                                  turbo models.
+3.2     The Models
+In earlier work, transformer-based pre-trained language models                    3.3     Retrieving Exemplars from Training Data
+offered significant gains, in both NLP and software engineering.                  As noted earlier, few-shot learning works quite well, when used
+Pre-trained language models can be divided into three categories:                 with very large models. We prompt the model with a small number
+encoder-only, encoder-decoder, and decoder-only models. While                     of ⟨problem, solution⟩ exemplars, and ask it to solve a new prob-
+encoder-decoder models have initially shown success on many                       lem. However, carefully selecting exemplars for few-shot learning
+tasks, decoder-only LLMs are now more scaleable and effective for                 is helpful. Nashid et al. discovered that retrieval-based exemplar
+numerous tasks.                                                                   selection is helpful for problems such as assertion generation and
+   Encoder-Decoder model. BERT is one of the earliest pre-trained                 program repair [48]. Following their recommendation, we use the
+language models [15]; it was pre-trained on two self-supervised                   BM25 IR algorithm to select relevant few-shot exemplars from the
+tasks: Masked Language Modeling (MLM) and Next Sentence Pre-                      training set. BM25 [55] is a frequency-based retrieval method which
+diction (NSP). Later, RoBERTa [45] was introduced with some minor                 improves upon TF-IDF [54]. We noted a substantial improvement
+
+3 Please see experimental power discussion in Section 7.                          4 https://openai.com/
+
+
+
+
+                                                                           2723
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                             ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+over the same fixed exemplars in few-shot learning, as detailed in                case of long prompts, we only kept the first 30 lines of the DFG in
+Section 4.1. Nashid et al. compare several retrieval methods, and                 the prompt. In addition to identifiers, the DFG also provides a better
+found BM25 works best; we therefore use it, as well.                              understanding of the importance of identifiers in the function.
+
+3.4    Automatic Semantic Prompt Augmentation                                         Use Case & Completion Pipeline. A𝑆𝐴𝑃 has 3 components: an
+This section presents the three semantic facts we selected to en-                 LLM, a pool of available exemplars (labeled input-output pairs, e.g.,
+hance A𝑆𝐴𝑃’s prompts and the A𝑆𝐴𝑃 pipeline (See Figure 2). The                    code with comments), and a static analysis tool for deriving facts
+choice of these facts comes from applying our central hypothesis,                 from code (See Figures 1 and 2).
+viz. that augmenting prompts with what developers think about                         A configuration file specifies these components. Once configured,
+when working on a task, to the code summarization task. A𝑆𝐴𝑃                      a developer invokes A𝑆𝐴𝑃 on a function body 𝐶𝑖𝑛 (Figure 1), for
+is not tied to any specific semantic facts or static analysis; it can             which an output (e.g.,, code summary) is desired. A𝑆𝐴𝑃 uses 𝐶𝑖𝑛
+easily incorporate others, as discussed later.                                    as a BM25 query over the its sample pool to get a result set of
+                                                                                  exemplar candidates ec 1, ec 2, . . ., where each ec𝑖 is a pair of the form
+   Repository Name & Path. Augmenting prompts with domain-                        ⟨input𝑖 , output𝑖 ⟩; in our context, input𝑖 is the function definition
+specific information can improve LLM performance on various                       and output𝑖 is the function header comment. BM25 chooses the
+tasks. Prior work suggests that augmenting prompts with code                      𝑖𝑛𝑝𝑢𝑡𝑖 s that match best with the given 𝐶𝑖𝑛 . A𝑆𝐴𝑃 then applies
+from the same repository improves performance in code generation                  program analyses to both the input 𝐶𝑖𝑛 and the several exemplar
+tasks [60]. We argue that basic repository-level meta-information,                inputs 𝑖𝑛𝑝𝑢𝑡𝑖 s, yielding analysis products 𝑎𝑝𝑖𝑛 and several 𝑎𝑝𝑖 s.
+such as the repository name and the complete path to the repository,                  Each exemplar 𝑒𝑖 (Figure 2) is the triple: ⟨input𝑖 , ap𝑖 , output𝑖 ⟩,
+provides additional context. For example, repository names like                   where each triple illustrates, for the LLM, how input source code
+“tony19/logback−android”, “apache/parquet−mr”, and “ngageoint/                    𝑖𝑛𝑝𝑢𝑡𝑖 relates, via the analysis product 𝑎𝑝𝑖 , to the output 𝑜𝑢𝑡𝑝𝑢𝑡𝑖 .
+geo−package−android” all connect a function to a specific domain                  The final prompt is then “𝑒 1 || 𝑒 2 || 𝑒 3 || 𝐶𝑖𝑛 || ap𝑖𝑛 ”. A𝑆𝐴𝑃 queries
+(e.g., android, apache, geo-location), which can enhance the un-                  an LLM with that prompt, and returns the completion (e.g., natural
+derstanding of the target code to be summarized. Figure 2 (yellow                 language summary).
+part) presents an example of how we enhance the prompt with                           By default, A𝑆𝐴𝑃 is configured with analyses to extract reposi-
+repository-level information. Similar to the repository name, the                 tory info, tag identifiers, construct DFGs. These analyses are inde-
+path to the function can also contribute to the model.                            pendent and are their outputs are separately labeled in the prompt.
+                                                                                  For example, Figure 2 shows the output of the DFG analysis in
+   Tagged Identifiers. Prior work suggests that language models
+                                                                                  A𝑆𝐴𝑃’s constructed prompt. These few shot examples, are aug-
+find more value in identifiers, rather than code structure, when
+                                                                                  mented and inserted into the prompt: the code, repository info,
+generating code summaries [4]. However, identifiers play different
+                                                                                  tagged identifiers, the DFG, and the desired (Gold) summary are all
+roles in code. Local variables, function names, parameters, global
+                                                                                  included in each few-shot. The target example includes just analysis
+variables etc., play different parts in the functioning of the method in
+                                                                                  product, and the LLM is prompted to produce the desired output.
+which they occur; a developer reading the code is certainly aware of
+                                                                                      In prior work using “chain of thought” [66] or “step by step” [40]
+the roles of identifier, simply by identifying the scope and use. Thus,
+                                                                                  reasoning, no such information is given to the model; instead, the
+augmenting prompts with the specific roles of identifiers could help
+                                                                                  prompt simply helps it organize its reasoning about the sample into
+the model better “understand” the function. We use tree-sitter to
+                                                                                  a sequence of instructions. Here, rather than having the model do its
+traverse the function’s AST and gather identifiers, along with their
+                                                                                  own reasoning, we shape its reasoning externally by using simple
+roles. Figure 2 (blue part) presents a sample example showing how
+                                                                                  program analyses, since we can get very precise information from
+we enhanced the prompt of the function with tagged identifiers.
+                                                                                  very efficient analysis tools. Each few-shot example includes source
+Although the model has access to the token sequence of the code,
+                                                                                  code, derived information, and conclusion (summary), thus provid-
+and thus also all the identifiers, them to the model in a tagged
+                                                                                  ing exemplary "chains of thought" for the model to implicitly use
+form might a) save the model some compute effort, and b) better
+                                                                                  when generating the desired target summary. Figure 1 presents the
+condition the model’s output.
+                                                                                  overall pipeline of our approach that we apply to each sample. The
+   Data Flow Graph (DFG). Guo et al. introduced the Graphcode-                    BM25 engine matches input code against a sample pool, A𝑆𝐴𝑃 pro-
+BERT model, which uses data flow graphs (DFG) instead of syntactic-               cesses resulting examples to create a prompt, and the final prompt
+level structures like abstract syntax trees (ASTs) in the pre-training            is sent to the GPT-3.x model via API, yielding a summary as output.
+stage [25]. GraphcodeBERT outperformed CodeBERT [21] on var-                          Next, we describe how we evaluate this pipeline.
+ious software engineering (SE) tasks. We incorporate this DFG
+information into the few-shot exemplars; we conjecture that this                  3.5    Metrics
+provides the model a better semantic understanding of each exem-                  BLEU [50] is the most widely-used, similarity-based measure for
+plar, and the target example. Figure 2 (orange) presents a sample                 code summarization [57] and commit log generation [16]. BLEU
+showing the Data Flow Graph (DFG) we used for our experiments.                    counts the fraction of 𝑛-grams (usually for 𝑛 ∈ [1..4]), that occur
+Each line contains an identifier with its index and the index of                  in both generated candidates and one or more reference transla-
+the identifiers to which that particular data flows. Unlike repo and              tions; the geometric mean of these fractions is the BLEU, usually
+tagged identifiers, the data flow graph can be very long, making it               normalized to the range 0-100. At sentence granularity, BLEU tends
+inconvenient to add the complete data flow to the prompt. In the                  to overly penalize candidate translations when few (or none) of the
+
+
+
+
+                                                                           2724
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                             Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+longer n-grams co-occur, so "Sentence BLEU" has been criticized                   window, or the model mysteriously generated an empty string. In
+for correlating poorly with human judgment. Various smoothing                     cases where the prompt as constructed with 3 samples was too
+techniques [13, 23, 44] have been used, to reduce Sentence BLEU’s                 long, we automatically reduce the number of shots. When empty
+sensitivity to sparse 𝑛-gram matches, and better align it with hu-                summaries were emitted, we resolved this by increasing the number
+man quality assessment. We report data on two variants: BLEU-CN,                  of shots. This simple, repeatable, modest-overhead procedure can
+which uses a kind of Laplacian smoothing [2, 3, 8, 21, 33, 47, 64] and            be incorporated into automated summarization tools.
+BLEU-DC, which uses newer smoothing methods [29, 65]. Other
+proposed metrics such as BERTScore [28, 70], BLEURT [58], NU-                     4     RESULTS
+BIA [37], are computationally expensive, not widely used and thus                 We evaluate the benefits of A𝑆𝐴𝑃-enhanced prompts, for code sum-
+not readily comparable with prior work for benchmarking.                          marization, in different settings and using various metrics. We find
+   Given all these options, metrics for code summarization and, in-               evidence of overall performance gain, in studies on six languages.
+dependently, for commit-log generation [16], have been debated [24,               However, for other detailed analyses, we focused primarily on Java
+28, 57]. In this paper, we follow prior work and primarily use BLEU-              and Python, because of OpenAI API rate limits.
+CN; this facilitates the comparison of our results with prior work.
+The CodeXGLUE benchmark recommends BLEU-CN, and most                              4.1    Encoder-decoders & Few-shot Learning
+newer models [3, 21, 64] use this metric. We, however, have not
+                                                                                  Our baseline results on CodeSearchNet [47], using IR-based few-
+neglected other measures. Besides BLEU-CN, and BLEU-DC, we also
+                                                                                  shotting, come first. Prior work reports that IR methods can find
+report results using ROUGE-L [43] and METEOR [9].
+                                                                                  better samples for few-shot prompting, for tasks such as program
+   In all cases, A𝑆𝐴𝑃 achieves significant overall improvements: we
+                                                                                  repair [48] and code generation [34]. In Table 2, we observe that
+observe gains greater than 2.0 BLEU for all programming languages
+                                                                                  this is also true for code summarization; we note improvements of
+except for Go (Table 3). We contend that gains greater than 2.0 BLEU
+                                                                                  3.00 (15.10%) and 1.12 (5.42%) in BLEU-4 score for Java and Python,
+are important for two reasons. Roy et al. [57] provide arguments,
+                                                                                  respectively, simply by using BM25 as a few-shot sample selection
+grounded on human subject study that for code summarization (our
+                                                                                  mechanism. Since BM25 was already used in prior paper (albeit for
+central task), that a gain of 2.0 or more BLEU is more likely to
+                                                                                  other tasks) [48], we consider this BM25-based few-shot learning
+correspond with human perception of improvement. Second, we
+                                                                                  for code summarization as just a baseline (not a contribution per
+argue that even smaller gains matter (especially if repeatable
+                                                                                  se) of this paper.
+and statistically significant) since incremental progress on such
+tasks accumulates, towards strong practical impact, as evidenced
+                                                                                  4.2    A𝑆𝐴𝑃 Prompt Enhancement
+by decades-long work in natural language translation.
+   In addition to code summarization, we evaluated A𝑆𝐴𝑃 ap-                       We now focus on the central result of our paper: the effect of A𝑆𝐴𝑃
+proach on the code completion task. The standard metrics used for                 prompt enhancement. Table 3 shows the component-wise and over-
+this task are exact match (did the completion match exactly) and edit             all improvements achieved after combining all the prompting com-
+similarity (how close is the completion to the expected sequence).                ponents for all six programming languages. BLEU improvements
+Here, too, A𝑆𝐴𝑃 achieves significant overall improvements.                        range from 1.84 (8.12%) to 4.58 (16.27%). In most cases, we see im-
+                                                                                  provements of over 2.0 BLEU, the required threshold for human
+3.6      Experimental Setup & Evaluation Criteria                                 perception noted by Roy et al. [57].
+                                                                                      We also noticed that all three components (i.e., Repository Infor-
+Our primary model is OpenAI’s code-davinci-002. We use the beta
+                                                                                  mation., DFG Data Flow Graph, Identifiers) help the model achieve
+version, via its web service API. To balance computational con-
+                                                                                  better performance in all six languages, as we combined these
+straints like rate limits and our desire for robust estimates of perfor-
+                                                                                  components individually with BM25. However, for Ruby, the best
+mance, we chose to use 1000 samples5 per experimental treatment
+                                                                                  performing combination includes just the Repo. information. In
+(one treatment for each language, each few-shot selection approach,
+                                                                                  most cases, the Repo. helps a lot, relative to other components.
+with A𝑆𝐴𝑃, without A𝑆𝐴𝑃 etc.).
+                                                                                      To ascertain improvement significance, we used the pairwise
+    Our experiments yielded statistically significant, interpretable
+                                                                                  one-sided Wilcoxon signed-rank test, finding statistical significance
+results in most cases. Each 1000-sample trial still took 5 to 8 hours,
+                                                                                  in all cases for our final prompt when compared with vanilla BM25
+varying (presumbly) with OpenAI’s load factors. We include waiting
+                                                                                  few-shot learning, even after adjusting for false discovery risk.
+periods between attempts, following OpenAI’s recommendations.
+To obtain well-defined answers from the model, we found it neces-
+                                                                                  4.3    Same Project Code Summarization
+sary to set the temperature to 0, for all our experiments. The model
+is designed to allow a window of approximately 4K tokens; this lim-               We now examine the benefits of A𝑆𝐴𝑃 in the context of some
+its the number of few-shot samples. For our experiments, we used                  earlier work on few-shot selection. Prior work has shown that
+3 shots. A𝑆𝐴𝑃 defaults to three shots because related work [3, 12]                selecting few-shots from the same projects substantially improves
+has shown, and our own experiments with A𝑆𝐴𝑃 confirmed, that                      performance [3]. To see if our prompt enhancement idea further
+more shots did not significantly improve performance. However, for                helps in project-specific code summarization, we evaluated our
+up to 2% of the randomly chosen samples in each experiment, we                    approach on the dataset from Ahmed and Devanbu [3]. Due to rate
+didn’t get good results; either the prompt didn’t fit into the model’s            limits, we reduced the number of test samples to 100 for each of
+                                                                                  the four Java and Python projects. Since we have too few samples
+5 Please see Section 7 for the rationale.                                         for a per-project test, we combined all the samples to perform the
+
+
+
+
+                                                                           2725
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                                               ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+                                                                Polyglot         Polyglot                                   Few-shot   Few-shot         Gain (%) over
+         Language     CodeBERT          GraphCodeBERT                                               CodeT5      CodeT5+
+                                                               CodeBERT       GraphcodeBERT                                 (random)   with BM25      random few-shot
+         Java               18.8               18.52             20.22             19.94             19.78       19.83       19.87        22.87           +15.10%
+         Python             17.73              17.35             18.19             18.33             19.98       18.85       20.66        21.78           +5.42%
+
+Table 2: Performance of encoder-decoder and few-shot models on Java and Python code summarization, measured using BLEU.
+
+                                                                                                                     Comparing with BM25
+                                Language       BM25     BM25+repo        BM25+id     BM25+DFG          A𝑆𝐴𝑃
+                                                                                                                  Gain (%) over BM25 p-value
+                                Java           22.87       25.23           23.39           23.13        25.41             +11.11%         <0.01
+                                Python         21.78       24.22           22.54           21.82        24.26             +11.39%         <0.01
+                                Ruby           17.21       19.67           19.19           17.55        19.62             +14.00%         <0.01
+                                JavaScript     23.27       25.11           24.21           24.04        25.36             +8.98%          <0.01
+                                Go             22.67       24.41            23.2           23.42        24.51             +8.12%          <0.01
+                                PHP            28.15       32.07            29.8           28.92        32.73             +16.27%         <0.01
+                                Overall        22.66       25.12           23.72           23.15        25.32             +11.74%         <0.01
+
+Table 3: Performance of prompt enhanced comment generation with code-davinci-002 model, measured using BLEU. p-values
+are calculated applying one-sided pair-wise Wilcoxon signed-rank test and B-H corrected.
+
+                                                                                                                      Cross-project                Same-project
+        Language     Project Name                              #of training sample     #of test sample
+                                                                                                              BM25      A𝑆𝐴𝑃 p-value       BM25      A𝑆𝐴𝑃 p-value
+                     wildfly/wildfly                                     14                    100            24.05     24.77              17.86     18.27
+                     orientechnologies/orientdb                          10                    100            25.54     27.23              19.43     20.24
+        Java
+                     ngageoint/geopackage-android                        11                    100            29.33      42.84             45.48     46.21
+                     RestComm/jain-slee                                  12                    100            17.04      19.06             17.99     19.61
+                                                                                                                                  <0.01                        <0.01
+                     apache/airflow                                      12                    100            20.39      20.37             20.36     20.72
+                     tensorflow/probability                              18                    100            21.36      21.18             20.30     20.86
+        Python
+                     h2oai/h2o-3                                         14                    100            19.50     20.72              18.75     19.81
+                     chaoss/grimoirelab-perceval                         14                    100            25.23      29.23             32.75     38.23
+Table 4: Performance of prompt enhanced comment generation with code-davinci-002 model on same project data (measured
+using BLEU) and p-values are calculated applying one-sided pair-wise Wilcoxon signed-rank test after combining the data
+from all projects.
+
+                                                                    Exact Match (EM)                                         Edit Similarity (ES)
+                  Language          # of Samples
+                                                                     A𝑆𝐴𝑃                                                     A𝑆𝐴𝑃
+                                                   Zero-shot                    Gain (%)           p-value    Zero-shot                    Gain (%)    p-value
+                                                                   (Zero-shot)                                              (Zero-shot)
+                  Java                  9292           20.75          22.12      +6.6%              <0.01       55.35          59.66        +7.79%      <0.01
+                  Python                6550           14.05          14.58      +3.77%             0.13        49.71          50.12        +0.82%      <0.01
+                  Overall              15842           17.97          19.01      +5.79%             <0.01       53.01          55.72        +5.11%      <0.01
+            Table 5: Performance of A𝑆𝐴𝑃 enhanced prompts with code-davinci-002 model on line completion task.
+
+statistical test. Note that our total sample size for the statistical                          use IR to select few-shot samples and consistently achieved better
+test exceeds the number of required samples determined through                                 results with same-project few-shot learning [3]. IR does find rel-
+the analysis mentioned in Section 7. When working with the same                                evant examples in the large samples available for Java & Python,
+project, one must split data with care, to avoid leakage from future                           and we get good results. We analyzed 16 pairs of average BLEU
+samples (where desired outputs may already exist) to past ones.                                from 8 projects, considering both cross-project and same-project
+Therefore, we sorted the samples by creation dates in this dataset.                            scenarios. Our prompt-enhanced few-shot learning outperformed
+After generating the dataset, we applied our approach to evaulate                              vanilla BM25 retrieved few-shot learning in 14 cases (87.5%). This
+the performance in same project setting. We also compared our                                  suggests that A𝑆𝐴𝑃 prompt enhancement is helpful across projects.
+results with a cross-project setup, where we retrieved samples from                            A𝑆𝐴𝑃 statistically improves performance in both cross-project and
+the complete cross-project training set, similar to the setting used                           same-project settings.
+in Section 4.2.
+   Table 4 shows the results project-based code summarization.
+Note that this is a project-specific scenario where data is not avail-
+able at all. The training data for each project is very limited. We                            4.4          Is A𝑆𝐴𝑃 Model-agnostic?
+found that, for 4 projects, cross-project few-shot learning yielded                            Our results so far pertain to the code-davinci-002 models. We
+the best performance; while, for 4 others, same-project few-shot                               also fed A𝑆𝐴𝑃-augmented prompts to the other two models, text-
+learning was most effective. We note that Ahmed & Devanbu didn’t                               davinci-003 & gpt-3.5-turbo (chat model). Our findings are in Table 6.
+                                                                                               Our prompt-enhanced few-shot learning approach improved the
+
+
+
+
+                                                                                      2726
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                               Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+      Language           Model          BM25     A𝑆𝐴𝑃     Gain     p-value                         Language     Prompt Component       BLEU-4
+                   Code-davinci-002      23.90   25.78   +7.87%     <0.01                                       ALL                     25.41
+      Java         Text-davinci-003      18.98   22.31   +17.54%    <0.01                                       -Repo.                  23.50
+                                                                                                   Java
+                   Turbo-GPT-3.5         16.68   16.96   +1.68%      0.95                                       -Id                     25.27
+                   Code-davinci-002      22.00   24.78   +12.64%    <0.01                                       -DFG                    24.86
+      Python       Text-davinci-003      16.74   18.93   +13.08%    <0.01                                       ALL                     24.26
+                   Turbo-GPT-3.5         15.01   16.38   +9.13%     <0.01                                       -Repo.                  22.80
+                   Code-davinci-002      28.42   33.52   +17.95%    <0.01                          Python
+                                                                                                                -Id                     23.93
+      PHP          Text-davinci-003      21.67   25.72   +18.69%    <0.01
+                                                                                                                -DFG                    23.31
+                   Turbo-GPT-3.5         18.48   19.99   +8.17%     <0.01
+                                                                                                          Table 7: Ablation study.
+Table 6: Performance on code summarization, measured us-
+ing BLEU. p-values are calculated applying one-sided pair-
+wise Wilcoxon signed-rank test and B-H corrected.                                   the effectiveness of incorporating semantic facts. For Python, we
+                                                                                    find statistical significance only for ES improvement, not for EM.
+performance of the gpt-3.5-turbo model by 1.68% to 9.13% and test-
+davinci-003 model by 13.08% to 18.69% on 500 samples each from                      4.6    Performance on Other Metrics
+Java, Python, PHP.
+                                                                                    In addition to BLEU-CN, we measured performance with 3 other
+   Gpt-3.5-turbo does worse than the code-davinci-002 and text-
+                                                                                    metrics; BLEU-DC, ROUGE-L and METEOR. Our results, in Table 10,
+davinci-003 models at code summarization. The Turbo version is
+                                                                                    shows average gains with A𝑆𝐴𝑃 on all three metrics. We conducted
+verbose and produces comments stylistically different from those
+                                                                                    pairwise one-sided Wilcoxon signed-rank tests and found signif-
+written by developers, and also from the few-shot exemplars in
+                                                                                    icant performance improvements with BLEU-DC and ROUGE-L
+the prompt. Careful prompt-engineering might improve the turbo
+                                                                                    for all the languages. However, we did not observe significant dif-
+model and enable it to generate more natural, brief comments;
+                                                                                    ferences with METEOR for 4 out of 6 languages, though sample
+this is left for future work. This underperformance by the chat
+                                                                                    averages do improve with A𝑆𝐴𝑃 in all 6 comparisons. It’s worth
+model is consistent with the findings by Kocon et al. [39]. Text-
+                                                                                    noting that we had only 1000 language samples (due to cost) for
+davinci-003 model showed the maximum performance increase
+                                                                                    each language, so it’s not unexpected to see some cases where we
+(albeit still outdone by code-davinci-002). Note that text-davinci-003
+                                                                                    didn’t observe significance. To evaluate the overall impact of A𝑆𝐴𝑃,
+is a completion model, like code-davinci-002. Our findings suggest
+                                                                                    we combined the dataset from all languages for code-davinci-002
+that A𝑆𝐴𝑃 is more effective with completion models than chat
+                                                                                    model (6000 samples) and performed the same test; we then get sta-
+models. We also conducted pairwise one-sided Wilcoxon signed
+                                                                                    tistical significance (p-value < 0.01) for all three metrics, suggesting
+rank tests, and the statistical significance of our findings (except
+                                                                                    that A𝑆𝐴𝑃 does provide value.
+java with gpt-3.5-turbo) suggests that A𝑆𝐴𝑃 will apply beyond just
+the original code-davinci-002 model.
+                                                                                    5     DISCUSSION AND ABLATION STUDY
+4.5     A𝑆𝐴𝑃 for Completion                                                         We now present an ablation study of A𝑆𝐴𝑃’s design and the particu-
+Our primary focus so far has been on code-summarization, in a                       lar semantic facts our instantiation of A𝑆𝐴𝑃 uses before comparing
+few-shot setting. Here, we explore if A𝑆𝐴𝑃 works on another task:                   A𝑆𝐴𝑃’s output to our vanilla BM25 baseline. The primary aim of
+code completion, in a zero-shot setting where no example is shown                   an ablation study is to gauge the contribute of each aspect of a
+or presented to the model. We assessed the value of including se-                   model to the final observed performance In our study, we removed
+mantic facts for the line completion task, where the model generates                each semantic component of the enhanced prompt and observed
+the next line given the prior line. We uniformly and randomly col-                  performance. We found that the Repo. component contributes most
+lected 9292 Java and 6550 Python samples from the CodeSearchNet                     to the model’s performance (Table 7) both for Java and Python.
+dataset to conduct our evaluation. We randomly selected a line for                  However, tagged identifier and DFG are also helpful, and the best
+each sample and tasked the model with generating that line, given                   results were obtained when we combined all three components in
+just all the preceding lines. While applying A𝑆𝐴𝑃, we append the                    the prompt.
+repository information and other semantic facts (i.e., tagged identi-               Two Illustrative Examples When manually examining results,
+fiers, DFG) before the preceding lines. Importantly, when generating                we observed that in several samples, the A𝑆𝐴𝑃 prompt contained
+tagged identifiers and DFG, we only used partial information from                   information that was crucial for the summary. Table 8 shows two
+preceding lines to avoid information leakage from later lines to the                example results that illustrate this point. In the first example, the
+target lines.                                                                       baseline model failed to generate the term "element-wise". However,
+   We used two metrics, Exact Match (EM) and Edit Similarity (ES),                  our prompted enhanced version capture this important concept,
+in line with the CodeXGLUE benchmark, to measure the model’s                        yielding a higher BLEU-4 score of 74.0 compared to the baseline
+performance. We conducted a McNemar test for EM and a pair-                         score of 39.0. Similarly, in the second example, the baseline model
+wise Wilcoxon sign-rank test to evaluate the model’s performance,                   did not recognize the function as a standalone process, leading to
+similar to what we performed for code summarization. Table 5                        a low BLEU score of 10.0. However, our proposed approach did
+summarizes our findings. We observe an overall 5.79% gain in Exact                  identify the function as a standalone process, resulting in a higher
+Match (EM) and a 5.11% gain in Edit Similarity (ES), highlighting                   BLEU score of 33.0.
+
+
+
+
+                                                                             2727
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                                   ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+                                   Example 1                                                                     Prompt Enhanced          Vanilla BM25
+                                                                                                    Language
+ def round(input_a, name: nil)                                                                                  #of shots BLEU-4       #of shots BLEU-4
+                                                                                                                                           3       22.87
+      check_allowed_types(input_a, TensorStream::Ops::FLOATING_POINT_TYPES)
+                                                                                                    Java           3       25.41           4       23.13
+      _op(:round, input_a, name: name)                                                                                                     5       23.20
+ end                                                                                                                                       3       21.78
+ Gold & model output                Comment                         BLEU                            Python         3       24.26           4       21.89
+                       Rounds the values of a tensor                                                                                       5       21.74
+ Gold                                                                NA
+                       to the nearest integer element - wise                             Table 9: Comparing with higher-shots Vanilla BM25.
+ BM25                  Round a tensor to the nearest integer          39
+                       Rounds the values of a tensor to
+                                                                                     What’s Better: More Shots or ASAP? Despite having billions of
+ A𝑆𝐴𝑃                                                                 74             parameters, LLMs have limited prompt sizes. For example, code-
+                       the nearest integer, element-wise.
+                                   Example 2                                         davinci-002 and gpt-3.5-turbo support allow prompt-lengths of just
+ public static void main(final String[] args) {                                      4k tokens. A𝑆𝐴𝑃 augmentation does consume some of the available
+     loadPropertiesFiles(args);                                                      prompt length budget! Thus we have two design options: 1) use
+     final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();              fewer, A𝑆𝐴𝑃-Augmented samples in the prompt or 2) use more
+     final MediaDriver.Context ctx = new MediaDriver.Context();                      few-shot samples sans augmentation. To investigate this, we also
+     ctx.terminationHook(barrier::signal);
+                                                                                     tried using 4 and 5 shots (instead of 3) for Java and Python with the
+     try (MediaDriver ignore = MediaDriver.launch(ctx))
+     {
+                                                                                     code-davinci-002 model. However, Table 9 shows that higher shots
+          barrier.await();                                                           using BM25 does not necessarily lead to better performance. With
+          System.out.println("Shutdown Driver...");                                  higher shots, there is a chance of introducing unrelated samples,
+     }                                                                               which can hurt the model instead of helping it.
+ }                                                                                      Only for Java did we observe better performance with both 4 and
+ Gold & model output                Comment                         BLEU             5 shots compared to our baseline model. However, our proposed
+                       Start Media Driver as a                                       technique with just 3-shots still outperforms using BM25 with 5
+ Gold                                                                NA
+                       stand - alone process .
+                                                                                     shots. It’s worth noting that the context window of the model is
+                       Main method that starts the
+ BM25                                                                 10             increasing day by day, and the upcoming GPT-4 model will allow
+                       CLR Bridge from Java .
+                       Main method for running Media
+                                                                                     us to have up to 32K tokens6 . Therefore, the length limit might
+ A𝑆𝐴𝑃                                                                 33             not be an issue in the near future. However, our study suggests
+                       Driver as a standalone process.
+Table 8: Selected examples, illustrating the effectiveness of                        that Automated Semantic Augmentation will still be a beneficial
+A𝑆𝐴𝑃 enhancement.                                                                    way to use available prompt length budget; moreover, it stands to
+                                                                                     reason that constructing more signal-rich, informative prompts will
+                                                                                     beneficial regardless of length.
+Does the Model Memorize the Path? Of the three semantic facts                        What’s New in A𝑆𝐴𝑃’s Output? We add a pro forma analysis of
+A𝑆𝐴𝑃 adds to a prompt, repo. information impacts the model’s                         a few hand-picked examples, to be consistent with peer-review-
+performance most. This may be due to the fact that Code-Davinci-                     required community rituals; however, these analyses are highly
+002 had memorized the specific file paths in our data during pre-                    anecdotal must be interpreted cautiously. We manually examine
+training; when we provide the path to the function, perhaps the                      several samples to discuss our results in greater detail; specifically,
+model just recalls memorized information? To investigate this ques-                  to answer three questions: to specify 1) the new types of informa-
+tion, we change the path representation: we took the repository                      tion A𝑆𝐴𝑃 presents to the LLM and 2) how A𝑆𝐴𝑃’s summaries
+name and path, split the tokens at "/", and presented the model with                 differ from those created by existing techniques, and 3) to analyze
+a list of tokens. The main idea behind this approach is to diffuse the               the errors that A𝑆𝐴𝑃 introduces. Table 11 presents some samples
+original representation, and present the model with something not                    where, for the first three, A𝑆𝐴𝑃 performed very well compared to
+encountered during pre-training. If the model isn’t literally memo-                  our retrieval-based baselines, and for the second three, the baseline
+rizing, its performance should not be impacted. We observed that                     performed better than A𝑆𝐴𝑃. While we discuss our findings in the
+the differences between both versions were very small. For Java,                     context of the provided samples, our observations generalise to
+we gained 0.24 BLEU but, for Python, we lost 0.04 with tokenized                     other samples.
+paths. This suggests a lower risk that the model memorized the                       The new types of information A𝑆𝐴𝑃 presents to the LLM: As dis-
+path to the function.                                                                cussed in the paper, our primary contribution involves augmenting
+Is the Identifier Tag Necessary? In this paper, we assign roles to                   retrieved samples (retrieved using BM25, as per Nashid et al. [48])
+the identifiers and tag them as Function Name, Parameters, Identifier                with semantic facts, resulting in improved performance compared
+etc. in the prompt (See Figure 2). Does this explicit tagging actually               to the base retrieval approach. We add semantic facts related to
+help performance? To investigate this question, we compare the                       repository details, identifiers, and data flow graphs to both retrieved
+model’s performance when provided with a plain, “tag-free” list of                   samples and input code. As anticipated, the added semantic facts
+identifiers. We observed that the tagged identifiers lead to better                  transfer into, and enhance, the model output.
+performance for both Java and Python than a simple tag-free list of                     In the first sample, the baseline retrieval-only method fails to
+identifiers. Our performance metric BLEU increased by 0.41 and 1.22                  capture the term “gradient” entirely. However, by incorporating
+for Java and Python, respectively, suggesting that explicit semantic
+information does indeed contribute to better model performance.                      6 https://platform.openai.com/docs/models/gpt-4
+
+
+
+
+                                                                              2728
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                                                         Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+                              BLEU-DC                        ROUGE-L                       METEOR
+           Language
+                   BM25 ASAP Gain (%) p-value BM25 ASAP Gain (%) p-value BM25 ASAP Gain (%) p-value
+        Java       14.09 15.94 +13.13%     <0.01   36.85 38.41 +4.23%   <0.01   35.66 36.10 +1.23%       0.32
+        Python     12.63 14.49 +14.73%     <0.01   35.32 37.74 +6.85%   <0.01   33.05 35.63 +7.81%       <0.01
+        Ruby        9.16  11.01 +20.2%     <0.01   28.19 30.55 +8.37%   <0.01   27.65 29.20 +5.61%       0.03
+        JavaScript 14.89 16.71 +12.22%     <0.01   32.28 33.88 +4.96%   <0.01   32.08 33.02 +2.93%       0.15
+        Go         17.10 18.57 +8.60%      <0.01   41.04 42.43 +3.39%   <0.01   36.78 37.26 +1.31%       0.27
+        PHP        16.97 20.63 +21.57%     <0.01   40.48 44.90 +10.92%  <0.01   40.14 43.35 +8.00%       <0.01
+        Overall    14.14 16.23 +14.78%     <0.01   35.69 37.99 +6.44%   <0.01   34.23 35.76 +4.47%       <0.01
+Table 10: The effectiveness of ASAP in popular code summarization metrics. p-values are calculated applying one-sided
+pair-wise Wilcoxon signed-rank test and B-H corrected.
+          Change (BLEU-4)                       Reference                                            BM25                                                      A𝑆𝐴𝑃
+                            Generates a gradient - noise value from the
+                            coordinates of a three - dimensional input value    Computes a value at the point                     Generates a gradient-coherent-noise value from
+          A𝑆𝐴𝑃 (+47)
+                            and the integer coordinates of a nearby three       (x, y, z) in a 3D Perlin noise function.          the coordinates of a three-dimensional input value.
+                            - dimensional value .
+                                                                                Returns the mapped type for the current
+          A𝑆𝐴𝑃 (+26)        Replaces type with mapped type for current path .                                                     Replaces target type with mapped type if any .
+                                                                                path, or the target type if no mapping exists .
+          A𝑆𝐴𝑃 (+41)        convert a dataRootExt to a dataRoot                 Convert to a DataRoot object .                    Convert a DataRootExt to a DataRoot .
+                                                                                                                                  Computes the convex hull of the set of points
+          A𝑆𝐴𝑃 (-36)        Computes the convex hull of the set of points .     Computes the convex hull of the set of points
+                                                                                                                                  using Andrew’s monotone chain algorithm
+          A𝑆𝐴𝑃 (-35)        Getter for the Uninstall Actions .                  Returns the uninstall actions .                   Retrieves the uninstall actions for this deployable unit .
+          A𝑆𝐴𝑃 (-67)        Get a column of this matrix .                       Get a column of this matrix .                     Return the specified column of this matrix as a column vector .
+
+                                                 Table 11: Examples Showing Strength and Weakness of A𝑆𝐴𝑃.
+
+semantic facts, the model successfully recovers the term because                                          per query (both in terms of monetary cost and performance over-
+it is frequently found in both identifiers and repository names,                                          head) is quite modest. On the other hand, we observe a substantial
+influencing the model’s output. In the second example, where the                                          12% overall improvement with A𝑆𝐴𝑃 using the Codex model.
+goal is to replace rather than simply return, the baseline fails to
+generate the term “replace”, despite the clear indication in the
+function name (“replaceWithMappedTypeForPath”). The data flow
+between identifiers, provided in the semantic facts, may have helped
+the model recognize replacement operations.                                                               6 RELATED WORK
+How A𝑆𝐴𝑃’s summaries differ from those created by existing tech-                                          6.1 Code Summarization
+niques: Following the above discussion, we observed that A𝑆𝐴𝑃 is                                          Deep learning models have advanced the state-of-the-art in SE
+generating more specific information:                                                                     tasks such as code summarization. The LSTM model for code sum-
+   (1) It identifies “gradient” in sample 1.                                                              marization was first introduced by Iyer et al. [33]. Pre-trained
+   (2) It suggests changing “return” to “replace” in another sample                                       transformer-based [62] models such as CodeBERT [21], PLBART [2],
+       (sample 2).                                                                                        and CodeT5 [64] have been extensively used on the CodeXGLUE [47]
+   (3) It recommends changing "dataroot" to “datarootext” in a                                            code summarization dataset, resulting in significant improvements.
+       different sample (sample 3).                                                                       However, there is a caveat to using pre-trained language models: al-
+                                                                                                          though these models perform well, extensive fine-tuning is required,
+  These differences were observed across multiple samples when
+                                                                                                          which can be data-hungry & time-consuming. Additionally, sepa-
+comparing our baseline to A𝑆𝐴𝑃. The A𝑆𝐴𝑃 approach consistently
+                                                                                                          rate models had to be trained for different languages, increasing
+produces more specific information compared to the baseline.
+                                                                                                          training costs. To reduce the number of models required, multi-
+Analyze the errors that A𝑆𝐴𝑃 introduces: The examined examples                                            lingual fine-tuning has been suggested, to maintain or improve
+suggest that A𝑆𝐴𝑃 can become too specific, and thus not match                                             performance while reducing the number of models to one [4]. How-
+the developer-written summary. A𝑆𝐴𝑃 gets over-specific in the                                             ever, this approach did not reduce the training time or the need for
+last three examples with “Andrew’s monotone chain algorithm”                                              labeled data.
+and “deployable unit”, “column vector”. While these terms are not                                            LLMs, or large language models, are much larger than these pre-
+necessarily incorrect, BLEU-4 drops, because the developer-written                                        trained models, and are trained on much bigger datasets with a sim-
+summary was more generic.                                                                                 ple training objective — auto-regressive next-token prediction [12].
+   We also observe quantitatively that A𝑆𝐴𝑃 induced positive                                              These models perform surprisingly well on tasks, even without fine-
+changes in 44% of the samples. However, the performance also                                              tuning. Just prompting the model with different questions, while
+declined for 30% of the samples, and remained the same on the rest.                                       providing a few problem-solution exemplars, is sufficient. Few-shot
+Compared to our baseline (few-shot learning with BM25-retrieved                                           learning has already been applied to code summarization, and has
+samples), A𝑆𝐴𝑃 requires more tokens. The additional token cost,                                           been found to be beneficial [3].
+
+
+
+                                                                                                 2729
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                               ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+6.2    Other Datasets                                                           and code completion tasks; judging the value of A𝑆𝐴𝑃 in other
+There are several datasets available for code summarization, in ad-             tasks is left for future work.
+dition to CodeXGLUE [47]. TL-CodeSum [30] is a relatively smaller
+dataset, with around 87K samples, but it does include duplicates,
+                                                                                7    THREATS & LIMITATIONS
+which may result in high performance estimates that may not gen-                A major concern when working with large language models is the
+eralize. Funcom [41] is a dedicated dataset with 2.1 million Java               potential for test data exposure during training. Sadly, one can’t
+functions, but contains duplicates. We chose CodeXGLUE (derived                 directly check this since the training dataset is not accessible. The
+from CodeSearchNet) because it is a diverse, multilingual dataset               model’s lower performance with random few-shotting suggests that
+that presents a challenge for models. Even well-trained models                  memorization may not be a major factor. As we incorporate relevant
+like CodeBERT struggle on this benchmark; its performance is                    information, the model’s performance improves with the amount
+particularly poor on languages with fewer training samples.                     and quality of information. Had the model already memorized the
+   There has been a lot of work on code summarization, ranging                  summaries, it could have scored much higher, even without the
+from template matching to few-shot learning. These models use                   benefit of relevant exemplars and semantic augmentation.
+different representations and sources of information to perform                 Sample Size Analysis: We used the observed means and standard
+well in code summarization. Comparing or discussing all of these                deviations to calculate (using G*power [19, 20]) the required sample
+models is beyond the scope of this work. We note, however, that our             sizes, using commonly used values: 𝛼 of 0.01 (desired p-value) and
+numbers represent a new high-point on the widely used CodeXGlue                 a 𝛽 of 0.20 (viz, a 20% chance of NOT discovering an effect, should
+benchmark for code summarization and code-completion; we refer                  one exist). For the tests that we used (Wilcoxon Signed-rank test),
+the reader to https://microsoft.github.io/CodeXGLUE/ for a quick                we found that the needed sample size was always below the sample
+look at the leader-board. Our samples are smaller (N=1000), but the             size we used for our primary studies, viz., 1000.
+estimates, and estimated improvements, are statistically robust (See
+                                                                                User Study: We did not conduct a user study for A𝑆𝐴𝑃. Thus, the
+the sample size discussion in Section 7).
+                                                                                enhancements in metrics presented here may not necessarily trans-
+                                                                                late into improved developer performance. This aspect is left to
+6.3    LLMs in Software Engineering                                             future work.
+Although LLMs are not yet so widely used for code summarization,                   Finally: fine-tuning large LMs to use derived semantic facts may
+they are extensively used for code generation [14, 49, 67] and pro-             improve on our augmented prompting approach, but would be
+gram repair [5, 18, 35, 36]. Models like Codex aim to reduce the                costly. We will leave its consideration to future research.
+burden on developers by automatically generating code or complet-
+ing lines. Several models such as Polycoder [67] and Codegen [49]               8    CONCLUSION
+perform reasonably well, and due to their few-shot learning or                  In this paper, we explored the idea of Automatic Semantic Aug-
+prompting, they can be applied to a wide set of problems. However,              mentation of Prompts, whereby we propose to enhance few-shot
+Code-davinci-002 model generally performs well than those models                samples in LLM prompts, with tagged facts automatically derived
+and allows us to fit our augmented prompts into a bigger window.                by semantic analysis. This based on an intuition that human de-
+   Jain et al. proposed supplementing LLM operation with subse-                 velopers often scan the code to implicitly extract such facts in the
+quent processing steps based on program analysis and synthesis                  process of code comprehension leading to writing a good summary.
+techniques to improve performance in program snippet genera-                    While it is conceivable that LLMs can implicitly infer such facts for
+tion [34]. Bareiß et al. showed the effectiveness of few-shot learning          themselves, we conjectured that adding these facts in a formatted
+in code mutation, test oracle generation from natural language doc-             style to the exemplars and the target, within the prompt, will help
+umentation, and test case generation tasks [10]. CODAMOSA [42],                 the LLM organize it’s “chain of thought” as it seeks to construct a
+an LLM-based approach, conducts search-based software testing                   summary. We evaluated this idea a challenging, de-duplicated, well-
+until its coverage improvements stall, then asks the LLM to provide             curated CodeSearchNet dataset, on two tasks: code summarization
+example test cases for functions that are not covered. By using these           and code completion. Our findings indicate that Automated Seman-
+examples, CODAMOSA helps redirect search-based software test-                   tic Augmentation of Prompts is generally helpful. Our estimates
+ing to more useful areas of the search space. Jiang et al. evaluated            suggest it helps surpass state-of-the-art.
+the effectiveness of LLMs for the program repair problem [35].
+   Retrieving and appending a set of training samples has been                  Acknowledgements: We would like to acknowledge National Science
+found to be beneficial for multiple semantic parsing tasks in NLP,              Foundation under Grant NSF CCF (SHF-MEDIUM) No. 2107592 and
+even without using LLM [68]. One limitation of this approach is that            the Intelligence Advanced Research Projects Agency (IARPA) under
+performance can be constrained by the availability of similar ex-               contract W911NF20C0038 for partial support of this work. Our con-
+amples. Nashid et al. used a similar approach and gained improved               clusions do not necessarily reflect the position or the policy of our
+performance in code repair and assertion generation with the help               sponsors and no official endorsement should be inferred.
+of LLM [48]. However, none of the above works has attempted to
+automatically semantically augment the prompt. Note that it is still            REFERENCES
+too early to comment on the full capabilities of these large language            [1] Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray, and Kai-Wei Chang. 2020. A
+                                                                                     Transformer-based Approach for Source Code Summarization. In Proceedings of
+models. Our findings so far suggest that augmenting the exemplars                    the 58th Annual Meeting of the Association for Computational Linguistics. 4998–
+in the prompt with semantic hints helps on the code summarization                    5007.
+
+
+
+
+                                                                         2730
+ICSE ’24, April 14–20, 2024, Lisbon, Portugal                                                              Toufique Ahmed, Kunal Suresh Pai, Premkumar Devanbu, and Earl T. Barr
+
+
+ [2] Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray, and Kai-Wei Chang. 2021. Uni-                     IEEE, 746–757.
+     fied Pre-training for Program Understanding and Generation. In Proceedings of               [25] Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng, Duyu Tang, LIU Shujie, Long
+     the 2021 Conference of the North American Chapter of the Association for Compu-                  Zhou, Nan Duan, Alexey Svyatkovskiy, Shengyu Fu, et al. 2020. GraphCodeBERT:
+     tational Linguistics: Human Language Technologies. 2655–2668.                                    Pre-training Code Representations with Data Flow. In International Conference
+ [3] Toufique Ahmed and Premkumar Devanbu. 2022. Few-shot training LLMs for                           on Learning Representations.
+     project-specific code-summarization. In 37th IEEE/ACM International Conference              [26] Sonia Haiduc, Jairo Aponte, and Andrian Marcus. 2010. Supporting program
+     on Automated Software Engineering. 1–5.                                                          comprehension with source code summarization. In Proceedings of the 32nd
+ [4] Toufique Ahmed and Premkumar Devanbu. 2022. Multilingual training for soft-                      ACM/IEEE International Conference on Software Engineering-Volume 2. 223–226.
+     ware engineering. In Proceedings of the 44th International Conference on Software           [27] Sonia Haiduc, Jairo Aponte, Laura Moreno, and Andrian Marcus. 2010. On the
+     Engineering. 1443–1455.                                                                          use of automated text summarization techniques for summarizing source code.
+ [5] Toufique Ahmed and Premkumar Devanbu. 2023. Better patching using LLM                            In 2010 17th Working Conference on Reverse Engineering. IEEE, 35–44.
+     prompting, via Self-Consistency. In 2023 38th IEEE/ACM International Conference             [28] Sakib Haque, Zachary Eberhart, Aakash Bansal, and Collin McMillan. 2022. Se-
+     on Automated Software Engineering (ASE). IEEE, 1742–1746.                                        mantic similarity metrics for evaluating source code summarization. In Proceed-
+ [6] Toufique Ahmed, Supriyo Ghosh, Chetan Bansal, Thomas Zimmermann, Xuchao                          ings of the 30th IEEE/ACM International Conference on Program Comprehension.
+     Zhang, and Saravan Rajmohan. 2023. Recommending Root-Cause and Mitigation                        36–47.
+     Steps for Cloud Incidents using Large Language Models. ICSE (2023).                         [29] Xing Hu, Ge Li, Xin Xia, David Lo, and Zhi Jin. 2018. Deep code comment
+ [7] Miltiadis Allamanis. 2019. The adverse effects of code duplication in machine                    generation. In Proceedings of the 26th conference on program comprehension. 200–
+     learning models of code. In Proceedings of the 2019 ACM SIGPLAN International                    210.
+     Symposium on New Ideas, New Paradigms, and Reflections on Programming and                   [30] Xing Hu, Ge Li, Xin Xia, David Lo, Shuai Lu, and Zhi Jin. 2018. Summarizing
+     Software. 143–153.                                                                               source code with transferred API knowledge. In Proceedings of the 27th Interna-
+ [8] Uri Alon, Shaked Brody, Omer Levy, and Eran Yahav. 2018. code2seq: Gen-                          tional Joint Conference on Artificial Intelligence. 2269–2275.
+     erating sequences from structured representations of code. arXiv preprint                   [31] Jie Huang and Kevin Chen-Chuan Chang. 2022. Towards Reasoning in Large
+     arXiv:1808.01400 (2018).                                                                         Language Models: A Survey. arXiv preprint arXiv:2212.10403 (2022).
+ [9] Satanjeev Banerjee and Alon Lavie. 2005. METEOR: An automatic metric for                    [32] Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit, Miltiadis Allamanis, and Marc
+     MT evaluation with improved correlation with human judgments. In Proceedings                     Brockschmidt. 2019. Codesearchnet challenge: Evaluating the state of semantic
+     of the acl workshop on intrinsic and extrinsic evaluation measures for machine                   code search. arXiv preprint arXiv:1909.09436 (2019).
+     translation and/or summarization. 65–72.                                                    [33] Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and Luke Zettlemoyer. 2016.
+[10] Patrick Bareiß, Beatriz Souza, Marcelo d’Amorim, and Michael Pradel. 2022. Code                  Summarizing source code using a neural attention model. In Proceedings of the
+     generation tools (almost) for free? a study of few-shot, pre-trained language                    54th Annual Meeting of the Association for Computational Linguistics (Volume 1:
+     models on code. arXiv preprint arXiv:2206.01335 (2022).                                          Long Papers). 2073–2083.
+[11] Lionel C Briand. 2003. Software documentation: how much is enough?. In Seventh              [34] Naman Jain, Skanda Vaidyanath, Arun Iyer, Nagarajan Natarajan, Suresh
+     European Conference onSoftware Maintenance and Reengineering, 2003. Proceedings.                 Parthasarathy, Sriram Rajamani, and Rahul Sharma. 2022. Jigsaw: Large language
+     IEEE, 13–15.                                                                                     models meet program synthesis. In Proceedings, 44th ICSE. 1219–1231.
+[12] Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan,                      [35] Nan Jiang, Kevin Liu, Thibaud Lutellier, and Lin Tan. 2023. Impact of Code
+     Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda                       Language Models on Automated Program Repair. ICSE (2023).
+     Askell, et al. 2020. Language models are few-shot learners. Advances in neural              [36] Harshit Joshi, José Cambronero, Sumit Gulwani, Vu Le, Ivan Radicek, and Gust
+     information processing systems 33 (2020), 1877–1901.                                             Verbruggen. 2022. Repair is nearly generation: Multilingual program repair with
+[13] Boxing Chen and Colin Cherry. 2014. A systematic comparison of smoothing                         llms. arXiv preprint arXiv:2208.11640 (2022).
+     techniques for sentence-level BLEU. In Proceedings of the ninth workshop on                 [37] Hassan Kane, Muhammed Yusuf Kocyigit, Ali Abdalla, Pelkins Ajanoh, and
+     statistical machine translation. 362–367.                                                        Mohamed Coulibali. 2020. NUBIA: NeUral Based Interchangeability Assessor for
+[14] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira                     Text Generation. arXiv:2004.14667 [cs.CL]
+     Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman,             [38] Sungmin Kang, Juyeon Yoon, and Shin Yoo. 2023. Large Language Models are
+     et al. 2021. Evaluating large language models trained on code. arXiv preprint                    Few-shot Testers: Exploring LLM-based General Bug Reproduction. ICSE (2023).
+     arXiv:2107.03374 (2021).                                                                    [39] Jan Kocoń, Igor Cichecki, Oliwier Kaszyca, Mateusz Kochanek, Dominika Szydło,
+[15] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2018. Bert:                    Joanna Baran, Julita Bielaniewicz, Marcin Gruza, Arkadiusz Janz, Kamil Kanclerz,
+     Pre-training of deep bidirectional transformers for language understanding. arXiv                et al. 2023. ChatGPT: Jack of all trades, master of none. Information Fusion (2023),
+     preprint arXiv:1810.04805 (2018).                                                                101861.
+[16] Samanta Dey, Venkatesh Vinayakarao, Monika Gupta, and Sampath Dechu. 2022.                  [40] Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yutaka Matsuo, and Yusuke
+     Evaluating commit message generation: to BLEU or not to BLEU?. In Proceedings                    Iwasawa. 2022. Large language models are zero-shot reasoners. arXiv preprint
+     of the ACM/IEEE 44th International Conference on Software Engineering: New Ideas                 arXiv:2205.11916 (2022).
+     and Emerging Results. 31–35.                                                                [41] Alexander LeClair, Siyuan Jiang, and Collin McMillan. 2019. A neural model
+[17] Brian P Eddy, Jeffrey A Robinson, Nicholas A Kraft, and Jeffrey C Carver. 2013.                  for generating natural language summaries of program subroutines. In 2019
+     Evaluating source code summarization techniques: Replication and expansion.                      IEEE/ACM 41st International Conference on Software Engineering (ICSE). IEEE,
+     In 2013 21st International Conference on Program Comprehension (ICPC). IEEE,                     795–806.
+     13–22.                                                                                      [42] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K Lahiri, and Siddhartha Sen.
+[18] Zhiyu Fan, Xiang Gao, Abhik Roychoudhury, and Shin Hwei Tan. 2022. Auto-                         2023. CODAMOSA: Escaping Coverage Plateaus in Test Generation with Pre-
+     mated Repair of Programs from Large Language Models. ICSE.                                       trained Large Language Models. In 45th International Conference on Software
+[19] Franz Faul, Edgar Erdfelder, Axel Buchner, and Albert-Georg Lang. 2009. Sta-                     Engineering, ser. ICSE.
+     tistical power analyses using G* Power 3.1: Tests for correlation and regression            [43] Chin-Yew Lin. 2004. Rouge: A package for automatic evaluation of summaries.
+     analyses. Behavior research methods 41, 4 (2009), 1149–1160.                                     In Text summarization branches out. 74–81.
+[20] Franz Faul, Edgar Erdfelder, Albert-Georg Lang, and Axel Buchner. 2007. G*                  [44] Chin-Yew Lin and Franz Josef Och. 2004. Orange: a method for evaluating auto-
+     Power 3: A flexible statistical power analysis program for the social, behavioral,               matic evaluation metrics for machine translation. In COLING 2004: Proceedings
+     and biomedical sciences. Behavior research methods 39, 2 (2007), 175–191.                        of the 20th International Conference on Computational Linguistics. 501–507.
+[21] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng Feng, Ming Gong,                    [45] Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Mandar Joshi, Danqi Chen, Omer
+     Linjun Shou, Bing Qin, Ting Liu, Daxin Jiang, et al. 2020. CodeBERT: A Pre-                      Levy, Mike Lewis, Luke Zettlemoyer, and Veselin Stoyanov. 2019. Roberta: A
+     Trained Model for Programming and Natural Languages. In Proceedings of the                       robustly optimized bert pretraining approach. arXiv preprint arXiv:1907.11692
+     2020 Conference on Empirical Methods in Natural Language Processing: Findings.                   (2019).
+     1536–1547.                                                                                  [46] Cristina V Lopes, Petr Maj, Pedro Martins, Vaibhav Saini, Di Yang, Jakub Zitny,
+[22] Andrew Forward and Timothy C Lethbridge. 2002. The relevance of software                         Hitesh Sajnani, and Jan Vitek. 2017. DéjàVu: a map of code duplicates on GitHub.
+     documentation, tools and technologies: a survey. In Proceedings of the 2002 ACM                  Proceedings of the ACM on Programming Languages 1, OOPSLA (2017), 1–28.
+     symposium on Document engineering. 26–33.                                                   [47] Shuai Lu, Daya Guo, Shuo Ren, Junjie Huang, Alexey Svyatkovskiy, Ambro-
+[23] Jianfeng Gao and Xiaodong He. 2013. Training MRF-based phrase translation                        sio Blanco, Colin Clement, Dawn Drain, Daxin Jiang, Duyu Tang, et al. 2021.
+     models using gradient ascent. In Proceedings of the 2013 Conference of the North                 Codexglue: A machine learning benchmark dataset for code understanding and
+     American Chapter of the Association for Computational Linguistics: Human Lan-                    generation. arXiv preprint arXiv:2102.04664 (2021).
+     guage Technologies. 450–459.                                                                [48] Noor Nashid, Mifta Sintaha, and Ali Mesbah. 2023. Retrieval-Based Prompt
+[24] David Gros, Hariharan Sezhiyan, Prem Devanbu, and Zhou Yu. 2020. Code to                         Selection for Code-Related Few-Shot Learning. In Proceedings, 45th ICSE.
+     Comment ?Translation?: Data, Metrics, Baselining & Evaluation. In 2020 35th                 [49] Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou,
+     IEEE/ACM International Conference on Automated Software Engineering (ASE).                       Silvio Savarese, and Caiming Xiong. 2022. Codegen: An open large language
+
+
+
+
+                                                                                          2731
+Automatic Semantic Augmentation of Language Model Prompts
+(for Code Summarization)                                                                                                                 ICSE ’24, April 14–20, 2024, Lisbon, Portugal
+
+
+     model for code with multi-turn program synthesis. arXiv preprint arXiv:2203.13474                arXiv:2206.12839 (2022).
+     (2022).                                                                                     [61] Giriprasad Sridhara, Emily Hill, Divya Muppaneni, Lori Pollock, and K Vijay-
+[50] Kishore Papineni, Salim Roukos, Todd Ward, and Wei-Jing Zhu. 2002. Bleu: a                       Shanker. 2010. Towards automatically generating summary comments for java
+     method for automatic evaluation of machine translation. In Proceedings of the                    methods. In Proceedings of the IEEE/ACM international conference on Automated
+     40th annual meeting of the Association for Computational Linguistics. 311–318.                   software engineering. 43–52.
+[51] Shuofei Qiao, Yixin Ou, Ningyu Zhang, Xiang Chen, Yunzhi Yao, Shumin Deng,                  [62] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+     Chuanqi Tan, Fei Huang, and Huajun Chen. 2022. Reasoning with Language                           Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention is all
+     Model Prompting: A Survey. arXiv preprint arXiv:2212.09597 (2022).                               you need. In Advances in neural information processing systems. 5998–6008.
+[52] Alec Radford, Karthik Narasimhan, Tim Salimans, Ilya Sutskever, et al. 2018.                [63] Yue Wang, Hung Le, Akhilesh Deepak Gotmare, Nghi DQ Bui, Junnan Li, and
+     Improving language understanding by generative pre-training. (2018).                             Steven CH Hoi. 2023. Codet5+: Open code large language models for code
+[53] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever,                 understanding and generation. arXiv preprint arXiv:2305.07922 (2023).
+     et al. 2019. Language models are unsupervised multitask learners. OpenAI blog               [64] Yue Wang, Weishi Wang, Shafiq Joty, and Steven CH Hoi. 2021. CodeT5: Identifier-
+     1, 8 (2019), 9.                                                                                  aware Unified Pre-trained Encoder-Decoder Models for Code Understanding and
+[54] Juan Ramos et al. 2003. Using tf-idf to determine word relevance in document                     Generation. In Proceedings of the 2021 Conference on Empirical Methods in Natural
+     queries. In Proceedings of the first instructional conference on machine learning,               Language Processing. 8696–8708.
+     Vol. 242. Citeseer, 29–48.                                                                  [65] Bolin Wei, Ge Li, Xin Xia, Zhiyi Fu, and Zhi Jin. 2019. Code generation as a dual
+[55] Stephen Robertson, Hugo Zaragoza, et al. 2009. The probabilistic relevance                       task of code summarization. Advances in neural information processing systems
+     framework: BM25 and beyond. Foundations and Trends® in Information Retrieval                     32 (2019).
+     3, 4 (2009), 333–389.                                                                       [66] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Ed Chi, Quoc Le,
+[56] Paige Rodeghero, Collin McMillan, Paul W McBurney, Nigel Bosch, and Sidney                       and Denny Zhou. 2022. Chain of thought prompting elicits reasoning in large
+     D’Mello. 2014. Improving automated source code summarization via an eye-                         language models. arXiv preprint arXiv:2201.11903 (2022).
+     tracking study of programmers. In Proceedings of the 36th international conference          [67] Frank F Xu, Uri Alon, Graham Neubig, and Vincent Josua Hellendoorn. 2022. A
+     on Software engineering. 390–401.                                                                systematic evaluation of large language models of code. In Proceedings of the 6th
+[57] Devjeet Roy, Sarah Fakhoury, and Venera Arnaoudova. 2021. Reassessing auto-                      ACM SIGPLAN International Symposium on Machine Programming. 1–10.
+     matic evaluation metrics for code summarization tasks. In Proceedings of the 29th           [68] Yury Zemlyanskiy, Michiel de Jong, Joshua Ainslie, Panupong Pasupat, Peter
+     ACM Joint Meeting on European Software Engineering Conference and Symposium                      Shaw, Linlu Qiu, Sumit Sanghai, and Fei Sha. 2022. Generate-and-Retrieve:
+     on the Foundations of Software Engineering. 1105–1116.                                           use your predictions to improve retrieval for semantic parsing. arXiv preprint
+[58] Thibault Sellam, Dipanjan Das, and Ankur P Parikh. 2020. BLEURT: Learning                        arXiv:2209.14899 (2022).
+     robust metrics for text generation. arXiv preprint arXiv:2004.04696 (2020).                 [69] Jian Zhang, Xu Wang, Hongyu Zhang, Hailong Sun, and Xudong Liu. 2020.
+[59] Ensheng Shi, Yanlin Wang, Lun Du, Junjie Chen, Shi Han, Hongyu Zhang, Dong-                      Retrieval-based neural source code summarization. In Proceedings of the
+     mei Zhang, and Hongbin Sun. 2023. On the evaluation of neural code summariza-                    ACM/IEEE 42nd International Conference on Software Engineering. 1385–1397.
+     tion. In Proceedings of the 44th International Conference on Software Engineering.          [70] Tianyi Zhang, Varsha Kishore, Felix Wu, Kilian Q Weinberger, and Yoav
+     1597–1608.                                                                                       Artzi. 2019. Bertscore: Evaluating text generation with bert. arXiv preprint
+[60] Disha Shrivastava, Hugo Larochelle, and Daniel Tarlow. 2022. Repository-                         arXiv:1904.09675 (2019).
+     level prompt generation for large language models of code. arXiv preprint
+
+
+
+
+                                                                                          2732
+

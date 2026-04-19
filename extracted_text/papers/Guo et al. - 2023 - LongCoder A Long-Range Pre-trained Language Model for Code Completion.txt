@@ -1,0 +1,735 @@
+                                         LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+
+                                                                 Daya Guo * 1 Canwen Xu * 2 Nan Duan 3 Jian Yin 1 Julian McAuley 2
+
+
+                                                                  Abstract                                     An efficient model that can scale to such long input can be
+                                               In this paper, we introduce a new task for code                 suitable for code completion that contains long context.
+                                               completion that focuses on handling long code                   In this paper, we propose a new pre-trained language model,
+                                               input and propose a sparse Transformer model,
+arXiv:2306.14893v1 [cs.SE] 26 Jun 2023
+
+
+
+
+                                                                                                               named LongCoder, for long code modeling. As shown
+                                               called LongCoder, to address this task. Long-                   in Figure 1, LongCoder features a sparse attention mech-
+                                               Coder employs a sliding window mechanism for                    anism that reduces the computational complexity (to lin-
+                                               self-attention and introduces two types of glob-                ear). LongCoder exploits a sliding window mechanism for
+                                               ally accessible tokens — bridge tokens and mem-                 self-attention that attends only to local context. To allow
+                                               ory tokens — to improve performance and ef-                     LongCoder to maintain an understanding of the entire code
+                                               ficiency. Bridge tokens are inserted throughout                 file, we introduce bridge attention and global attention, with
+                                               the input sequence to aggregate local information               the corresponding two types of globally accessible tokens,
+                                               and facilitate global interaction, while memory                 bridge tokens and memory tokens. Bridge attention aggre-
+                                               tokens are included to highlight important state-               gates the information of a code snippet and allows it to be
+                                               ments that may be invoked later and need to be                  accessed from a long distance. Bridge tokens are inserted
+                                               memorized, such as package imports and defini-                  throughout the input sequence and can attend to a fixed
+                                               tions of classes, functions, or structures. We con-             length of context. Memory tokens provide global attention
+                                               duct experiments on a newly constructed dataset                 to statements that include a package import, definitions of
+                                               that contains longer code context and the publicly              classes, functions, or structures. The scope of these state-
+                                               available CodeXGLUE benchmark. Experimen-                       ments is often global and invoked later, which means they
+                                               tal results demonstrate that LongCoder achieves                 have a longer impact than other statements, making them
+                                               superior performance on code completion tasks                   worth memorizing. By referring to these statements, the
+                                               compared to previous models while maintaining                   model can exploit long context while maintaining linear
+                                               comparable efficiency in terms of computational                 complexity.
+                                               resources during inference.
+                                                                                                               To evaluate the effectiveness of LongCoder and encourage
+                                                                                                               future research on Long Code Completion, we construct a
+                                         1. Introduction                                                       new dataset called LCC by filtering code from GitHub based
+                                                                                                               on length, with the goal of focusing on longer code exam-
+                                         Code completion is a crucial task in software development             ples. On average, the examples in LCC are 5× longer than
+                                         that helps developers save time and effort by suggesting              those in existing datasets (Lu et al., 2021). We benchmark
+                                         and auto-completing code based on context. With the ad-               several baselines, LongCoder and OpenAI Codex (Chen
+                                         vancement of large language models, Transformer-based                 et al., 2021) on LCC. Our experimental results demonstrate
+                                         models (Vaswani et al., 2017) have demonstrated impres-               that code completion can benefit from taking longer context
+                                         sive results in code completion (Chen et al., 2021). However,         into consideration, and our LongCoder achieves superior
+                                         the computational cost of these models grows quadratically            performance compared to existing models with comparable
+                                         with the length of input, making them less suitable for mod-          computational costs.
+                                         eling long code context. On the other hand, modeling long
+                                         code can potentially improve the accuracy of code comple-             Overall, our contributions are as follows:
+                                         tion and enable applications on a file and even project level.
+                                           *
+                                                                                                                  • We construct a new dataset (LCC) for code completion
+                                             Equal contribution 1 Sun Yat-sen University 2 University of            tasks that requires long code modeling to encourage
+                                         California, San Diego 3 Microsoft Research Asia. Correspondence
+                                         to: Daya Guo <guody5@mail2.sysu.edu.cn>.                                   more research in such scenarios.
+
+                                         Proceedings of the 40 th International Conference on Machine             • We propose two types of sparse attention, motivated by
+                                         Learning, Honolulu, Hawaii, USA. PMLR 202, 2023. Copyright                 observations on attention patterns of existing models
+                                         2023 by the author(s).                                                     and how human programmers write code.
+
+                                                                                                           1
+                           LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+       Out-of-Window Context                                                                             Attention Pattern
+       import torch \n
+       import torch.nn as nn \n
+       import torch.nn.functional as F \n
+       class ConvBlock(nn.Module): \n
+           """
+           A block of convolutional and pooling layers
+           """
+           def __init__(self, in_channels, out_channels, kernel_size, stride, padding): \n
+               super(ConvBlock, self).__init__()
+               self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+               self.pool = nn.MaxPool2d(kernel_size=2)                                                             BigBird
+           def forward(self, x): \n
+               x = self.pool(F.relu(self.conv(x)))
+               return x                                                Aggregate
+           …                                                                       <bridge>
+
+
+       In-Window Context
+       class ConvNet(nn.Module): \n
+           """
+           A convolutional neural network
+           """                                                                                                   Longformer
+           def __init__(self): \n                                                                               Autoregressive
+               super(ConvNet, self).__init__()
+               self.conv_block1 = ConvBlock(3, 32, 3, 1, 1) #first block
+               self.conv_block2 = ConvBlock(32, 64, 3, 1, 1) #second block
+               self.flatten = nn.Flatten()
+               self.fc1 = nn.Linear(
+                   in_features=64 * 8 * 8, out_features=128)
+               self.fc2 = nn.Linear(
+                   in_features=128, out_features=10)                   Aggregate
+                                                                                         <bridge>
+
+
+
+    Code to Complete                                                                                             LongCoder
+
+           def forward(self, x):                                      Information Flow
+                                                                                                                  Window Attention
+               x = self.conv_block1(x)
+               x = self.conv_block2(x)                                                                            Random Attention
+               x = self.flatten(x)                           \n       Memory Token                                Global Attention
+               x = F.relu(self.fc1(x))                                                                            Bridge Attention
+               x = self.fc2(x)                             <bridge>   Bridge Token
+               return x
+
+
+
+
+Figure 1. (Left) An example of how LongCoder facilitates completion with longer context. The memory tokens save potentially useful
+information (including package imports, class and function definitions) for global access despite whether they are within the sliding
+window. The bridge tokens aggregate local information by attending to a fixed length of tokens. The information flow within the window
+is omitted for clarity. (Right) Attention patterns used in BigBird (Zaheer et al., 2020), Longformer (Beltagy et al., 2020) and LongCoder.
+Best viewed in color.
+
+
+   • We train and release LongCoder, a sparse and efficient               n-gram techniques (Tu et al., 2014; Hindle et al., 2016) and
+     pre-trained Transformer model for long code model-                   probabilistic grammar-based methods (Allamanis & Sutton,
+     ing, which achieves superior performance on both long                2014; Bielik et al., 2016; Raychev et al., 2016; Hellendoorn
+     and regular code completion with comparable compu-                   & Devanbu, 2017). With the success of pre-training in natu-
+     tational resources.1                                                 ral language processing (Devlin et al., 2019; Radford et al.,
+                                                                          2019; Brown et al., 2020), decoder-only pre-trained mod-
+2. Related Work                                                           els based on Transformer have been proposed to promote
+                                                                          the development of code completion. Svyatkovskiy et al.
+Code Completion Code completion is an essential task                      (2020) and Lu et al. (2021) respectively propose GPT-C and
+that helps programmers improve their efficiency by suggest-               CodeGPT, which are pre-trained by generating code from
+ing and automatically completing code based on context and                left to right in an auto-regressive manner on large amounts
+previous inputs. Prior works have explored the use of statis-             of code. Liu et al. (2020) and Guo et al. (2022) pre-train sim-
+tical learning for the code completion task, such as the use of           ilar models CugLM and UniXcoder with multi-task learning
+   1
+                                                                          by leveraging code structure for code completion. Codex
+   All the codes and data are available at https://github.
+                                                                          (Chen et al., 2021), PolyCoder (Xu et al., 2022), CodeGen
+com/microsoft/CodeBERT.
+
+
+                                                                      2
+                        LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+(Nijkamp et al., 2022), InCoder (Fried et al., 2022), and            3. Long Code Completion
+AlphaCode (Li et al., 2022) build large language models
+with billions of parameters and achieve impressive perfor-           Code completion is a fundamental and important task for
+mance on code generation by training on a large-scale and            code models, which can help programmers improve their
+high-quality code corpus. For these pre-trained models, it is        efficiency while coding. Previous public benchmarks pri-
+impractical to simply expand the context window to model             marily focused on completion with short code context. For
+long-range sequences, due to computational complexity of             instance, CodeXGLUE (Lu et al., 2021) offers two code
+the attention mechanism increasing quadratically with the            completion datasets from PY150 (Raychev et al., 2016) in
+input length. Therefore, Clement et al. (2021) propose to ex-        Python and Github Java Corpus Allamanis & Sutton (2013)
+tract the most important code fragments and integrate them           in Java, and also builds two test datasets to evaluate next-
+into a fixed-length context window. However, due to the              line prediction. The average length of the code context in
+constraint of fixed window length, some high-priority code,          the two test datasets is 478 tokens and 365 tokens, respec-
+such as class and function definitions, may be omitted. Addi-        tively. However, according to our statistics, the average
+tionally, increasing the window length would also introduce          length of a Python source file on GitHub is 1,305 tokens.
+additional computational overhead. Different from these              After tokenization, the average length becomes 2,090 to-
+works, LongCoder is a sparse Transformer that can take               kens while 41%/24% of the files have a length longer than
+advantage of the entire file-level code context while main-          1,024/2,048 tokens, which highlights the need for models
+taining comparable efficiency in terms of computational              that can handle longer code sequences in order to be more
+resources during inference.                                          practical and useful in the real-world. Meanwhile, longer
+                                                                     code sequences contain more complex structures and require
+                                                                     models to consider more context and dependencies. This
+                                                                     can be challenging for previously proposed code completion
+Long-Range Transformer Models The original Trans-                    models that focus on short code and do not take into account
+former (Vaswani et al., 2017) is inefficient for modeling long       the long context of the code. By evaluating models on longer
+sequences since its time and space complexity is O(n2 ),             code sequences, we can better understand their ability to
+where n is the length of the sequence. Prior studies focus           handle more complex and realistic scenarios. Meanwhile,
+on optimizing the complexity to enable processing of longer          long code completion poses new challenges for efficiency
+sequences. To name a few, Sparse Transformer (Child et al.,          of code models, as in vanilla Transformers (Vaswani et al.,
+2019) reduces the quadratic complexity of standard self-             2017), the computational resources grow quadratically with
+attention by computing attention on sparse query-key pairs.          the input length.
+Sparse Transformer uses a dilated sliding window to capture
+local context. Reformer (Kitaev et al., 2020) proposes local-        In this paper, we introduce the Long Code Completion
+ity sensitive hashing (LSH) attention to reduce the complex-         Benchmark (LCC), a new benchmark that focuses on code
+ity and memory footprint. Longformer (Beltagy et al., 2020)          completion with long code context for three programming
+uses dilated sliding windows to model longer sequences               languages: Python, Java, and C#. Specifically, we construct
+and adds global memory tokens to allow interaction with all          our datasets from the github-code2 dataset, which contains
+tokens. Performer (Choromanski et al., 2021) generalizes             a vast number of code files sourced from GitHub with an
+attention calculation by introducing kernel functions. They          open-source license that permits research use. The steps to
+then propose a random kernel function, namely orthogonal             construct the datasets are as follows:
+random features (ORF) to approximate the standard self-
+attention. Linformer (Wang et al., 2020) applies low-rank               • We first follow Allamanis (2019) to deduplicate exam-
+projection to the length dimension to reduce the complex-                 ples with high similarity (Jacobi similarity ≥ 0.9) in
+ity of self-attention. Linear Transformers (Katharopoulos                 order to eliminate forked files, and then remove code
+et al., 2020) uses a kernel function that exploits the asso-              files that can’t be parsed into an abstract syntax tree
+ciativity property of matrix products to reduce complexity.               using a standard compiler tool called tree-sitter.3
+BigBird (Zaheer et al., 2020) has an attention pattern com-
+prised of random attention, window attention and global                 • Since the benchmark primarily focuses on the code
+attention. CosFormer (Qin et al., 2022) proposes a linear                 completion task with long code context, we remove
+operator and a cosine-based distance re-weighting mecha-                  code files whose length of code tokens after tokeniza-
+nism as the substitute for softmax attention. We recommend                tion is shorter than 512. Additionally, we also eliminate
+Tay et al. (2022) as a more comprehensive survey on long-                 excessively long code files with a length greater than
+range efficient Transformer models. Different from these               2
+                                                                         https://huggingface.co/datasets/
+works, our LongCoder introduces code heuristics into the             codeparrot/github-code
+dynamic construction of global attention to imitate how                3
+                                                                         https://github.com/tree-sitter/
+human programmers code.                                              tree-sitter
+
+                                                                 3
+                          LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+                                                                                                                                                   1.0
+Table 1. Data statistics of the code context length in LCC test set.                               0.05
+25%/50%/75% refer to the first/second/third quartile.
+                                                                                                                                                   0.8
+                                                                                                   0.04
+
+
+
+
+                                                                            Avg. Attention Score
+       Language       Average      25%       50%      75%
+
+
+
+
+                                                                                                                                                     Accumulation
+                                                                                                                                                   0.6
+                                                                                                   0.03
+       Python          1993.3      1056     1438     2211
+       Java            1841.4      1058     1307     2003                                          0.02                                            0.4
+       C#              1970.5      1023     1396     2143
+                                                                                                   0.01                                            0.2
+
+                                                                                                   0.00
+                                                                                                          0   100   200          300   400   500
+     10,000 tokens.                                                                                                       Distance
+
+
+   • For each programming language, we sample 100k ex-                     Figure 2. Distribution of average attention scores between two
+     amples for training, and 10k examples for development                 tokens within different distances in CodeGPT (Lu et al., 2021).
+     and 10k for testing. For each sample on development                   The attention score is an average of 100 Python code examples
+     and test sets, we randomly sample an uncommented                      across all Transformer layers.
+     line of code not shorted than 3 tokens and ensure that
+     there is sufficient context, i.e., a context larger than 512          Formally, given the linear projections Q, K, V , the self-
+     code tokens. The data statistics of the context length                attention scores in Transformer are calculated as follows:
+     in the LCC test sets are listed in Table 1.
+                                                                                                                             QK T
+                                                                                               Attention(Q, K, V ) = softmax( √    + M )V                      (1)
+We follow Lu et al. (2021) to evaluate the performance of the                                                                   dk
+models in terms of Exact Match (EM) and Edit Similarity                    where M is a mask matrix (to be completed in Equation 5)
+(Edit Sim) on a per-line basis (Svyatkovskiy et al., 2020).                to control the context a token can attend to when computing
+                                                                           its contextual representation. If the i-th token is allowed to
+4. LongCoder                                                               attend to the j-th token, then Mij is set to 0, otherwise −∞.
+
+LongCoder is an attempt to tackle the efficiency problem of                For window attention, the mask attention matrix M window
+modeling longer code. It applies sparse attention to reduce                is calculated as follows:
+quadratic time and space complexity of self-attention to                                             (
+                                                                                           window     0     if i − j ≤ w
+linear. There are three types of attention in LongCoder                                 Mij       =                              (2)
+— window attention, bridge attention, and global attention.                                           −∞ otherwise
+Each type is motivated by observations on previous models
+and focuses on one important aspect in modeling long code.                 where w is the window size. This window attention pattern
+The three types of attention are illustrated in Figure 1 and               reduces the complexity of the self-attention mechanism by
+we will describe them individually.                                        limiting the receptive field size of each token to a small
+                                                                           window of size w at each layer. The computation complexity
+4.1. Window Attention                                                      of this pattern is O(n × w), which scales linearly with input
+                                                                           sequence length n. After applying N transformer layers
+Code completion largely relies on local context while only                 of such sliding window attention, the receptive field size
+a few instances of long-distance dependencies are present.                 increases to N × w at the top layer. Since each token only
+For example, in Figure 1 (bottom left), generating assign-                 attends to w tokens to its left rather than the entire preceding
+ment operators and parentheses only depend on the cur-                     sequence, the model can achieve faster inference speed.
+rent statement, whereas to generate variables such as x and
+conv block, the model needs to look at neighboring state-
+                                                                           4.2. Bridge Attention
+ments. Intuitively, we can exploit such locality to sparsify
+the attention to achieve better efficiency. We further ver-                Window attention is good at handling local dependencies
+ify this observation by counting the distribution of average               and it also has a wide receptive field as discussed above.
+attention scores between two tokens within different dis-                  However, if a token needs to access tokens from a distance
+                                                                                                                L
+tances. As shown in Figure 2, a large portion of attention is              of L tokens away, it would require ⌈ w ⌉ hops through win-
+concentrated within a narrow window. Notably, a fixed win-                 dow attention. This makes it challenging to access infor-
+dow of 256 covers more than 90% of the attention weights.                  mation from distant context as the attention score between
+This sparsity enables us to apply a sliding window attention               them will be greatly reduced due to accumulation through
+mechanism (Beltagy et al., 2020; Zaheer et al., 2020).                     multiplication. Thus, we introduce a new type of special
+
+                                                                       4
+                          LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+                                                                           package name.4 Also, to call the forward function of
+                                                         0.16              conv block1 and conv block2, the model needs ac-
+                                                         0.14              cess to the original definition of the class ConvBlock,
+                                                         0.12              which also falls outside the current sliding window. Directly
+                                                         0.10              accessing these tokens is similar to how human program-
+                                                                           mers quickly refer to definitions in the code. This global
+                                                         0.08
+                                                                           effect can also be observed in the visualization of the at-
+                                                         0.06              tention matrix in CodeGPT (Lu et al., 2021). As shown in
+                                                         0.04              Figure 3, some tokens seem to have a global impact while
+                                                         0.02              others only matter locally.
+                                                         0.00              Therefore, in addition to bridge tokens, where the model au-
+                                                                           tomatically learns to aggregate globally useful information,
+Figure 3. Visualization of the attention matrix (partially shown for       we add another type of global token, namely memory tokens,
+clarity) in CodeGPT (Lu et al., 2021). The attention matrix is             to inject code heuristics to the attention. Specifically, we
+averaged across all Transformer layers.                                    leverage the structure of code with tree-sitter to parse the
+                                                                           code into an abstract syntax tree (AST). Then, we find all
+                                                                           statements that include a package import, class or function
+token, namely bridge tokens, to aggregate local information
+                                                                           definition and grant the line feeds (LF, \n) of those state-
+for global access. Bridge tokens can attend to a fixed length
+                                                                           ments global access. We denote the set of positions of these
+of tokens and be attended from all subsequent tokens. From
+                                                                           line feeds as G, where k = |G|. The mask matrix M global
+the perspective of representation learning, a bridge token
+                                                                           of global attention is calculated as follows:
+can be seen as a learned representation for the corresponding
+slice of code.
+                                                                                                 (
+                                                                                        global     0       if j ∈ G and i ≥ j
+                                                     n                               Mij       =                                     (4)
+Specifically, we insert m bridge tokens Sb every ⌈ m   ⌉ tokens                                    −∞ otherwise
+and use a separate set of projections, Qb , Kb , Vb to compute
+attention scores for the bridge attention. The bridge tokens               The complexity of the global attention is O(kn) ≈ O(n),
+do not involve next token prediction but they are used to                  as we have k ≪ n, where n is the length of the sequence.
+                                               n
+aggregate information from the preceding ⌈ m     ⌉ tokens. The
+                                                                           Unlike previous work (Clement et al., 2021) which extracts
+use of additional projections allows for the ability to model
+                                                                           the most significant statements and encode them in a fixed-
+different types of attention. Finally, the mask matrix for
+                                                                           length context window, our global attention requires less
+bridge attention is calculated as follows:
+                                                                           memory and can reuse previously encoded hidden states.
+                   
+                   0
+                            if j ∈ Sb and i ≥ j                           Finally, considering all three types of attention together, M
+         bridge                                       n
+      Mij       = 0          if i ∈ Sb and i − j ≤ ⌈ m  ⌉ (3)              in Equation 1 becomes:
+                   
+                     −∞ otherwise
+                   
+                                                                                        M = max(M window , M bridge , M global )     (5)
+The complexity of bridge attention is O(m × n) ≈ O(n)
+                                                                           where max is the element-wise maximum function.
+where m ≪ n. Compared to stacked window attention,
+bridge attention allows each token to attend to any preceding
+token with at most 2 hops, which enables the model to                      5. Experiments
+effectively access long-range context.
+                                                                           5.1. Experimental Settings
+4.3. Global Attention                                                      Baselines We evaluate LongCoder against several pub-
+                                                                           licly available pre-trained code generation models, includ-
+Identifiers with the global scope, for example, package im-                ing GPT-2 (Radford et al., 2019), CodeGPT (Lu et al., 2021),
+ports, global functions, classes and their member functions                and UniXcoder (Guo et al., 2022). GPT-2 is pre-trained on a
+(i.e., methods), can be called from any location within a                  text corpus and CodeGPT is pre-trained on the CodeSearch-
+file. For long code, a local sliding window cannot cap-                    Net dataset (Husain et al., 2019) using next token prediction
+ture such information that should be globally accessible.                  as the objective. UniXcoder based on UniLM (Dong et al.,
+This is especially outstanding for package imports, which                  2019) is pre-trained on a cross-modal dataset that includes
+are usually located at the beginning of a file. For ex-                    code, text, and abstract syntax trees. Additionally, we also
+ample, in Figure 1, without knowing the user has im-                       compare LongCoder with sparse Transformer models, such
+ported torch.nn.functional as a new identifier F,
+                                                                              4
+the model cannot be sure whether to use F or the full                             Both are common code styles in PyTorch.
+
+                                                                       5
+                          LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+
+                              Table 2. Experimental results on the Long Code Completion (LCC) dataset.
+                                                                          Python                   Java                        C#
+      Model               #Param.      Memory       Runtime
+                                                                  EM         Edit Sim        EM        Edit Sim       EM       Edit Sim
+      OpenAI Codex           12B            -            -       39.65         68.97       43.15          72.05       53.89         77.93
+      Transformer           124M          191M       750ms       10.64         43.64       15.32          47.52       19.16         48.87
+      GPT-2                 124M          191M       750ms       11.20         42.62       17.09          47.18       20.27         48.27
+      CodeGPT               124M          191M       750ms       12.24         43.81       19.20          49.50       22.58         51.03
+      UniXcoder             126M          191M       750ms       16.55         50.22       23.93          55.38       27.97         57.29
+      LongFormer            150M          381M       781ms       16.79         51.07       24.80          56.03       29.75         58.23
+      BigBird               128M          205M       804ms       17.03         51.14       25.19          56.91       30.27         58.66
+      LongCoder             150M          211M       812ms       17.88         55.07       26.42          61.21       31.34         64.37
+      - w/o pretrain        150M          211M       812ms       17.61         54.82       25.96          60.81       31.22         64.18
+
+
+
+Table 3. Data statistics about the context length of CodeXGLUE            Table 4. Results on CodeXGLUE code completion benchmark.
+test dataset. 25%/50%/75% refer to the first/second/third quartile.
+                                                                                                       PY150               JavaCorpus
+                                                                               Model
+        Language       Average     25%      50%      75%                                       EM          Edit Sim     EM          Edit Sim
+        Python          477.8        83     197      502                       Transformer    38.51         69.01      17.00          50.23
+        Java            365.0        74     171      397                       GPT-2          41.73         70.60      27.50          60.36
+                                                                               CodeGPT        42.37         71.59      30.60          63.45
+                                                                               UniXcoder      43.12         72.00      32.90          65.78
+                                                                               LongCoder      43.77         73.37      33.13          67.32
+as LongFormer (Beltagy et al., 2020) and BigBird (Zaheer
+et al., 2020). LongFormer uses a dilated sliding window to
+model long sequences in the generation task, while BigBird
+                                                                          Table 5. Cross-file code completion results on RepoBench XF-
+has an attention pattern that includes random, window, and                R (Liu et al., 2023).
+global attention. In addition to these comparable baselines,
+we also report the performance of OpenAI Codex on LCC                                                    Python                Java
+                                                                                Model
+for reference. Note that Codex is 100× larger than other                                          EM       Edit Sim     EM      Edit Sim
+models and is likely to have seen the test set of LCC in its                    Transformer        7.0       38.3      5.8          34.4
+pretraining thus is not directly comparable.                                    GPT-2             15.5       48.2      11.6         41.4
+                                                                                CodeGPT           16.6       49.1      13.3         44.2
+                                                                                UniXcoder         18.0       53.4      16.5         50.0
+Benchmarks We evaluate the performance of LongCoder
+and the baselines on two benchmarks: LCC (introduced                            LongCoder         21.4       59.7      19.7         60.1
+in Section 3), and the code completion task benchmark
+in CodeXGLUE (Lu et al., 2021). CodeXGLUE provides
+PY150 (Raychev et al., 2016) and JavaCorpus (Allamanis                    R) setting of RepoBench (Liu et al., 2023). The task is to
+& Sutton, 2013) datasets in Python and Java for line-level                predict the next line of code based on a given in-file context,
+code completion. The statistics for the context length of                 consisting of import statements and preceding lines before
+the CodeXGLUE test datasets are listed in Table 3. We                     the target line, as well as a cross-file context, comprising
+can see that the context length of the input sequence is 5                snippets from other files in the code repository, parsed by
+times shorter than LCC, and only a small portion of the                   import statements.
+samples require modeling for long code sequences. The
+objective of evaluating the performance of sparse models on
+                                                                          Evaluation Metrics We report the number of parame-
+the CodeXGLUE dataset is to examine their effectiveness
+                                                                          ters, inference memory consumption, runtime, Exact Match
+in scenarios where the code context is relatively short.
+                                                                          (EM) and Edit Similarity (Edit Sim) of the baselines. The
+Moreover, longer context can benefit applications including               inference memory consumption and runtime per example
+cross-file code completion (Liu et al., 2023). We test the                are calculated using a beam search with beam size of 5 and
+performance of LongCoder on the cross-file-random (XF-                    maximum generation length of 64 on a single V100 GPU.
+
+                                                                      6
+                        LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+
+                                   Table 6. Ablation study on LongCoder without pre-training.
+                                                         Python                    Java                 C#
+               Model
+                                                    EM      Edit Sim        EM      Edit Sim     EM      Edit Sim
+               LongCoder                           17.61      54.82        25.96      60.81     31.22        64.18
+               w/o memory tokens                   16.80      53.90        24.87      60.35     30.16        63.61
+               w/o bridge tokens                   17.54      51.92        25.88      57.48     30.80        59.09
+               w/o out-of-window context           16.66      50.63        24.17      55.97     28.81        57.79
+               w/ equidistant memory tokens        17.16      54.25        24.96      60.42     30.31        63.65
+
+
+
+5.2. Training Details                                                which reveal the effectiveness of our proposed bridge and
+                                                                     global attention mechanisms. Table 4 shows the result of
+We set the maximum length of code context to 512 and
+                                                                     LongCoder on CodeXGLUE code completion benchmarks.
+4096 for non-sparse and sparse models, respectively. In
+                                                                     It can be observed that LongCoder achieves state-of-the-art
+order to make a fair comparison between sparse models and
+                                                                     performance, which illustrates its effectiveness in scenarios
+non-sparse models, we set the window size w to 512 so that
+                                                                     where the code context is short. As shown in Table 5, Long-
+both types of models maintain the same local context length
+                                                                     Coder has an even larger advantage compared to UniXcoder,
+during inference. Note that this setting is different from the
+                                                                     indicating its potential in more complex scenarios.
+original setting of RepoBench (Liu et al., 2023), thus the
+results are not directly comparable to those reported in Liu
+                                                                     5.4. Ablation Study
+et al. (2023). For sparse models, we use the parameters of
+UniXcoder released by Guo et al. (2022) to initialize the            To better understand the impact of different components
+models. For LongCoder, we set the maximum size of bridge             on overall performance, we conduct an ablation study on
+tokens n and global tokens k as 16 and 64, respectively.             LongCoder, and the results are shown in Table 6. We can
+To ensure fair comparison with other models, we pre-train            see that the average score of Exact Match drops by approxi-
+LongCoder on the CodeSearchNet dataset using the same                mately 1% when memory tokens are removed (w/o memory
+next token prediction objective and pre-training setting as          tokens), which demonstrates the importance of these tokens.
+baselines (Lu et al., 2021; Guo et al., 2022). During fine-          On the other hand, when bridge tokens are removed (w/o
+tuning, we use the Adam optimizer with a batch size of 16            bridge tokens), the average score drops by about 3% in
+and a learning rate of 2e-4. We fine-tune the model for 10           terms of Edit Similarity. This is likely because bridge to-
+epochs and perform early stopping on the development set.            kens assist LongCoder in understanding the semantics of the
+Note that although the maximum context sequence length               code context and generating more accurate patterns, while
+is 4096, during inference, we only retain a cache of at most         memory tokens enable it to access concrete identifiers with
+592 tokens for past key and value hidden states to maintain          global scope, thus improving accuracy on libraries, classes,
+efficiency in terms of computational resources.                      and functions invoked. Additionally, we observe that select-
+                                                                     ing one as a memory token every 64 tokens (equidistant
+5.3. Experimental Results                                            memory tokens) results in worse performance than Long-
+                                                                     Coder, indicating that the advantage of the memory tokens
+Table 2 illustrates the comparison results of LongCoder with
+                                                                     is not solely due to increased context length. We also eval-
+other models on the LCC dataset. The results reveal that
+                                                                     uate the performance of LongCoder by only using code
+the sparse models (i.e., the last two groups) have superior
+                                                                     context within the window size during inference to verify if
+performance compared to the non-sparse models (i.e., the
+                                                                     the improvement is solely attributed to the use of long code
+second group) on both EM and Edit Sim metrics, and they
+                                                                     context or whether other factors such as fine-tuning settings
+also maintain a similar inference speed. LongFormer is
+                                                                     also contribute. By only keeping the last 512 tokens as code
+initialized using the parameters of UniXcoder, with the sole
+                                                                     context (w/o out-of-window context), we can see that the
+difference being the use of a sliding window attention mech-
+                                                                     performance is nearly the same as UniXcoder in Table 2,
+anism. This mechanism allows the model to maintain a
+                                                                     which shows the importance of modeling long code context.
+consistent inference speed while having a larger receptive
+field, resulting in improved performance. This demonstrates
+                                                                     5.5. Case Study
+the effectiveness of the sliding window attention mechanism
+in code completion tasks. Compared to other sparse mod-              We also conduct a case study to demonstrate the effective-
+els, LongCoder achieves an improvement of 0.8%–1.3%                  ness of LongCoder, as shown in Figure 4. We provide two
+in Exact Match score and 4.0%–6.0% in Edit Similarity,               examples in the Python and Java programming languages
+
+                                                                 7
+                                                                                                                                                                                             ✅
+
+
+
+
+                                    LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+ Out-of-Window Context                                                      In-Window Context                                              Predictions
+
+ """
+ Fetch a url from live web and apply rewriting rules
+                                                                                ... (22 lines omitted)                                     Ground Truth    timestamp = timestamp_now()
+ """
+                                                                            def fetch_request(self, url, urlrewriter,
+ import requests
+ ... (8 lines omitted)
+                                                                                              head_insert_func=None,                       Transformer     return (status_headers, stream)
+                                                                                              urlkey=None,                                 GPT-2           timestamp = time.time()
+ from pywb.utils.timeutils import timestamp_now \n
+                                                                                              env=None,                                    CodeGPT         timestamp = time.time()
+ ... (5 lines omitted)
+                                                                                              req_headers={},                              UniXcoder       timestamp = int(time.time())
+ class LiveRewriter(object):
+                                                                                              timestamp=None,                              Longformer      timestamp = int(time.time())
+     ... (94 lines omitted)
+                                                                                              follow_redirects=False,
+     def fetch_http(self, url,                                                                                                             BigBird         timestamp = time.time()
+                                                                                              ignore_proxies=False,
+                    urlkey=None,                                                                                                           LongCoder       timestamp = timestamp_now()
+                                                                                              verify=True,
+                    env=None,
+                                                                                              remote_only=True):                           Codex-2048      timestamp = timestamp_now()
+                    req_headers=None,
+                                                                                ... (28 lines omitted)
+                    follow_redirects=False,                                                                                                Codex-512       timestamp = time.time()
+                                                                                if timestamp is None:
+                    ignore_proxies=False,
+                    verify=True):
+         ... (18 lines omitted)
+
+
+ package ims.therapies.treatment.domain.objects;                             public String fieldsToXMLString(java.util.HashMap domMap){
+ public class GaitReEducation extends ... implements ... {                     StringBuffer sb = new StringBuffer();
+   public static final int CLASSID = 1044100009;                               if (this.getClinicalContact() != null){
+   ... (20 lines omitted)                                                        sb.append("<clinicalContact>");
+   (Methods omitted)                                                             sb.append(this.getClinicalContact().toXMLString(domMap));
+   public GaitReEducation (Integer id, int ver){...}                             sb.append("</clinicalContact>");
+                                                                                                                                            Ground Truth   if (this.getDetails() != null)
+   public GaitReEducation (){...}                                              }
+   public GaitReEducation (...){...}                                           if (this.getAuthoringDateTime() != null){                    Transformer    return sb.toString();
+   public Class getRealDomainClass(){...}                                        sb.append("<authoringDateTime>");
+                                                                                                                                            GPT-2          return sb.toString();
+   public ...ClinicalContact getClinicalContact() {...}                          sb.append(new ims.framework.utils.DateTime(
+   public void setClinicalContact(...ClinicalContact clinicalContact) {...}        this.getAuthoringDateTime()).toString(                   CodeGPT        return sb.toString();
+   public java.util.Date getAuthoringDateTime() {...}                              ims.framework.utils.DateTimeFormat.MILLI));              UniXcoder      return sb.toString();
+   public void setAuthoringDateTime(java.util.Date authoringDateTime) {...}        sb.append("</authoringDateTime>");                       Longformer     return sb.toString();
+   public ims.core.resource.people.domain.objects.Hcp getAuthoringCP() {...}   }
+   public void setAuthoringCP(...Hcp authoringCP) {...}                        if (this.getAuthoringCP() != null){}                         BigBird        return sb.toString();
+   public java.util.List getGaitAspect() {...}                                   sb.append("<authoringCP>");                                LongCoder      if (this.getDetails() != null)
+   public void setGaitAspect(java.util.List paramValue) {...}                    sb.append(this.getAuthoringCP().toXMLString(domMap));
+   public String getDetails() { \n                                               sb.append("</authoringCP>");                               Codex-2048     if (this.getDetails() != null)
+     return details;                                                           }
+   }                                                                           if (this.getGaitAspect() != null){
+                                                                                                                                            Codex-512      if (this.getGaitPlan() != null)
+   public void setDetails(String details) {...}                                  if (this.getGaitAspect().size() > 0){
+   public ims.domain.SystemInformation getSystemInformation() {...}                sb.append("<gaitAspect>");
+   public static boolean isConfigurationObject(){...}                              sb.append(ims.domain.lookups.LookupInstance.toXMLString(
+   public int getClassId() {...}                                                     this.getGaitAspect()));
+   public String getClassVersion(){...}                                            sb.append("</gaitAspect>");
+   public String toAuditString(){...}                                            }
+   public String toXMLString(){...}
+   public String toXMLString(java.util.HashMap domMap){...}                    }
+
+
+
+
+Figure 4. Two LCC examples of Python (top) and Java (bottom) code and predictions of different models. Codex-2048 refers to the
+original Codex model with the maximum context length of 2,048 while Codex-512 is the same model with a maximum context length set
+to 512. Key information is highlighted with arrows.
+
+
+and output predictions from different models. (1) From the                                            function, it is essential to keep track of all function defini-
+Python example, we can see that all models infer the correct                                          tions. As seen in the output results, only LongCoder and
+intended outcome, which is to assign the current timestamp                                            Codex-2048, which both make use of long code context, can
+to the timestamp variable. However, only LongCoder                                                    predict the correct results. Additionally, it can be observed
+and Codex-2048 produce the correct result. This is pri-                                               that Codex-512, due to its limited context, can only make a
+marily because these two models are able to refer to the                                              guess for a member function. We can see that LongCoder
+import statement at the beginning of the file, which imports                                          leverages the structure of the code to analyze the scope of
+the timestamp now function. Codex-2048 uses a long                                                    statements and stores those that have potential long-term
+context window to cover the entire file, but this approach                                            dependencies. This not only improves performance but also
+increases memory consumption and decreases inference                                                  achieves comparable efficiency in terms of computational
+speed as discussed above. Additionally, as the failure of                                             resources during inference.
+Codex-512 shows, even a large powerful model can struggle
+to identify the correct function from other candidates if the                                         6. Discussion
+required information exceeds the window size. In contrast,
+LongCoder utilizes a more efficient memory attention mech-                                            Limitations One limitation of LongCoder is its small size.
+anism, storing information based on the scope of different                                            Due to resource constraints, we are not able to train a large
+statements. This method is more effective, allowing access                                            model that is comparable to Codex. Besides, to compare
+to statements from the global scope while remaining effi-                                             fairly with other baselines, we only pre-train LongCoder on
+cient. (2) In the Java example, the function to be completed                                          a small-scale corpus (CodeSearchNet). It would be interest-
+aims to convert a HashMap variable into an XML string.                                                ing to see how the idea of sparse attention scales with more
+The function sequentially calls the getter functions of the                                           data.
+GaitReEducation class and has already completed call-
+                                                                                                      Another limitation of our work is the evaluation datasets.
+ing the getGaitAspect function. From the out-window
+                                                                                                      Many existing code datasets and LCC share the same source
+context, it is clear that the next call should be made to the
+                                                                                                      of data from GitHub. The same data can appear in the
+getDetails function. In order to correctly complete the
+
+                                                                                                 8
+                       LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+pretraining data, making the evaluation less reliable. Ad-          Bielik, P., Raychev, V., and Vechev, M. T. PHOG: proba-
+ditionally, models with larger-scale pretraining are even             bilistic model for code. In ICML, volume 48 of JMLR
+more likely to have seen the test data before. For example,           Workshop and Conference Proceedings, pp. 2933–2942.
+OpenAI Codex is trained on all GitHub repositories, that              JMLR.org, 2016.
+undoubtedly, include most (if not all) test data in PY150,
+JavaCorpus, and LCC. As the code completion models have             Brown, T. B., Mann, B., Ryder, N., Subbiah, M., Kaplan,
+seen wider adoption in software development, future evalua-           J., Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+tion can be “self-fulfilling”. For example, GitHub CoPilot5           Askell, A., Agarwal, S., Herbert-Voss, A., Krueger, G.,
+is a popular commercial code completion tool powered by               Henighan, T., Child, R., Ramesh, A., Ziegler, D. M., Wu,
+OpenAI Codex. A lot of code generated by Codex may                    J., Winter, C., Hesse, C., Chen, M., Sigler, E., Litwin, M.,
+have already been submitted to GitHub. This could give                Gray, S., Chess, B., Clark, J., Berner, C., McCandlish,
+widely-used models like Codex an advantage if it is eval-             S., Radford, A., Sutskever, I., and Amodei, D. Language
+uated on a dataset with a data source of the latest GitHub            models are few-shot learners. In NeurIPS, 2020.
+repositories, as we could be evaluating Codex on its own            Chen, M., Tworek, J., Jun, H., Yuan, Q., Pinto, H. P. d. O.,
+input. To address these problems, we need the community               Kaplan, J., Edwards, H., Burda, Y., Joseph, N., Brockman,
+to contribute new, clean, and high-quality datasets with code         G., et al. Evaluating large language models trained on
+from private projects to support future research.                     code. arXiv preprint arXiv:2107.03374, 2021.
+
+Future Work LongCoder opens up new research oppor-                  Child, R., Gray, S., Radford, A., and Sutskever, I. Gen-
+tunities in code generation not only within a large file, but         erating long sequences with sparse transformers. arXiv
+also across multiple files. For example, we could allow the           preprint arXiv:1904.10509, 2019.
+model to look at other files in the project for even more
+                                                                    Choromanski, K. M., Likhosherstov, V., Dohan, D., Song,
+accurate code completion. It could enable new applications
+                                                                      X., Gane, A., Sarlós, T., Hawkins, P., Davis, J. Q., Mo-
+including automatically extracting package requirements,
+                                                                      hiuddin, A., Kaiser, L., Belanger, D. B., Colwell, L. J.,
+generating build files, refactoring the project, etc.
+                                                                      and Weller, A. Rethinking attention with performers. In
+                                                                      ICLR. OpenReview.net, 2021.
+ACKNOWLEDGMENTS
+                                                                    Clement, C. B., Lu, S., Liu, X., Tufano, M., Drain, D.,
+Jian Yin is the corresponding author. Daya Guo and
+                                                                      Duan, N., Sundaresan, N., and Svyatkovskiy, A. Long-
+Jian Yin are supported by the National Natural Science
+                                                                      range modeling of source code files with ewash: Extended
+Foundation of China (U1911203, U2001211, U22B2060),
+                                                                      window access by syntax hierarchy. In EMNLP, pp. 4713–
+Guangdong Basic and Applied Basic Research Foundation
+                                                                      4722. Association for Computational Linguistics, 2021.
+(2019B1515130001), Key-Area Research and Development
+Program of Guangdong Province (2020B0101100001). We                 Devlin, J., Chang, M., Lee, K., and Toutanova, K. BERT:
+would like to thank the anonymous reviewers and the meta-             pre-training of deep bidirectional transformers for lan-
+reviewer for their insightful comments.                               guage understanding. In NAACL-HLT, pp. 4171–4186.
+                                                                      Association for Computational Linguistics, 2019.
+References                                                          Dong, L., Yang, N., Wang, W., Wei, F., Liu, X., Wang,
+Allamanis, M. The adverse effects of code duplication in             Y., Gao, J., Zhou, M., and Hon, H. Unified language
+  machine learning models of code. In Onward!, pp. 143–               model pre-training for natural language understanding
+  153. ACM, 2019.                                                     and generation. In NeurIPS, pp. 13042–13054, 2019.
+
+Allamanis, M. and Sutton, C. Mining source code reposito-           Fried, D., Aghajanyan, A., Lin, J., Wang, S., Wallace, E.,
+  ries at massive scale using language modeling. In 2013              Shi, F., Zhong, R., Yih, W.-t., Zettlemoyer, L., and Lewis,
+  10th Working Conference on Mining Software Reposito-                M. Incoder: A generative model for code infilling and
+  ries (MSR), pp. 207–216. IEEE, 2013.                                synthesis. arXiv preprint arXiv:2204.05999, 2022.
+
+Allamanis, M. and Sutton, C. Mining idioms from source              Guo, D., Lu, S., Duan, N., Wang, Y., Zhou, M., and Yin,
+  code. In SIGSOFT FSE, pp. 472–483. ACM, 2014.                      J. Unixcoder: Unified cross-modal pre-training for code
+                                                                      representation. In ACL, pp. 7212–7225. Association for
+Beltagy, I., Peters, M. E., and Cohan, A.        Long-                Computational Linguistics, 2022.
+  former: The long-document transformer. arXiv preprint
+                                                                    Hellendoorn, V. J. and Devanbu, P. T. Are deep neural
+  arXiv:2004.05150, 2020.
+                                                                      networks the best choice for modeling source code? In
+   5
+       https://github.com/features/copilot                            ESEC/SIGSOFT FSE, pp. 763–773. ACM, 2017.
+
+                                                                9
+                        LongCoder: A Long-Range Pre-trained Language Model for Code Completion
+
+Hindle, A., Barr, E. T., Gabel, M., Su, Z., and Devanbu, P. T.        Tay, Y., Dehghani, M., Bahri, D., and Metzler, D. Efficient
+  On the naturalness of software. Commun. ACM, 59(5):                   transformers: A survey. ACM Computing Surveys, 55(6):
+  122–131, 2016.                                                        1–28, 2022.
+Husain, H., Wu, H.-H., Gazit, T., Allamanis, M., and                  Tu, Z., Su, Z., and Devanbu, P. T. On the localness of
+  Brockschmidt, M. Codesearchnet challenge: Evaluat-                    software. In SIGSOFT FSE, pp. 269–280. ACM, 2014.
+  ing the state of semantic code search. arXiv preprint
+  arXiv:1909.09436, 2019.                                             Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+                                                                        L., Gomez, A. N., Kaiser, L., and Polosukhin, I. Attention
+Katharopoulos, A., Vyas, A., Pappas, N., and Fleuret, F.                is all you need. In NIPS, pp. 5998–6008, 2017.
+  Transformers are rnns: Fast autoregressive transform-
+  ers with linear attention. In ICML, volume 119 of Pro-              Wang, S., Li, B. Z., Khabsa, M., Fang, H., and Ma, H.
+  ceedings of Machine Learning Research, pp. 5156–5165.                Linformer: Self-attention with linear complexity. arXiv
+  PMLR, 2020.                                                          preprint arXiv:2006.04768, 2020.
+
+Kitaev, N., Kaiser, L., and Levskaya, A. Reformer: The                Xu, F. F., Alon, U., Neubig, G., and Hellendoorn, V. J. A
+  efficient transformer. In ICLR. OpenReview.net, 2020.                 systematic evaluation of large language models of code.
+                                                                        In MAPS@PLDI, pp. 1–10. ACM, 2022.
+Li, Y., Choi, D., Chung, J., Kushman, N., Schrittwieser, J.,
+  Leblond, R., Eccles, T., Keeling, J., Gimeno, F., Dal Lago,         Zaheer, M., Guruganesh, G., Dubey, K. A., Ainslie, J., Al-
+  A., et al. Competition-level code generation with alpha-              berti, C., Ontañón, S., Pham, P., Ravula, A., Wang, Q.,
+  code. Science, 378(6624):1092–1097, 2022.                             Yang, L., and Ahmed, A. Big bird: Transformers for
+                                                                        longer sequences. In NeurIPS, 2020.
+Liu, F., Li, G., Zhao, Y., and Jin, Z. Multi-task learning
+  based pre-trained language model for code completion.
+  In ASE, pp. 473–485. IEEE, 2020.
+Liu, T., Xu, C., and McAuley, J. Repobench: Benchmarking
+  repository-level code auto-completion systems. arXiv
+  preprint, 2023.
+Lu, S., Guo, D., Ren, S., Huang, J., Svyatkovskiy, A.,
+  Blanco, A., Clement, C. B., Drain, D., Jiang, D., Tang, D.,
+  Li, G., Zhou, L., Shou, L., Zhou, L., Tufano, M., Gong,
+  M., Zhou, M., Duan, N., Sundaresan, N., Deng, S. K., Fu,
+  S., and Liu, S. Codexglue: A machine learning bench-
+  mark dataset for code understanding and generation. In
+  NeurIPS Datasets and Benchmarks, 2021.
+Nijkamp, E., Pang, B., Hayashi, H., Tu, L., Wang, H., Zhou,
+  Y., Savarese, S., and Xiong, C. A conversational paradigm
+  for program synthesis. arXiv preprint arXiv:2203.13474,
+  2022.
+Qin, Z., Sun, W., Deng, H., Li, D., Wei, Y., Lv, B., Yan, J.,
+  Kong, L., and Zhong, Y. cosformer: Rethinking softmax
+  in attention. In ICLR. OpenReview.net, 2022.
+Radford, A., Wu, J., Child, R., Luan, D., Amodei, D.,
+  Sutskever, I., et al. Language models are unsupervised
+  multitask learners. OpenAI blog, 1(8):9, 2019.
+Raychev, V., Bielik, P., and Vechev, M. T. Probabilistic
+  model for code with decision trees. In OOPSLA, pp.
+  731–747. ACM, 2016.
+Svyatkovskiy, A., Deng, S. K., Fu, S., and Sundaresan, N.
+  Intellicode compose: code generation using transformer.
+  In ESEC/SIGSOFT FSE, pp. 1433–1443. ACM, 2020.
+
+                                                                 10
+

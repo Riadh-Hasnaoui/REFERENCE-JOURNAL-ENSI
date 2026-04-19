@@ -1,0 +1,1534 @@
+    Iterative Refinement of Project-Level Code Context for Precise Code
+                    Generation with Compiler Feedback
+     Zhangqian Bi1∗ Yao Wan1∗† Zheng Wang2 Hongyu Zhang3                Batu Guan1
+           Fangxin Lu1 Zili Zhang4 Yulei Sui5 Hai Jin1∗ Xuanhua Shi1∗
+         1
+           Huazhong University of Science and Technology 2 University of Leeds
+3
+  Chongqing University 4 Shanghai Jiao Tong University 5 University of New South Wales
+                   {zqbi,wanyao,hjin,xhshi}@hust.edu.cn
+
+
+                       Abstract                                   (a) Task Prompt
+
+
+
+
+    Large Language Models (LLMs) have shown                                Enhance the image by first reducing
+
+                                                                           noise and then adjusting brightness and
+    remarkable progress in automated code genera-                          contrast.
+
+
+    tion. Yet, LLM-generated code may contain er-
+    rors in API usage, class, data structure, or miss-            (b) Generating and Identifying Errors
+
+    ing project-specific information. As much of                          def   enhance_image(img:         Image):
+
+
+    this project-specific context cannot fit into the                           denoised_img       =   reduce_noise(img)
+
+
+
+
+    prompts of LLMs, we must find ways to allow                                 ...
+
+
+
+
+    the model to explore the project-level code con-                        Error:      missing    ‘reduce_noise’.
+
+
+    text. We present C O C O G EN, a new code gener-                        Synonyms:
+
+
+
+
+    ation approach that uses compiler feedback to                               def   denoising.denoise(img)
+
+
+
+
+    improve the LLM-generated code. C O C O G EN
+    first leverages static analysis to identify mis-
+                                                                  (c) Generating with Correct Context
+
+
+
+    matches between the generated code and the                            import
+
+                                                                          def
+                                                                                      denoising
+
+
+                                                                                enhance_image(img):
+
+
+    project’s context. It then iteratively aligns and                       denoised_img      =    denoising.denoise(img)
+
+
+
+    fixes the identified errors using information ex-                       ...
+
+
+
+    tracted from the code repository. We integrate
+    C O C O G EN with two representative LLMs, i.e.,           Figure 1: LLM-based code generation example. (a) task
+    GPT-3.5-Turbo and Code Llama (13B), and                    prompt; (b) wrong solution and error identification; (c)
+    apply it to Python code generation. Experimen-             correct solution utilizing project context
+    tal results show that C O C O G EN significantly
+    improves the vanilla LLMs by over 80% in                   LLM-based code generation into real-world soft-
+    generating code dependent on the project con-              ware projects remains challenging (Li et al., 2024).
+    text and consistently outperforms the existing                Practical code generation for software reposito-
+    retrieval-based code generation baselines.                 ries is often associated with broader project-level
+                                                               contexts declared in other repository files due to
+1   Introduction
+                                                               the demands of modularity, structure, and compre-
+Large Language Models (LLMs), especially those                 hension in software management (Kemerer, 1995).
+pre-trained on code, as demonstrated by tools                  Solely providing the task requirements and sur-
+such as GitHub Copilot (Microsoft, 2024), Ama-                 rounding incomplete code can lead LLMs to over-
+zon’s CodeWhisperer (Amazon, 2023), and Chat-                  look the complex hierarchies of APIs, classes, data
+GPT (OpenAI, 2023), are revolutionizing how de-                structures, or type constraints specific to a software
+velopers approach programming by automatically                 project’s repository, risking omitting essential logic
+generating code for given contexts (e.g., natural-             during code generation (Gifany et al., 2013).
+language descriptions or surrounding incomplete                   As a motivating example, consider the case
+code). While existing LLM-based code generation                shown in Figure 1. In this case, we use the Ope-
+tools excel in code generation within a small-scale            nAI GPT-3.5-Turbo API to generate an image-
+and isolated context (i.e., a single file), integrating        enhancing function by first reducing the notice and
+    * Also with National Engineering Research Center for Big   then adjusting brightness and contrast. Given the
+Data Technology and System, Services Computing Technol-        prompt in Figure 1a, the LLM will produce a code
+ogy and System Lab, Cluster and Grid Computing Lab, School     snippet of calling a reduce_noise method as
+of Computer Science and Technology, Huazhong University
+of Science and Technology, Wuhan, 430074, China.               depicted in Figure 1b. Although the generated code
+    †
+      Yao Wan is the corresponding author.                     follows a standard workflow specified in the task
+                                                           2336
+                  Findings of the Association for Computational Linguistics ACL 2024, pages 2336–2353
+                          August 11-16, 2024 ©2024 Association for Computational Linguistics
+prompt, it leads to a compilation error in our ap-      which consists of code generation tasks utilizing
+plication context because reduce_noise is not           project-specific context. We test C O C O G EN on
+implemented. This is unsurprising as the prompt         two popular code generation models: the GPT-3.5-
+does not provide enough project-level context for       Turbo (OpenAI, 2023) and Code Llama (Rozière
+the LLM, and can be fixed by providing the project-     et al., 2023). Experimental results demonstrate that
+specific function denoising.denoise as con-             C O C O G EN significantly improves the repository-
+text, as illustrated in Figure 1c. While a carefully    level code generation performance of different de-
+engineered prompt may resolve this issue, it is         pendency levels, outperforming the baseline by
+not always possible for the user to generate such       over 80% relative pass rates in generating functions
+prompts, and the project context may be too large       dependent on project-specific contexts. Moreover,
+to fit into the prompt. As we will empirically show     our iterative method consistently enhances the per-
+later in (Section 2.2), such errors are commonly        formance of vanilla retrieval-augmented generation.
+found when applying LLMs to repository-level            We also provide a comprehensive analysis of the ef-
+code generation (Li et al., 2024).                      fectiveness and limitations of C O C O G EN, offering
+   This paper investigates a way to effectively in-     insights for future research.
+tegrate LLM-based code generation with existing            This paper makes the following contributions:
+code implementations within a software project.
+Our solution is to leverage project-level contextual    • An empirical study to analyze the error distribu-
+information, such as project-specific implementa-         tion in self-contained and repository-level code
+tion of classes, methods, and data structures, to         generation, highlighting the significance of pre-
+reduce compilation errors and improve code qual-          cise and grounded program context in generating
+ity. Directly incorporating the entire project code       code at the project level (Section 2.2);
+into a language model is infeasible due to model        • A new iterative generation-verification-retrieval
+input sequence length limitations. Instead, we use        method that leverages the program compiler to
+compiler-based analysis to post-process the model-        eliminate context-related errors in repository-
+generated code by first detecting discrepancies be-       level code generation (Section 3);
+tween the generated code and the project’s con-
+                                                        • Extensive experiments and analysis based on
+text. We then utilize information extracted from the
+                                                          two LLMs, i.e., GPT-3.5-Turbo and Code Llama
+project code base to rectify the mismatches in using
+                                                          (13B), showing the effectiveness of the proposed
+modules, APIs, and classes. Our approach com-
+                                                          C O C O G EN method (Section 5).
+bines well-established compiler techniques with
+emerging generative methods, allowing software
+                                                        The source code and dataset used in this paper
+developers to leverage the power of LLMs with-
+                                                        are available at: https://github.com/
+out being overwhelmed and discouraged by the
+                                                        CGCL-codes/naturalcc/tree/main/
+frequent compilation and semantic errors in the
+                                                        examples/cocogen.
+model-generated code.
+   We present C O C O G EN, a method to allow an        2     Background
+LLM to leverage the code repository of a software
+project to enhance the quality of the generated code.   2.1    LLM-based Code Generation
+For a given LLM-generated code sample, C O C O -        Our work targets the code generation task, which
+G EN first compiles it and identifies context-related   produces source code from a natural-language de-
+errors. It then retrieves the related context from      scription complemented by programming context
+the code repository to fix the errors. This itera-      (e.g., project-specific APIs, and data structures).
+tive generation and verification process proceeds       We denote this input as x. Given x, it is first con-
+repetitively until no error is identified in the gen-   verted to a sequence of tokens x = [x1 , . . . , x|x| ],
+erated solution. We demonstrate that C O C O G EN       and a generative Language Model (LM) pLM (x)
+enhances the accuracy of generation (as indicated       predicts new tokens sequentially. At each step t,
+by pass rates) by bridging the gap between the          the LM calculates the probability distribution of
+repository context and the intended solution.           the next token as pLM (xt |x1:t−1 ). The probability
+  We evaluate C O C O G EN by applying it to the        of generating a program y with token sequence
+CoderEval benchmarking dataset (Yu et al., 2024),       y = [x|x|+1 , . . . , x|x|+|y| ] is computed as a prod-
+                                                    2337
+Table 1: Typical errors reported in compilation and                                       Error Type    API       OBJECT   UNDEF      OTHER       FUNC
+
+execution                                                                                                 14%                              17%
+Error Type     Example                                                                                          2%
+                                                                                                                            34%                   1%
+UNDEF          No name ‘AsyncBolt5x0’ in module ’neo4j._sync.io._bolt5’                                          7%
+API            No value for argument ‘xmls’ in function call
+OBJECT         ‘function’ object is not subscriptable                                                              5%
+FUNC           The generated function not passes a test case
+OTHER          Parsing failed: ‘expected an indented block after function definition’                                       1%
+                                                                                              72%
+                                                                                                                                           47%
+                                                                                                 Function−level                   Project−level
+uct of next-token distributions given left context:
+                                 |x|+|y|
+                                   Y                                                    Figure 2: Distribution of error types in the generated
+               p(y|x) =                      pLM (xt |x1:t )                   (1)
+                                                                                        solutions on CoderEval dataset
+                                t=|x|+1
+
+   For few-shot learning with large LMs, the gener-                                     and incorporates the five code fragments with the
+ation is also often conditioned on a fixed set of m                                     highest similarity scores, as determined by dense
+exemplars, {⟨xi , yi ⟩}i≤m . Thus, the LLM-based                                        passage retrieval (Karpukhin et al., 2020), into the
+code generation can be formulated as:                                                   prompt for improved code generation.
+                                                                                           As the code is generated, we compile it and col-
+             pLM (y|x) = p(y|x, {⟨xi , yi ⟩}i≤m )                              (2)
+                                                                                        lect any errors reported by the compiler or encoun-
+  Practically, the probability of the next token xt                                     tered during testing. We have generated 10 candi-
+depends on a fixed number of preceding tokens                                           date solutions for a task, comprising 850 solutions
+xmax(1,t−w) : xt−1 , defined by the model’s context                                     for function-level tasks and 1450 for project-level
+window length w, without encompassing the entire                                        tasks. We report the Pass@10 rate as 53.57% for
+software project’s code base.                                                           function-level tasks and 39.73% for project-level
+                                                                                        tasks. The code that does not pass the test has been
+2.2 Error Analysis in Code Generation                                                   taken into error analysis. Each generated code snip-
+The performance of simple function-level code gen-                                      pet contains precisely one type of error. If multi-
+eration has significantly improved, as demonstrated                                     ple errors are reported by the compiler, the most
+by an increase in the pass rate from 31.6% with                                         common error type is selected for analysis. The
+CodeT5 (Wang et al., 2021) to 94.7% with the                                            error distribution reveals that four specific types of
+state-of-the-art Code Llama (Rozière et al., 2023)                                      errors constitute the majority of all errors encoun-
+on the widely-used HumanEval benchmark (Chen                                            tered. We categorize these errors into: 1) UNDEF,
+et al., 2021). However, a recent study (Yu et al.,                                      involving Use of Undefined Symbol, 2) API, involv-
+2024) shows that existing LLMs for code gener-                                          ing Incorrect Use of APIs, 3) OBJECT, involving
+ation struggle to generate code snippets that are                                       Improper Use of an Object, 4) FUNC, involving
+dependent on the project contexts, such as private                                      Runtime or Functional Errors, and 5) OTHER, in-
+APIs, classes, data structures, or type constraints.                                    volving Other Syntax and Semantic Errors. Table 1
+To this end, various benchmarks, including ClassE-                                      presents several errors encountered in compiling
+val (Du et al., 2024), CoderEval (Yu et al., 2024),                                     and testing. One example is the “UNDEF” error,
+and CrossCodeEval (Ding et al., 2023), have been                                        where a variable AsyncBolt5x0 is referenced
+devised to assess the performance of LLMs in gen-                                       but does not exist in the specified module.
+erating context-dependent code within the project.                                         Figure 2 illustrates the distribution of error types,
+   To better illustrate our motivation, we perform                                      under the scenario of function-level code gener-
+an empirical analysis of when the LLMs fail to gen-                                     ation and project-level code generation. From
+erate complex code that is dependent on project-                                        this figure, we can observe that the majority of
+level context, on the CoderEval dataset (Yu et al.,                                     errors are runtime or functional errors, accounting
+2024). This dataset comprises 85 function-level                                         for 72% and 34% for function-level and project-
+tasks and 145 project-level tasks. Specifically, we                                     level code generation, respectively. Furthermore,
+select the GPT-3.5-Turbo (OpenAI, 2023) as a tar-                                       the UNDEF errors and the API errors account
+get LLM for function-level code generation. Based                                       for substantially high portions of 21% and 64%
+on it, we select a state-of-the-art method called                                       for function-level and project-level code genera-
+RepoCoder (Zhang et al., 2023a). RepoCoder re-                                          tion, respectively. C O C O G EN addresses both types
+trieves project-level context as an augmentation                                        of errors associated with project context by sup-
+                                                                                   2338
+                                                                      Extracted Project Context
+    Code Files
+     async/bolt3.py
+
+                A stb ract Syntax Trees                 async/bolt.py                 async/_bolt3.py             main.py         sync/bolt.py          ...
+      main.py
+
+
+      async/bolt.py
+
+                    async/bolt.py
+                                         async/bolt3.py
+
+
+                                          async/bolt3.py
+
+
+     class
+      class SynbBolt
+             SynbBolt:
+:
+ ()
+                   class
+       def
+        def get_handler                  class  SynbBolt
+             get_handler
+       “Return   Bolt         ()
+         class  SynbBolt:
+:
+ ()
+
+      class AsyncBolt
+        “Return
+     protocol     Bolt:
+
+                handlers 
+
+                                           def
+                                            def
+                                          name
+                                                get_handler
+                                                 get_handler   ()
+
+                                                     body protocol
+                                                                          class AsyncBolt:
+                class AsyncBolt3:
+                   class SyncBolt:
+
+      protocol   handlers 
+
+       def get_handler   ():
+              “Return
+                                            “Return Bolt
+                                                     Bolt protocol          """ Server connection            """Handler for 
+                      ...
+                ...
+     ...”
+      ...”
+          “Return Bolt protocol
+                                         handlers 
+
+                                          handlers 
+ function
+                                         ASyncBolt
+                                         ...”
+                                                                          for Bolt protocol. """
+
+         Bolt 3 protocol."""   f3                          f2
+                                          ...”
+         handlers”
+
+          <to be completed>                   name     doc ...                                                                                                                lass
+                                                                         @classmethod
+                     class BoltStates(Enum):
+       CONNECTED = "CONNECTED"
+
+                                                                                                                                                                             C
+
+                                              get_han “Return            def get_handler(p_ver):
+             """Defines states for        READY = "READY"
+                 Function
+                                              dler    Bolt ...”            """ Return Bolt                  a Bolt connection."""
+         STREAMING = "STREAMING"
+                                                                         protocol handlers."""
+ f1                                                                           Variable
+
+
+
+
+                                                      ...
+                                                                                                            
+
+                                                                           <to be completed>
+
+                                                                     a
+                                                                     ( )P    roject-level Context Extraction
+                                     erations
+                                    It                e re a o e
+                                                    R t i v l C nt xt                                   e erated Solution
+                                                                                                      G n                                                Error Feedback
+ T sa k Requirement                                                                                   def get_handler(p_ver):
+
+                                                        class SyncBolt:
+
+     Return Bolt protocol                 I               def get_handler(p_ver):
+                      from ._bolt3 
+
+                                                     f2     from ._bolt3 import
+                          import SyncBolt3
+                              No name 'SyncBolt3' in
+     handlers based on the                                  SyncBolt3
+                                  SyncBolt3.handler()...                           module async._bolt3
+                                         ...
+
+
+
+
+     value of p_ver for                  ( )
+     AsyncBolt.
+
+                         II           module neo4j._sync.io._bolt3:
+                  def get_handler(p_ver):
+
+     class AsyncBolt:
+                                     class AsyncBolt3:
+                            from ._bolt3 
+
+       def get_handler(p_ver):
+                              def handler(): ...
+                           import AsyncBolt3
+
+    f1 <to_be_completed>
+
+                           f3 class BoltStates: ...               LLMs
+                                                                                                           AsyncBolt3.handler()...
+                                                                                                                                         Compiler          No compilation error
+                                                                      b
+                                                                     ( ) It   erative Context Refinement
+    f1
+
+Figure 3: Overview of the C O C O G EN method. (a) the project-level code context extraction process; (b) iterative
+refinement to fix compiler-reported errors
+
+plying the relevant project context. Experiments                                                     code file within the project into an Abstract Syntax
+demonstrate that C O C O G EN not only fixes these                                                   Tree (AST), extracting tree nodes that correspond
+two types of error but also mitigates other compila-                                                 to classes, functions, or variables. Subsequently,
+tion errors by providing context feedback on error                                                   if a node of these types is found to be a child of
+messages to the code LM, leading directly to an                                                      another node (e.g., the function get_handler
+improvement in prediction accuracy.                                                                  and the class AsyncBolt in Figure 3a’s AST) ,
+                                                                                                     an edge is created from the parent node to the child
+3         Methodology                                                                                node, establishing a hierarchical relationship.
+3.1 Overview                                                                                            Take the function f1 from Figure 3a as an ex-
+                                                                                                     ample. From this figure, we can see that both
+Figure 3 depicts the workflow of C O C O G EN, con-
+                                                                                                     its semantics (e.g., its docstring), and its syntac-
+sisting of two crucial components: 1) a method
+                                                                                                     tic relation between the parent class AsyncBolt
+for extracting project-level code context through
+                                                                                                     and file async/bolt.py are captured. This
+both syntactic and semantic approaches, and 2) a
+                                                                                                     allows C O C O G EN to find the function from the
+component responsible for iterative generation and
+                                                                                                     project syntactically using the function’s quali-
+evaluation of solutions. This process refines the
+                                                                                                     fied name AsyncBolt.get_handler(), or
+generated solutions incrementally, ensuring they
+                                                                                                     semantically according to its docstring “Return
+evolve towards an error-free state that seamlessly
+                                                                                                     Bolt protocol handlers”.
+aligns with the codebase of the software project.
+
+3.2 Project-Level Code Context Extraction
+                                                                                                     3.3         Retrieval-Augmented Code Generation
+Supposing that the code generation tools are acti-
+vated at a specific juncture. In light of the natural-                                               We leverage project-level code context in the
+language requirement and the code produced by                                                        retrieval-augmented generation paradigm (Zhang
+LLMs after an initial iteration, our objective is to                                                 et al., 2023a; Ding et al., 2024; Karpukhin et al.,
+extract the semantic context of the generated code                                                   2020), which has been widely adopted to integrate
+from the project’s code base.                                                                        factual knowledge into LLMs and address halluci-
+   Unlike plain texts, source code has syntactic                                                     nation issues. In practice, we commence by ex-
+structures that enable precise identification of ele-                                                tracting project-level context from the database
+ments in a project. Thus, in practice, we employ                                                     through the construction of a Structured Query
+syntax-directed program analysis (Aho et al., 2006)                                                  Language (SQL) query. Following this, we en-
+at various points throughout the offline stage to                                                    hance the acquired context by retrieving similar
+extract the code context at the project level. We                                                    code snippets based on the dense passage retrieval
+initially employ a parser to transform each source                                                   techniques (Karpukhin et al., 2020).
+                                                                                            2339
+ (a) Prompt for SQL Synthesize                                                                          trieval (Karpukhin et al., 2020). In the initial search
+  Task instruction: Please generate SQL according to given error line
+
+  content and error message.
+                                                                                                        round, no compilation error is reported, and C O C O -
+  Error Line Content: loggerDict.RootLogger(msg)                                                        G EN utilizes the task description string for retrieval.
+                                                                                                        In subsequent searches, C O C O G EN employs the
+  Error Message:         No name 'RootLogger' in module ‘loggerDict’               Demonstration 
+
+
+  SQL: FROM Module m, Variable v WHERE m.getName() = ‘loggerDict’                  Examples
+
+
+  SELECT v
+
+  Error Line Content: from ._bolt3 import AsyncBolt3
+                                                                                                        error report and the corresponding error line.
+  Error Message: No name ‘
+
+  SQL:    [to be completed]
+                                    SyncBolt3’ in module ‘async._bolt3’
+                                                                                                           Given a natural-language query q, C O C O G EN
+                                                                                                        first converts it into an embedding vector by utiliz-
+ (b) Prompt for Code Generation                                                                         ing an encoder network, as follows:
+ Task instruction:      Please generate code following the task requirement,
+
+ fixing errors in previous solution according to relevant context (if exist).
+ Task Requirement: Check if in given list of numbers, are any two num-
+                                                                                                                        hq = ENCODER(q)                     (3)
+ bers closer to each other than given threshold.                                   Demonstration 
+
+
+                      def has_close_elements(numbers: List[float],                 Examples
+
+
+                                                                                                           C O C O G EN utilizes a pre-trained Transformer
+ Desired Solution:
+  t   hreshold: float) -> bool ...
+                                    Bolt protocol handlers based on the value of
+ Task Requirement:
+
+  p_ver for AsyncBolt.
+                           Return
+                                                                                                        network (Vaswani et al., 2017) as the encoder. Af-
+ Last Solution:     def handlers(p_ver):
+                         from   ._bolt3   import   SyncBolt3
+                                                                                                        ter generating the query vector, C O C O G EN calcu-
+                                                                                                        lates the cosine similarity between the query and
+                    ...
+                                                                                   Compiler
+
+
+ Error Line Content: from ._bolt3 import            SyncBolt3                      Feedback
+ Error Message: No name ‘         SyncBolt3’ in module ‘async._bolt3’
+                                                                                                        embedding vectors of each context entry hc . This
+                         module neo4j._async._bolt3:
+                                                                                                        similarity measure is defined as:
+ Project Context:
+                           class AsyncBolt3:                                       Retrieved
+                               def get_handler(): ...                              Context
+                             class BoltStates: ...
+
+
+
+
+                                                                                                                                         h⊺q hc
+ Desired Solution:        [to be completed]
+
+                                                                                                                   sim(hq , hc ) =                          (4)
+                                                                                                                                     ||hq || · ||hc ||
+Figure 4: Prompt examples for (a) SQL synthesize and
+(b) code generation
+                                                                                                        and the top-n entries exhibiting the highest similar-
+Structural Search. Based on the compiler feed-                                                          ity to the query are retrieved as results.
+back, we aim to retrieve the relevant project-level
+                                                                                                        3.4   Refinement with Compiler Feedback
+context from all extracted ones. We implement
+this by transforming the textual compiler feedback                                                      Figure 3(b) showcases the iterative refinement
+into an SQL query using the ChatGPT. The prompt                                                         pipeline. Given the task requirement and partial
+used is presented in Figure 4a. Several examples of                                                     function f1 , a semantic retrieval is activated to iden-
+paired compiler feedback and SQL queries are pro-                                                       tify similar functions. Specifically, the function
+vided as demonstrations for in-context learning* .                                                      f2 , which provides equivalent functionality in syn-
+   For instance, consider the compiler feed-                                                            chronous scenario, is identified. Utilizing both the
+back: No name ’SyncBolt3’ found in module                                                               retrieved context and the prompt illustrated in Fig-
+’async._bolt3’, the resulting SQL query gen-                                                            ure 4(b), the language model generates a solution.
+erated by ChatGPT is as follows:                                                                           However, the generated output mistakenly in-
+                                                                                                        vokes SyncBolt3 due to its intended use in
+ FROM Module m, Class c                                                                                 asynchronous scenarios, not aligning with the syn-
+ WHERE m.contains(c)                                                                                    chronous scenario in f2 The compiler’s feedback
+ and m.getName() = ‘async._bolt3’                                                                       highlights this error. With this feedback, C O C O -
+ SELECT m, c                                                                                            G EN conducts the structural and semantic search,
+                                                                                                        leading to the discovery of the correct function f3
+   Using this SQL query, the code snippets that
+                                                                                                        for asynchronous scenarios. Incorporating the error
+involve the implementations of AsyncBolt3 will
+                                                                                                        details and context into the next iteration ensures
+be returned from our constructed database. The
+                                                                                                        accurate function invocation. This process goes
+detailed process of constructing and querying such
+                                                                                                        iterative until no error is reported by the compiler,
+SQL database is refer to Appendix G.
+                                                                                                        resulting in an error-free solution that aligns with
+Semantic Search. In addition to returning the                                                           the project’s environment.
+project-level context retrieved by the SQL query,                                                          It is noteworthy that C O C O G EN does not take
+we also enhance the acquired context by retriev-                                                        into account FUNC errors, which arise during exe-
+ing similar code snippets using dense passage re-                                                       cution despite successful compilation. C O C O G EN
+   * Only one demonstration example is illustrated in Fig-
+                                                                                                        focuses on addressing compilation errors, which
+ure 3(b), the full list of examples can be found in Ap-                                                 constitute 66% of the total errors in the context of
+pendix G.2.                                                                                             project-level code generation, as shown in Figure 6.
+                                                                                                     2340
+Table 2: Pass rates of C O C O G EN based on two LLMs, i.e., GPT-3.5-Turbo and Code Llama (13B), assessed against
+various baselines across different splits of the CoderEval dataset
+
+ Data Split          Class Runnable                       File Runnable                Project Runnable
+ Method       Pass@1 Pass@5 Pass@10             Pass@1       Pass@5 Pass@10       Pass@1 Pass@5 Pass@10
+ LLM: GPT-3.5-Turbo
+ Direct          8.73     12.57     14.55         19.85      27.62      30.88        9.57     12.08      13.04
+ ReACC          20.36     33.27     38.18         17.65      28.92      33.82       11.30     19.53      21.74
+ RepoCoder      35.45     40.46     41.82         29.41      34.61      36.76       16.96     19.57      21.74
+ C O C O G EN   28.00     44.92     49.09         30.29      43.58      47.06       21.30     36.73      39.13
+ LLM: Code Llama (13B)
+ Direct         18.91     30.65     34.55         18.53      27.82      29.41        5.22      8.70      13.04
+ ReACC          20.36     33.27     38.18         17.65      27.61      33.82       11.30     19.53      21.74
+ RepoCoder      17.82     35.22     40.00         15.00      28.31      32.35       16.09     21.36      21.74
+ C O C O G EN   26.36     39.42     41.82         17.06      29.39      33.82       13.04     28.04      34.78
+
+
+
+
+4   Experimental Setup                                      across other coding tasks. the statistics and exper-
+                                                            imental results of these benchmarks can be found
+4.1 Models and Datasets
+                                                            in Appendix B and Appendix F.
+To validate the effectiveness of C O C O G EN, we
+select GPT-3.5-Turbo and Code-Llama 13B base†               4.2   Baseline Methods
+language models for investigation. The technical            C O C O G EN can function seamlessly and be inte-
+details of models and their invocation for inference        grated into existing LLMs, requiring only black-
+are presented in Appendix A.                                box access to these models. In this paper, we se-
+   We conduct experiments using the Python split            lect two state-of-the-art LLMs for code generation,
+of the CoderEval benchmark (Yu et al., 2024), re-           namely GPT-3.5-Turbo (OpenAI, 2023) and Code
+ferred to as CoderEval-Python. It is a benchmark            Llama (13B) (Rozière et al., 2023), as our base
+designed to evaluate models within realistic soft-          models. To validate the effectiveness of C O C O -
+ware development scenarios. Without loss of gener-          G EN, we compare it with the following baselines:
+alizability, we concentrate on the Python program-          ▷ Direct Generation (Yu et al., 2024). This line
+ming language within this dataset. This bench-              of method denotes directly inputting the task re-
+mark categorizes 230 test samples into six levels           quirements into LLM for code generation, without
+of context dependency: 1) self-contained: built-            providing additional context.
+in types/functions, no imports required; 2) slib-           ▷ ReACC (Lu et al., 2022). We employ the
+runnable: standard libraries/modules, no installa-          retrieval-augmented generation technique intro-
+tion needed; 3) plib-runnable: publicly-available           duced in this baseline for code generation tasks.
+libraries on PyPI/Maven; 4) class-runnable: code            More precisely, we retrieve project contexts aligned
+outside the function but within a class; 5) file-           with the task instructions semantically through em-
+runnable: code outside the class but within the             bedding similarity, and leverage them to augment
+file; and 6) project-runnable: code in other source         the prompts of LLMs for better code generation.
+files. We concentrate on the last three dependency          ▷ RepoCoder (Zhang et al., 2023a). Similar to
+types, where the solutions are dependent on project-        our work, the referenced baseline also proposes the
+specific contexts. There are 55, 68, and 23 tasks as-       iterative refinement of generated code. Specifically,
+sociated with each dependency level, respectively.          it involves retrieving similar code snippets derived
+   We also evaluate C O C O G EN on two function-           from the previously generated ones, and employ-
+level code generation benchmarks, namely Hu-                ing them to augment the prompts of LLMs. One
+manEval (Chen et al., 2021) and MBPP (Austin                distinguishing feature is that this baseline does not
+et al., 2021), as well as a project-level code com-         leverage compiler feedback.
+pletion benchmark named CrossCodeEval (Ding
+et al., 2023), to further validate its generalizability     4.3   Evaluation Metrics
+  †
+    https://huggingface.co/codellama/                      We employ the Pass@k metric (Chen et al., 2021;
+CodeLlama-13b-hf                                           Yu et al., 2024) for code generation tasks, and em-
+                                                      2341
+                       CoCoGen         No Feedback              RepoCoder           Table 3: Pass rates of C O C O G EN with components
+               Class−level              File−level               Project−level      ablated, based on GPT-3.5-Turbo model using the
+          50                      50                       40                       CoderEval-Python dataset
+Pass@10
+
+
+
+                                  45
+          45                                               30
+                                  40
+          40                                                                            Method                           Pass@1   Pass@5   Pass@10
+                                                           20
+                                  35                                                    C O C O G EN                     28.01    43.01    46.58
+          35
+                                  30                       10                           - w/o CF and SQL (RepoCoder)     28.72    34.44    36.30
+               0   1    2   3          0   1   2   3             0   1   2   3          - w/ CF, w/o SQL, w/o Semantic   25.69    37.50    41.78
+                                 Number of Iterations                                   - w/ CF and SQL, w/o Semantic    26.37    38.31    41.78
+                                                                                        - w/ CF and Semantic, w/o SQL    27.39    40.02    44.45
+
+Figure 5: Pass@10 of C O C O G EN, RepoCoder, and No
+Feedback baseline across three dependency levels
+                                                                                    RepoCoder, and C O C O G EN, exhibit a noteworthy
+                                                                                    performance superiority over the no context (i.e.,
+ploy the code exact match (C-EM), code edit sim-                                    direct) model, thereby affirming the practical value
+ilarity (C-ES), identifier exact match (I-EM), and                                  of the context in project-level code generation.
+identifier F1 score (I-F1) to evaluate both the code
+match rate and the identifier match rate for code                                   5.2      Effectiveness of the Iterative Refinement
+completion tasks, follows Ding et al. (2023). We                                    Here, we investigate the effectiveness of iterative
+present the details of the Pass@k metric for code                                   refinement in code generation with compiler feed-
+generation. For metrics used in the code comple-                                    back. We conduct an ablation analysis on both Re-
+tion task, readers are referred to Appendix C.                                      poCoder and C O C O G EN, via removing or retaining
+Pass@k. Following previous studies (Chen et al.,                                    the iterative refinement process. Figure 5 shows the
+2021; Yu et al., 2024), we evaluate the functional                                  performance of RepoCoder and C O C O G EN, with
+correctness of the generated code by executing test                                 respect to varying iterations, on different data splits.
+cases. We employ the Pass@k metric, where k                                         This figure clearly illustrates that as the number of
+denotes the number of programs generated for each                                   iterations increases, the performance of C O C O G EN
+task. A task is solved if at least one solution passes                              also exhibits a corresponding improvement. The
+all unit tests, and we report the overall proportion                                improvement substantiates the efficacy of our sug-
+of solved tasks. To reduce sampling variance, we                                    gested iterative refinement process, demonstrating
+generate n ≥ k solutions (for this study, n = 20                                    its ability to enhance the generated code through
+and k = 1, 5, 10) for each task, count the number                                   multiple iterations progressively.
+of correct solutions c ≤ n that pass the unit tests,
+and calculate the unbiased estimator:                                               5.3      Ablation on Components
+                           "           #                                           To explore the impact of each component within
+                                    n−c
+             Pass@k = E 1 − nk                    (5)                              C O C O G EN on overall performance, we remove
+                                                       k                            various components from C O C O G EN, including
+5         Results and Analysis                                                      the compiler, SQL retriever, and semantic retriever.
+                                                                                    Notably, the configuration that excludes the com-
+5.1 Overall Performance of C O C O G EN                                             piler and SQL, relying solely on semantic retrieval,
+Table 2 shows the overall performance of C O C O -                                  is known as RepoCoder (Zhang et al., 2023a).
+G EN, assessed against various baselines, on the                                       Table 3 demonstrates the pass rates of C O C O -
+CoderEval (Yu et al., 2024) and the CrossCodeE-                                     G EN across CoderEval-Python. The data indicates
+val (Ding et al., 2023) dataset, respectively. This ta-                             that incorporating compiler feedback does improve
+ble shows that the C O C O G EN can significantly out-                              accuracy, although not markedly substantial. The
+perform other baselines on the project-level code                                   reason is that highlighting compilation errors alone
+generation task. This trend persists, with a few                                    does not provide related context for resolving them,
+exceptions noted specifically in terms of Pass@1.                                   which is important in project-level coding prob-
+We attribute such exceptions to variations in the                                   lems. Also, compared to RepoCoder—which relies
+generated solutions. Selecting a significantly larger                               solely on semantic retrieval, integrating compiler
+n (e.g., 1000), as discussed in (Li et al., 2022), sta-                             feedback with project-specific context results in a
+bilizes the result and eliminates these expectations.                               stable performance improvement. Results on each
+Moreover, it becomes evident that models incor-                                     data split can be found in Appendix F.2.
+porating contextual information, such as ReACC,                                        Further analytical experiments, including the
+                                                                                 2342
+                                                                                        Task Requirement Use the value in timedelta to generate the Structure class.
+
+                              CoCoGen        No Feedback       RepoCoder                def dehydrate_timedelta(value):
+ Context class timedelta: self.days
+
+                                                                                          :param value:
+                                self.seconds ...
+                                UNDEF                              API                    :type value: timedelta         class Structure:
+
+                                                                                                                           def __init__(self, tag, fields)
+                   5000                                                                 Reference Solution
+                                                   1500                                       def dehydrate_timedelta(value):
+
+                   4000                                                                           days = value.days
+
+                                                                                                  seconds = value.seconds
+
+                   3000                            1000                                           microseconds = value.microseconds
+
+Number of Errors
+
+
+
+
+                                                                                                  nanoseconds = microseconds * 1000
+
+                   2000                             500                                           return Structure(b\"E\", days, seconds, 0, nanoseconds)
+                   1000                                                                 CoCoGen’s Solution
+                                                                                         def dehydrate_timedelta(value):
+
+                          0     1   2        3             0   1         2   3               months = 0
+
+                                                                                             days = value.days
+
+                                                                                             seconds = value.seconds
+
+                                                                                             nanoseconds = 1000 * value.microseconds
+
+                               OBJECT                          OTHER                         return Structure(b\"E\", months, days, seconds, nanoseconds)
+                   125
+                   100
+                                                   100                              Figure 7: An example of a runtime error in C O C O G EN’s
+                    75                                                              generated code for a CoderEval test case
+                    50                              50
+                    25
+                          0     1   2       3              0   1     2       3      stated task requirements and the model’s lack of
+                                        Number of Iterations                        familiarity with the Structure class’s format,
+                                                                                    despite its definition being available, resulting in
+Figure 6: Compilation errors fixed per iteration of                                 misinterpretation of the intended functionality. Fur-
+C O C O G EN, RepoCoder, and No Feedback baselines                                  ther examples are detailed in Appendix E. The ob-
+                                                                                    servations inspire us to integrate a comprehensive
+                                                                                    reference comprising documentation, web search
+evaluation of benefits from solely compiler feed-                                   results, and code execution log to provide explicit
+back, the performance of C O C O G EN on project-                                   guidelines for code generation in our future work.
+level code completion and function-level code gen-
+eration, and the efficiency of static analysis and                                  6       Related Work
+SQL queries, can be found in Appendix F.
+                                                                                    LLM-based Code Generation. Automated code
+5.4 Error Analysis and Case Study                                                   generation has a history spanning several decades,
+                                                                                    with initial endeavors utilizing rule-based sys-
+We also perform an error analysis of the gener-                                     tems (Woods, 1973) and structured predic-
+ated code in iterative generation. We follow the                                    tion (Zelle and Mooney, 1996; Zettlemoyer and
+categorization of errors defined in Section 2.2, ex-                                Collins, 2005). In recent years, the development
+amples of each error type can be found in Table 1.                                  of LLMs has led to the emergence of many promi-
+Figure 6 shows the distribution of errors resolved                                  nent models in coding tasks. These include open-
+iteratively by our C O C O G EN and two baselines.                                  access models such as DeepSeek Coder (Bi et al.,
+From this figure, we can see that the errors of vari-                               2024), Code Llama (Rozière et al., 2023), and Star-
+ous types can be effectively resolved after a single                                Coder (Li et al., 2023), alongside commercial of-
+iteration of refinement. For instance, UNDEF er-                                    ferings like GPT-3.5 (OpenAI, 2023) and GitHub
+rors are notably reduced from 5,133 to 1,042 after                                  Copilot (Microsoft, 2024). These models and tools
+one iteration. Additionally, it is observed that the                                have demonstrated significant promise in enhanc-
+RepoCoder baseline, which operates without com-                                     ing code generation capabilities.
+piler feedback, manages to rectify API and syntax
+errors, corroborating the findings in Zhang et al.                                  Project-level Code Generation. Generating ac-
+(2023a). Nonetheless, RepoCoder proves ineffec-                                     curate code within a project poses challenges due to
+tive against UNDEF and OBJECT errors, likely                                        the modular design of software engineering, which
+due to the model’s lack of awareness regarding                                      results in cross-file dependency patterns (Parnas,
+these errors in the absence of compiler feedback.                                   1972). Early works augmented N-gram, RNN, and
+   To thoroughly evaluate C O C O G EN’s effective-                                 LSTM models with an additional cache model
+ness, we focus on scenarios where compilation is                                    to track project-level changes (Tu et al., 2014;
+successful, but execution fails. In the case illus-                                 Hellendoorn and Devanbu, 2017). Pashakhanloo
+trated in Figure 7, C O C O G EN incorrectly excludes                               et al. (2023) transformed projects into a relational
+the microseconds field and erroneously adds a                                       database and proposes a graph walking method to
+month field. This error stems from ambiguously                                      traverse this database. Zan et al. (2022) first used
+                                                                                 2343
+private API documentation to improve code genera-      Acknowledgements
+tion, and Zan et al. (2023) investigated how various
+components of API documentation influence pre-         This work is supported by the Major Program (JD)
+diction accuracy. Shrivastava et al. (2023) proposed   of Hubei Province (Grant No. 2023BAA024), and
+a code completion framework using a classifier to      the National Natural Science Foundation of China
+filter useful repository-level prompt proposals. Lu    under grant No. 62102157. This work is also par-
+et al. (2022); Zhang et al. (2023a) proposed to use    tially supported by Huawei. Fangxin Lu is a visit-
+single or multiple levels of retrieval-augmented       ing student at Huazhong University of Science and
+generation mechanisms for code generation. Liao        Technology, and she is from South-Central Minzu
+et al. (2023) proposed A3 -CodGen, which utilizes      University for Nationalities.
+local, global, and third-party-library information
+for better context retrieval. (Yu et al., 2024; Liu    Limitations
+et al., 2023; Zhou et al., 2022; Ding et al., 2023)    In this paper, we utilize compilation information
+proposed benchmarks and datasets for repository-       as a means to validate programs. However, it is
+level code generation tasks.                           important to note that even programs that compile
+                                                       successfully can experience execution failures. Fur-
+Post-processing of LLMs for Code Generation.           thermore, the successful compilation of programs
+To identify correct code generated by LLM, re-         does not guarantee their safety for execution. As
+searchers employ post-processing techniques to         a result, while our findings indicate improvements
+further rank and filter the generated code. Inala      in quality metrics through the correction of code to
+et al. (2022) trained a fault-aware neural ranker      properly leverage context, it is imperative to under-
+that ranks multiple code samples based on compila-     take additional verification methods such as testing
+tion feedback. AlphaCode (Li et al., 2022) and Shi     and manual review to ascertain the functional cor-
+et al. (2022) employed filtering methods based         rectness of the generated code. The challenge of en-
+on the execution feedback. Zhang et al. (2023c)        suring functional correctness of code encompasses
+reranked LLM outputs based on back translation.        various aspects, including compliance with task re-
+SelfEdit (Zhang et al., 2023b) employed a generate-    quirements, adherence to pre/post-conditions and
+and-edit approach that utilizes execution results to   security requirements, and preserving robustness in
+improve the competitive programming task code          generating code. With many questions unanswered,
+quality. Chen et al. (2023) proposed a rubber duck     we hope our study can promote a broader view of
+debugging mechanism without human feedback,            utilizing computational linguistic technologies in
+which identifies mistakes in generated code by in-     the realm of automated software engineering.
+vestigating the execution results, and explaining
+                                                       Ethics Statements
+the generated code in natural language.
+                                                       We meticulously ensure that all code and mod-
+                                                       els integrated into our research adhere to open-
+7   Conclusion                                         access policies as outlined by the Creative Com-
+                                                       mons license. The methodology ensures full com-
+In this paper, we show how to use project-specific     pliance with copyright and intellectual property
+context information, indexed structural and seman-     laws, thereby eliminating any potential for infringe-
+tic, to fix compilation errors generated by com-       ment or unauthorized use of protected materials.
+pilers and improve the quality of code generated       By exclusively utilizing resources that are freely
+by LLMs. Our experimental results show the in-         available and legally distributable, we maintain the
+creased prevalence of errors related to project con-   highest standards of ethical conduct in research.
+texts in project-level code generation compared        This approach fosters an environment of trans-
+to function-level code generation. The presented       parency and respect for the intellectual property
+C O C O G EN can effectively fix the compilation er-   rights of others. Our commitment to these princi-
+rors by retrieving related context from the project,   ples ensures that our work advances the frontiers of
+thus significantly improving the native LLM base-      knowledge in a manner that is both legally sound
+lines on over 80% relative pass rates in generating    and ethically responsible.
+functions dependent on project-specific contexts.
+                                                   2344
+References                                              Yangruibo Ding, Zijian Wang, Wasi Ahmad, Hantian
+                                                          Ding, Ming Tan, Nihal Jain, Murali Krishna Ra-
+Alfred V. Aho, Monica S. Lam, Ravi Sethi, and Jef-        manathan, Ramesh Nallapati, Parminder Bhatia, Dan
+  frey D. Ullman. 2006. Compilers: Principles, Tech-      Roth, and Bing Xiang. 2023. Crosscodeeval: A di-
+  niques, and Tools (2nd Edition). Addison-Wesley         verse and multilingual benchmark for cross-file code
+  Longman Publishing Co., Inc., USA.                      completion. In Advances in Neural Information Pro-
+Amazon. 2023. Ai code generator—amazon codewhis-          cessing Systems, volume 36, pages 46701–46723.
+ perer. Online. Accessed 1-Feb-2024.                      Curran Associates, Inc.
+
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten      Yangruibo Ding, Zijian Wang, Wasi U. Ahmad, Mu-
+   Bosma, Henryk Michalewski, David Dohan, Ellen          rali Krishna Ramanathan, Ramesh Nallapati, Par-
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, and         minder Bhatia, Dan Roth, and Bing Xiang. 2024.
+   Charles Sutton. 2021. Program synthesis with large     CoCoMIC: Code completion by jointly modeling
+   language models. arXiv preprint arXiv:2108.07732.      in-file and cross-file context. In Proceedings of the
+Xiao Bi, Deli Chen, Guanting Chen, Shanhuang Chen,        2024 Joint International Conference on Computa-
+  Damai Dai, Chengqi Deng, Honghui Ding, Kai Dong,        tional Linguistics, Language Resources and Eval-
+  Qiushi Du, Zhe Fu, Huazuo Gao, Kaige Gao, Wenjun        uation (LREC-COLING 2024), pages 3433–3445,
+  Gao, Ruiqi Ge, Kang Guan, Daya Guo, Jianzhong           Torino, Italia. ELRA and ICCL.
+  Guo, Guangbo Hao, Zhewen Hao, Ying He, Wenjie
+  Hu, Panpan Huang, Erhang Li, Guowei Li, Jiashi        Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+  Li, Yao Li, Y. K. Li, Wenfeng Liang, Fangyun Lin,       Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng Sha,
+  A. X. Liu, Bo Liu, Wen Liu, Xiaodong Liu, Xin Liu,      Xin Peng, and Yiling Lou. 2024. Evaluating large
+  Yiyuan Liu, Haoyu Lu, Shanghao Lu, Fuli Luo, Shi-       language models in class-level code generation. In
+  rong Ma, Xiaotao Nie, Tian Pei, Yishi Piao, Junjie      Proceedings of the IEEE/ACM 46th International
+  Qiu, Hui Qu, Tongzheng Ren, Zehui Ren, Chong            Conference on Software Engineering, ICSE ’24, New
+  Ruan, Zhangli Sha, Zhihong Shao, Junxiao Song,          York, NY, USA. Association for Computing Machin-
+  Xuecheng Su, Jingxiang Sun, Yaofeng Sun, Minghui        ery.
+  Tang, Bingxuan Wang, Peiyi Wang, Shiyu Wang,
+  Yaohui Wang, Yongji Wang, Tong Wu, Y. Wu, Xin         D. Gifany, IS. Amiri, M. Ranjbar, and J. Ali. 2013.
+  Xie, Zhenda Xie, Ziwei Xie, Yiliang Xiong, Hanwei       Logic codes generation and transmission using an
+  Xu, R. X. Xu, Yanhong Xu, Dejian Yang, Yuxiang          encoding-decoding system. International Journal of
+  You, Shuiping Yu, Xingkai Yu, B. Zhang, Haowei          Advances in Engineering & Technology, 5(2):37.
+  Zhang, Lecong Zhang, Liyue Zhang, Mingchuan
+  Zhang, Minghua Zhang, Wentao Zhang, Yichao            Vincent J. Hellendoorn and Premkumar Devanbu. 2017.
+  Zhang, Chenggang Zhao, Yao Zhao, Shangyan Zhou,         Are deep neural networks the best choice for model-
+  Shunfeng Zhou, Qihao Zhu, and Yuheng Zou. 2024.         ing source code? In Proceedings of the 2017 11th
+  Deepseek llm: Scaling open-source language models       Joint Meeting on Foundations of Software Engineer-
+  with longtermism. arXiv preprint arXiv:2401.02954.      ing, ESEC/FSE 2017, page 763–773, New York, NY,
+                                                          USA. Association for Computing Machinery.
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+ Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-      Jeevana Priya Inala, Chenglong Wang, Mei Yang, An-
+ plan, Harri Edwards, Yuri Burda, Nicholas Joseph,         dres Codas, Mark Encarnación, Shuvendu Lahiri,
+ Greg Brockman, Alex Ray, Raul Puri, Gretchen              Madanlal Musuvathi, and Jianfeng Gao. 2022. Fault-
+ Krueger, Michael Petrov, Heidy Khlaaf, Girish Sas-        aware neural code rankers. In Advances in Neural
+ try, Pamela Mishkin, Brooke Chan, Scott Gray,             Information Processing Systems, volume 35, pages
+ Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz        13419–13432. Curran Associates, Inc.
+ Kaiser, Mohammad Bavarian, Clemens Winter,
+ Philippe Tillet, Felipe Petroski Such, Dave Cum-       Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick
+ mings, Matthias Plappert, Fotios Chantzis, Eliza-        Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and
+ beth Barnes, Ariel Herbert-Voss, William Hebgen          Wen-tau Yih. 2020. Dense passage retrieval for open-
+ Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie        domain question answering. In Proceedings of the
+ Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain,     2020 Conference on Empirical Methods in Natural
+ William Saunders, Christopher Hesse, Andrew N.           Language Processing (EMNLP), pages 6769–6781,
+ Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan         Online. Association for Computational Linguistics.
+ Morikawa, Alec Radford, Matthew Knight, Miles
+ Brundage, Mira Murati, Katie Mayer, Peter Welinder,
+ Bob McGrew, Dario Amodei, Sam McCandlish, Ilya         Chris F. Kemerer. 1995. Software complexity and soft-
+ Sutskever, and Wojciech Zaremba. 2021. Evaluat-          ware maintenance: A survey of empirical research.
+ ing large language models trained on code. arXiv         Annals of Software Engineering, 1(1):1–22.
+ preprint arXiv:2107.03374.
+                                                        Vladimir I. Levenshtein. 1965. Binary codes capable
+Xinyun Chen, Maxwell Lin, Nathanael Schärli, and          of correcting deletions, insertions, and reversals. In
+  Denny Zhou. 2023. Teaching large language models        Doklady Akademii Nauk SSSR, volume 163, pages
+  to self-debug. arXiv preprint arXiv:2304.05128.         845–848. Soviet Union.
+
+                                                    2345
+Jia Li, Ge Li, Xuanming Zhang, Yihong Dong, and           OpenAI. 2023. ChatGPT. Online. Accessed 1-Feb-
+   Zhi Jin. 2024. Evocodebench: An evolving code            2024.
+   generation benchmark aligned with real-world code
+   repositories. arXiv preprint arXiv:2404.00599.         David L. Parnas. 1972. On the criteria to be used in
+                                                            decomposing systems into modules. Commun. ACM,
+Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas           15(12):1053–1058.
+  Muennighoff, Denis Kocetkov, Chenghao Mou, Marc
+  Marone, Christopher Akiki, Jia Li, Jenny Chim,          Pardis Pashakhanloo, Aaditya Naik, Yuepeng Wang,
+  Qian Liu, Evgenii Zheltonozhskii, Terry Yue Zhuo,         Hanjun Dai, Petros Maniatis, and Mayur Naik. 2023.
+  Thomas Wang, Olivier Dehaene, Mishig Davaadorj,           Codetrek: Flexible modeling of code using an ex-
+  Joel Lamy-Poirier, João Monteiro, Oleh Shliazhko,         tensible relational representation. In Proceedings of
+  Nicolas Gontier, Nicholas Meade, Armel Zebaze,            10th International Conference on Learning Represen-
+  Ming-Ho Yee, Logesh Kumar Umapathi, Jian Zhu,             tations.
+  Benjamin Lipkin, Muhtasham Oblokulov, Zhiruo
+  Wang, Rudra Murthy, Jason Stillerman, Siva Sankalp      Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten
+  Patel, Dmitry Abulkhanov, Marco Zocca, Manan Dey,         Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+  Zhihan Zhang, Nour Fahmy, Urvashi Bhattacharyya,          Jingyu Liu, Romain Sauvestre, Tal Remez, Jérémy
+  Wenhao Yu, Swayam Singh, Sasha Luccioni, Paulo            Rapin, Artyom Kozhevnikov, Ivan Evtimov, Joanna
+  Villegas, Maxim Kunakov, Fedor Zhdanov, Manuel            Bitton, Manish Bhatt, Cristian Canton Ferrer, Aaron
+  Romero, Tony Lee, Nadav Timor, Jennifer Ding,             Grattafiori, Wenhan Xiong, Alexandre Défossez,
+  Claire Schlesinger, Hailey Schoelkopf, Jan Ebert, Tri     Jade Copet, Faisal Azhar, Hugo Touvron, Louis Mar-
+  Dao, Mayank Mishra, Alex Gu, Jennifer Robinson,           tin, Nicolas Usunier, Thomas Scialom, and Gabriel
+  Carolyn Jane Anderson, Brendan Dolan-Gavitt, Dan-         Synnaeve. 2023. Code llama: Open foundation mod-
+  ish Contractor, Siva Reddy, Daniel Fried, Dzmitry         els for code. arXiv preprint arXiv:2308.12950.
+  Bahdanau, Yacine Jernite, Carlos Muñoz Ferran-
+  dis, Sean Hughes, Thomas Wolf, Arjun Guha, Le-          Hinrich Schütze, Christopher D Manning, and Prab-
+  andro von Werra, and Harm de Vries. 2023. Star-           hakar Raghavan. 2008. Introduction to information
+  coder: may the source be with you! arXiv preprint         retrieval, volume 39. Cambridge University Press
+  arXiv:2305.06161.                                         Cambridge.
+Yujia Li, David Choi, Junyoung Chung, Nate Kush-
+                                                          Freda Shi, Daniel Fried, Marjan Ghazvininejad, Luke
+  man, Julian Schrittwieser, Rémi Leblond, Tom Ec-
+                                                            Zettlemoyer, and Sida I. Wang. 2022. Natural lan-
+  cles, James Keeling, Felix Gimeno, Agustin Dal
+                                                            guage to code translation with execution. In Proceed-
+  Lago, Thomas Hubert, Peter Choy, Cyprien de Mas-
+                                                            ings of the 2022 Conference on Empirical Methods
+  son d’Autume, Igor Babuschkin, Xinyun Chen, Po-
+                                                            in Natural Language Processing, pages 3533–3546,
+  Sen Huang, Johannes Welbl, Sven Gowal, Alexey
+                                                            Abu Dhabi, United Arab Emirates. Association for
+  Cherepanov, James Molloy, Daniel J. Mankowitz,
+                                                            Computational Linguistics.
+  Esme Sutherland Robson, Pushmeet Kohli, Nando
+  de Freitas, Koray Kavukcuoglu, and Oriol Vinyals.
+                                                          Disha Shrivastava, Hugo Larochelle, and Daniel Tarlow.
+  2022. Competition-level code generation with alpha-
+                                                            2023. Repository-level prompt generation for large
+  code. Science, 378(6624):1092–1097.
+                                                            language models of code. In Proceedings of the
+Dianshu Liao, Shidong Pan, Qing Huang, Xiaoxue Ren,         40th International Conference on Machine Learning,
+  Zhenchang Xing, Huan Jin, and Qinying Li. 2023.           volume 202 of Proceedings of Machine Learning
+  Context-aware code generation framework for code          Research, pages 31693–31715. PMLR.
+  repositories: Local, global, and third-party library
+  awareness. arXiv preprint arXiv:2312.05772.             Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+                                                            bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Tianyang Liu, Canwen Xu, and Julian McAuley.                Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+  2023. Repobench: Benchmarking repository-level            Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton
+  code auto-completion systems. arXiv preprint              Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,
+  arXiv:2306.03091.                                         Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller,
+                                                            Cynthia Gao, Vedanuj Goswami, Naman Goyal, An-
+Shuai Lu, Nan Duan, Hojae Han, Daya Guo, Seung-won          thony Hartshorn, Saghar Hosseini, Rui Hou, Hakan
+  Hwang, and Alexey Svyatkovskiy. 2022. ReACC:              Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa,
+  A retrieval-augmented code completion framework.          Isabel Kloumann, Artem Korenev, Punit Singh Koura,
+  In Proceedings of the 60th Annual Meeting of the          Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee, Di-
+  Association for Computational Linguistics (Volume         ana Liskovich, Yinghai Lu, Yuning Mao, Xavier Mar-
+  1: Long Papers), pages 6227–6240, Dublin, Ireland.        tinet, Todor Mihaylov, Pushkar Mishra, Igor Moly-
+  Association for Computational Linguistics.                bog, Yixin Nie, Andrew Poulton, Jeremy Reizen-
+Microsoft. 2024. Microsoft Copilot. Online. Accessed        stein, Rashi Rungta, Kalyan Saladi, Alan Schelten,
+ 1-Feb-2024.                                                Ruan Silva, Eric Michael Smith, Ranjan Subrama-
+                                                            nian, Xiaoqing Ellen Tan, Binh Tang, Ross Tay-
+OpenAI. 2022. New and improved embedding model.             lor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+  Online. Accessed 1-Feb-2024.                              Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan,
+
+                                                      2346
+  Melanie Kambadur, Sharan Narang, Aurelien Ro-                classification with probabilistic categorial grammars.
+  driguez, Robert Stojnic, Sergey Edunov, and Thomas           In Proceedings of the Twenty-First Conference on
+  Scialom. 2023. Llama 2: Open foundation and fine-            Uncertainty in Artificial Intelligence, UAI’05, page
+  tuned chat models. arXiv preprint arXiv:2307.09288.          658–666, Arlington, Virginia, USA. AUAI Press.
+
+Zhaopeng Tu, Zhendong Su, and Premkumar Devanbu.           Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  2014. On the localness of software. In Proceedings         Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  of the 22nd ACM SIGSOFT International Symposium            Weizhu Chen. 2023a. RepoCoder: Repository-level
+  on Foundations of Software Engineering, FSE 2014,          code completion through iterative retrieval and gen-
+  page 269–280, New York, NY, USA. Association for           eration. In Proceedings of the 2023 Conference on
+  Computing Machinery.                                       Empirical Methods in Natural Language Processing,
+                                                             pages 2471–2484, Singapore. Association for Com-
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob             putational Linguistics.
+  Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz
+  Kaiser, and Illia Polosukhin. 2017. Attention is all     Kechi Zhang, Zhuo Li, Jia Li, Ge Li, and Zhi Jin.
+  you need. In Advances in Neural Information Pro-           2023b. Self-edit: Fault-aware code editor for code
+  cessing Systems, volume 30. Curran Associates, Inc.        generation. In Proceedings of the 61st Annual Meet-
+                                                             ing of the Association for Computational Linguistics
+Yue Wang, Weishi Wang, Shafiq Joty, and Steven C.H.          (Volume 1: Long Papers), pages 769–787, Toronto,
+  Hoi. 2021. CodeT5: Identifier-aware unified pre-           Canada. Association for Computational Linguistics.
+  trained encoder-decoder models for code understand-
+  ing and generation. In Proceedings of the 2021           Tianyi Zhang, Tao Yu, Tatsunori Hashimoto, Mike
+  Conference on Empirical Methods in Natural Lan-            Lewis, Wen-Tau Yih, Daniel Fried, and Sida Wang.
+  guage Processing, pages 8696–8708, Online and              2023c. Coder reviewer reranking for code generation.
+  Punta Cana, Dominican Republic. Association for            In Proceedings of the 40th International Conference
+  Computational Linguistics.                                 on Machine Learning, volume 202 of Proceedings
+                                                             of Machine Learning Research, pages 41832–41846.
+William A. Woods. 1973. Progress in natural language         PMLR.
+  understanding: an application to lunar geology. In
+                                                           Shuyan Zhou, Uri Alon, Frank F. Xu, Zhengbao Jiang,
+  Proceedings of the National Computer Conference
+                                                             and Graham Neubig. 2022. Docprompting: Gener-
+  and Exposition, AFIPS ’73, page 441–450, New
+                                                             ating code by retrieving the docs. In Proceedings of
+ York, NY, USA. Association for Computing Machin-
+                                                             The Eleventh International Conference on Learning
+  ery.
+                                                             Representations.
+Hao Yu, Bo Shen, Dezhi Ran, Jiaxin Zhang, Qi Zhang,
+  Yuchi Ma, Guangtai Liang, Ying Li, Qianxiang Wang,       A       More Details on Investigated Large
+  and Tao Xie. 2024. Codereval: A benchmark of prag-               Language Models
+  matic code generation with generative pre-trained
+  models. In Proceedings of the IEEE/ACM 46th Inter-       In this paper, we have selected GPT-3.5-Turbo and
+  national Conference on Software Engineering, ICSE        Code-Llama 13B for investigation.
+  ’24, New York, NY, USA. Association for Computing
+  Machinery.                                               GPT-3.5-Turbo (OpenAI, 2023). It is a large-
+                                                           scale decoder-only model based on the Transformer
+Daoguang Zan, Bei Chen, Yongshun Gong, Junzhi Cao,         architecture (Vaswani et al., 2017). It is pre-trained
+  Fengji Zhang, Bingchao Wu, Bei Guan, Yilong Yin,
+  and Yongji Wang. 2023. Private-library-oriented          on a diverse array of data, encompassing both nat-
+  code generation with large language models. arXiv        ural language and code, and can learn a specific
+  preprint arXiv:2307.15370.                               task given an instruction and several demonstration
+                                                           examples. We perform the inference by invocating
+Daoguang Zan, Bei Chen, Zeqi Lin, Bei Guan, Wang
+  Yongji, and Jian-Guang Lou. 2022. When language          the model through an online API.
+  model meets private library. In Proceedings of Find-
+  ings of the Association for Computational Linguistics:   Code Llama (Rozière et al., 2023). It is a family
+  EMNLP 2022, pages 277–288, Abu Dhabi, United             of LLMs for code based on Llama 2 (Touvron et al.,
+  Arab Emirates. Association for Computational Lin-        2023) and further trained on 1TB code and natural
+  guistics.                                                language tokens. It can be used for code com-
+John M. Zelle and Raymond J. Mooney. 1996. Learn-          pletion and generation following natural language
+  ing to parse database queries using inductive logic      instructions. For Code-Llama 13B, we utilize its
+  programming. In Proceedings of the Thirteenth Na-        base variant, specifically designed for general code
+  tional Conference on Artificial Intelligence - Volume    generation and understanding.‡
+  2, AAAI’96, page 1050–1055. AAAI Press.
+                                                               ‡
+                                                              The   model    can  be    accessed                 via
+Luke S. Zettlemoyer and Michael Collins. 2005. Learn-      https://huggingface.co/codellama/
+  ing to map sentences to logical form: structured         CodeLlama-13b-hf.
+
+                                                       2347
+   In the inference stage, we set the decoding tem-     matches each character of the correct answer. All
+perature to 0.7, and adopt the top-k sampling           characters are the same yields EM = 1, while any
+strategy. We implement the retrieval modules            discrepancy results in EM = 0. This is a strict
+based on the text-ada model introduced by Ope-          all-or-nothing metric, where a single character dif-
+nAI (OpenAI, 2022), which is effective in both          ference results in a score of 0. The average value
+natural language search and code search. The em-        of EM on all test cases is reported.
+bedding dimension is 1,536 for the text-ada
+                                                        Edit Similarity (Levenshtein, 1965). This met-
+model. We retrieve at most 5 entries for each query.
+                                                        ric quantifies how dissimilar two strings are to one
+All the experiments in this paper are conducted
+                                                        another. It is measured by counting the minimum
+on a Linux server with 128GB memory, with four
+                                                        number of operations required to transform one
+32GB Tesla V100 GPUs.
+                                                        string into the other:
+B   More Details on the Investigated                                
+                                                                    
+                                                                    |a|                                if |b| = 0,
+                                                                    
+    Dataset                                                         
+                                                                    
+                                                                    
+                                                                    
+                                                                    |b|                                if |a| = 0,
+                                                                    
+                                                                    lev(tail(a), tail(b))              if head(a) = head(b),
+                                                                              
+In this paper, we also use three recently proposed      lev(a, b) =
+                                                                    
+                                                                    
+                                                                             lev(tail(a), b)
+                                                                              
+                                                                    
+benchmarks evaluating the project-level code com-                   
+                                                                    
+                                                                    
+                                                                    
+                                                                    
+                                                                     1 + min lev(a, tail(b))
+                                                                              
+                                                                                                        otherwise
+                                                                             
+pletion and function-level code generation ability.                             lev(tail(a), tail(b))
+
+We provide the details of each benchmark.                                                                                (6)
+                                                        F1 Score (Schütze et al., 2008). This metric eval-
+CrossCodeEval (Ding et al., 2023). It is a
+                                                        uates the balance between precision and recall for
+project-level code completion benchmark that ne-
+                                                        the retrieved identifiers. The F1 score is based on
+cessitates cross-file contextual understanding to
+                                                        the number of identifiers that both the prediction
+complete the code accurately. CrossCodeEval is
+                                                        and the ground truth share. Precision is defined as
+built on a diverse set of real-world, open-sourced,
+                                                        the ratio of the shared identifiers to the total number
+permissively-licensed repositories, including 471
+                                                        of identifiers in the prediction, while recall is the
+repositories, 2,665 test cases across 1,368 files for
+                                                        ratio of the shared identifiers to the total number of
+Python language (Ding et al., 2023).
+                                                        identifiers in the ground truth. The F1 score is then
+HumanEval (Chen et al., 2021). It is a function-        calculated as the harmonic mean of the recall rate
+level code generation benchmark that consists of        and the precision rate:
+164 programming problems with corresponding
+                                                                                               2
+Python solutions. These problems cover a range of                     F1 =              −1                               (7)
+difficulty levels and programming concepts. Hu-                                 recall       + precision−1
+manEval is widely used in evaluating LMs for code
+generation tasks due to its focus on real-world cod-    D      Errors Reported by the Compiler
+ing scenarios and its comprehensive test cases.
+                                                        We utilize pylint for error checking; it is a static
+MBPP (Austin et al., 2021). It is a function-           code analyzer designed to inspect code within a
+level code generation benchmark consisting of           project without executing it. The analyzer accepts
+974 crowd-sourced Python programming problems.          the entire file containing the solution along with
+These problems are designed to be solvable by           associated source files as input, and then it extracts
+entry-level programmers and cover programming           errors that pertain directly to the lines in the gener-
+fundamentals and standard library functionalities.      ated solution from the entirety of identified errors.
+Each problem includes a task description, a code        pylint generates a range of diagnostic messages,
+solution, and several automated test cases.             encompassing errors, warnings, recommendations
+                                                        for adhering to language conventions, and sugges-
+C    More Details on the Evaluation Metrics             tions for refactoring to adhere to best coding prac-
+                                                        tices. However, our focus is solely on the errors.
+In this work, we use several evaluation metrics for
+                                                           Each error is identified by an error code and de-
+method generation and line completion tasks. This
+                                                        scribed with an error message. The error code is
+includes:
+                                                        a numerical identifier that reflects the error’s na-
+Exact Match. This metric assesses whether each          ture, while the error message provides a concise
+character of the model’s predicted code exactly         description of the error. pylint recognizes 133
+                                                    2348
+                    Table 4: A complete list of frequently occurred errors reported by the compiler
+ Error Category   Error ID        Corresponding   Error Reason
+                                  Error Code
+                  UNDEF-P         E0401           Unable to import a Package.
+                  UNDEF-CM        E1101           A Class is accessed for an unexistent Member.
+ UNDEF
+                  UNDEF-API       E0611           A function or API cannot be found in a module.
+                  UNDEF-O         E0602           An undefined variable or Object is accessed.
+                  API-TMA         E1121           A function call passes Too Many positional Arguments.
+                  API-IA          E1120           A function call passes Insufficient Arguments.
+ API
+                                  E1111           Assignment from the function that doesn’t return anything.
+                  API-WA
+                                  E1123           A function call passes a keyword argument which has no corresponding formal parameter.
+                  OBJ-NI          E1133           A Non-Iterable value is used in place where iterable is expected.
+ OBJ              OBJ-NC          E1102           An object being called is a Non-Callable object.
+                  OBJ-NS          E1136           A subscripted value does Not support Subscription.
+ OTHER            OTHER                           Other errors reported by analyzer.
+
+
+Table 5: Pass rates on CoderEval-Python of each ap-
+proach with or without compiler feedback                                Task Requirement          Returns the key in the form of int.
+
+
+                                                                         def index(self, key):
+
+
+    Method              Pass@1        Pass@5      Pass@10                  :param key: a key
+
+
+                                                                           :return: index
+
+                                                                                                               Context
+
+                                                                                                                          class Record():
+
+
+
+    Direct               20.65         26.66       29.13                   :rtype: int
+
+                                                                                                                                __keys: t.Tuple[str]
+
+
+
+
+    Direct+CF            32.34         38.43       40.43                Reference Solution         def index(self, key):
+
+                                                                                                          if isinstance(key, int):
+
+
+
+    ReACC                34.13         41.44       43.48
+                                                                                                                if 0 <= key < len(self.__keys):
+
+                                                                                                                      return key
+
+                                                                                                                raise IndexError(key)
+
+
+    ReACC+CF             36.60         44.05       46.52                                                  elif isinstance(key, str):
+
+                                                                                                                try:
+
+
+    RepoCoder            36.82         40.73       42.17                                                                return self.__keys.index(key)
+
+                                                                                                                except ValueError:
+
+
+    RepoCoder+CF         38.00         45.38       48.26                                                  else:
+
+                                                                                                                        raise KeyError(key)
+
+
+
+                                                                                                                raise TypeError(key)
+
+
+
+
+Table 6: Pass rates of C O C O G EN on Class Runnable                   CoCoGen’s Solution
+
+test cases                                                                 def index(self, key):
+
+                                                                                 return int(key)
+
+ Data Split                              Class Runnable
+ Method                            Pass@1 Pass@5 Pass@10                       Figure 8: An error case of degenrate solution
+ C O C O G EN                      28.00    44.92    49.09
+ - w/o CF and SQL (RepoCoder)      35.45    40.46    41.82
+ - w/ CF, w/o SQL, w/o Semantic    30.00    42.58    45.45
+ - w/ CF and SQL, w/o Semantic     30.36    44.61    49.09              Task Requirement          Dynamically Generating Point Class.
+
+                                                                         def dehydrate_timedelta(value):
+ Context
+ - w/ CF and Semantic, w/o SQL     31.45    45.00    47.27                                                               class Point:
+
+                                                                           :param value:
+                                  srid_table = {}
+
+                                                                           :type value: timedelta                         srid_table_lock = Lock()
+
+                                                                        Reference Solution
+distinct error types, and only 12 of these are re-                            def point_type(name, fields, srid_map):
+
+                                                                                  def srid(self):
+
+ported frequently on the CoderEval-Python dataset.                                     try:
+
+                                                                                             return srid_map[len(self)]
+
+                                                                                       except KeyError:
+
+We have categorized these errors into four groups                                            return None
+
+                                                                                  attributes = {"srid": property(srid)}
+
+based on their characteristics, detailed in Table 1.                              for index, subclass_field in enumerate(fields):
+
+                                                                                       def accessor(self, i=index, f=subclass_field):
+
+The FUNC error category is also included in the                                              try:
+
+                                                                                                  return self[i]
+
+                                                                                             except IndexError:
+
+error distribution analysis but is excluded from the                                              raise AttributeError(f)
+
+                                                                                       for field_alias in {subclass_field, "xyz"[index]}:
+
+compiler feedback pipeline. This exclusion is be-                                           attributes[field_alias] = property(accessor)
+
+                                                                                  cls = type(name, (Point,), attributes)
+
+cause such errors can only be identified with exe-                                with srid_table_lock:
+
+                                                                                       for dim, srid in srid_map.items():
+
+                                                                                            srid_table[srid] = (cls, dim)
+
+cution, a process that extends beyond the scope of                                return cls
+
+
+
+
+
+static analysis and is unsuitable for the real-time                     CoCoGen’s Solution
+                                                                         def point_type(name, fields, srid_map):
+
+generation and refinement pipeline. The specific                             fields_dict = {f: i for i, f in enumerate(fields)}
+
+                                                                             srid = srid_map.get(len(fields), None)
+
+                                                                             class Point:
+
+types of each error and corresponding error codes                                def __init__(self, *args):
+
+                                                                                      if len(args) != len(fields):
+
+are documented in Table 4.                                                                 raise ValueError("Wrong number of arguments")
+
+                                                                                      self._coordinates = tuple(args)
+
+                                                                                      self._srid = srid
+
+                                                                                 @property
+
+E      More Details About the Error Cases                                        def srid(self):
+
+                                                                                      return self._srid
+
+                                                                                 @srid.setter
+
+                                                                                 def srid(self, value):
+
+We delve into additional cases where C O C O G EN                                     self._srid = value
+
+                                                                                 def __iter__(self):
+
+struggles to generate viable solutions, elucidating                                   return iter(self._coordinates)
+
+                                                                                 def __eq__(self, other):
+
+the underlying causes to foster further research. We                                  return isinstance(other, Point) and 
+
+                                                                                            self._coordinates == other._coordinates
+
+                                                                                 def __repr__(self):
+
+identify two primary factors leading to execution                                     return f"{name}({', '.join(
+
+                                                                                                       map(str, self._coordinates))})"
+
+errors despite successful compilation. The first fac-                        return Point
+
+tor is the occurrence of degenerate solutions, such                   Figure 9: An error case of misinterpreting task require-
+as overly simplistic or redundant code. This phe-                     ments
+
+                                                                 2349
+Table 7: Pass rates of C O C O G EN on File Runnable test       Table 9: Pass rates of C O C O G EN on varying iterations
+cases
+                                                                    Iteration   Class Level   File Level   Project Level
+ Data Split                             File Runnable               i=0         34.55         30.88        13.04
+ Method                           Pass@1 Pass@5 Pass@10
+                                                                    i=3         49.09         47.06        39.13
+ C O C O G EN                     30.29    43.58    47.06
+ - w/o CF and SQL (RepoCoder)     29.41    34.61    36.76
+                                                                    i = 10      47.27         45.59        39.13
+ - w/ CF, w/o SQL, w/o Semantic   26.03    37.41    42.65
+ - w/ CF and SQL, w/o Semantic    26.76    37.68    39.71       Table 10: C-EM, C-ES, I-EM, and I-F1 scores based on
+ - w/ CF and Semantic, w/o SQL    27.35    39.90    45.45       the GPT-3.5-Turbo on the CrossCodeEval dataset
+Table 8: Pass rates of C O C O G EN on Project Runnable             Category       Code Match          Identifier Match
+test cases                                                          Method         C-EM C-ES           I-EM I-F1
+ Data Split                             Project Runnable            Direct         1.91   50.51        3.60     32.27
+ Method                           Pass@1 Pass@5 Pass@10             ReAcc          5.48   54.03        10.02 38.49
+ C O C O G EN                     21.30     36.73    39.13          RepoCoder      8.52   55.05        13.02 41.05
+ - w/o CF and SQL (RepoCoder)     16.96     19.57    21.74
+ - w/ CF, w/o SQL, w/o Semantic   14.35     25.62    30.43          CoCoGen        9.08   55.31        14.11 42.34
+ - w/ CF and SQL, w/o Semantic    15.65     25.12    30.43
+ - w/ CF and Semantic, w/o SQL    17.83     28.50    34.78
+                                                                F.2     More Results on the Ablation Study
+nomenon is discovered and explored in (Zhang                    To further examine the performance of each compo-
+et al., 2023c). Figure 8 exemplifies this issue,                nent of C O C O G EN across different dependency lev-
+showcasing a solution that omits necessary validity             els of test cases, we evaluate C O C O G EN at various
+checks and error handling, neither of which are                 dependency levels from the CoderEval-Python test
+specified in the task requirements, nor produced                suite. The results are presented in Table 6, Table 7,
+by C O C O G EN’s outputs. Our analysis reveals that            and Table 8. The results show that utilizing com-
+degenerate solutions frequently pass compilation,               piler feedback and structural queries consistently
+rendering compiler-based verification ineffective.              demonstrates performance improvements across
+   Another prevalent mistake involves misinterpret-             most scenarios. Furthermore, it achieves better per-
+ing task requirements, resulting in solutions that              formance when stronger cross-file dependencies
+lack logical coherence. Figure 9 depicts an instance            are present (i.e., at the file-level and project-level
+where the assignment is to leverage the pre-existing            tasks), indicating that C O C O G EN can accurately
+Point class; instead, the LM disregards this spec-              capture the context across the project.
+ification and redundantly recreates the class. This
+underscores the challenge LLMs face in accurately
+comprehending prompts and generating appropri-                  F.3     Varying the Number of Iterations
+ate solutions.                                                  To investigate whether iteration could continuously
+                                                                improve performance, we increase the number of
+F    More Analytic Experiments                                  iterations to ten. As shown in Table 9, with more
+                                                                iterations, the performance of C O C O G EN reaches
+F.1 Usefulness of Compiler Feedback                             a plateau. This indicates that there are still errors
+Here, we examine the usefulness of compiler feed-               that cannot got repaired by C O C O G EN, leaving for
+back by integrating it into three baseline models:              further research.
+Vanilla, ReACC, and RepoCoder, each considered
+separately. We conduct experiments using the GPT-               F.4     C O C O G EN on Project-level Code
+3.5-Turbo and subsequently reported the average                         Completion
+score across the entire CoderEval-Python dataset
+consisting of six levels of context dependencies, as            We also evaluate C O C O G EN on project-level code
+shown in Table 5. The table provides clear evidence             completion tasks. Although C O C O G EN is origi-
+that incorporating compiler feedback yields a no-               nally designed for code generation tasks, the com-
+table enhancement in model performance for code                 piler feedback may also benefit this code comple-
+generation. Specifically, a comparison between                  tion task. The results are presented in Table 10.
+RepoCoder with and without compiler feedback                    From the table, we can see that the compiler feed-
+reveals a substantial increase in Pass@1 from 36.82             back does improve performance, although not as
+to 38.00.                                                       significantly as it does in the code generation task.
+                                                             2350
+Table 11: The performance of CoCoGen across varying      fixed after the last iteration, and identify that two
+iterations on the HumanEval benchmark (CE: Compila-      test tasks are responsible for all 7 errors: one named
+tion Errors, CE%: their proportion among all generated
+                                                         "sum" contributed to six errors, and another called
+solutions)
+                                                         "month_season" resulted in one error. We detail
+            Pass@1   Pass@5   Pass@10   CE    CE(%)
+                                                         these error cases as follows:
+ Direct     61.52    80.56    83.15     40    2.38%
+ CF i = 1   71.46    82.46    85.20     7     0.42%
+ CF i = 2   71.40    82.56    85.98     3     0.18%           def month_season(month, day):
+ CF i = 3   71.65    82.49    85.36     3     0.18%
+                                                             seasons = "spring": [(3, 20),
+Table 12: The performance of CoCoGen across varying          (6, 20)], "summer": [(6, 21),
+iterations on the MBPP benchmark (CE: Compilation            (9, 22)], "autumn": [(9, 23),
+Errors, CE%: their proportion among all generated so-
+                                                             (12, 20)], "winter": [(12, 21),
+lutions)
+                                                             (3, 19)] for season, (start,
+            Pass@1   Pass@5   Pass@10   CE    CE(%)
+                                                             end) in seasons.items(): if
+ Direct     49.71    58.50    60.81     185   1.90%
+ CF i = 1   52.95    59.58    61.85     11    0.11%          (month == start[0] and day >=
+ CF i = 2   53.06    59.87    62.01     9     0.09%          start[1]) or (month == end[0]
+ CF i = 3   52.79    59.80    62.09     7     0.07%          and day <= end[1]): return
+                                                             season return "Invalid input"
+F.5   C O C O G EN on Function-level Code
+      Generation                                            The error arises because ’start’ and ’end’
+To assess the efficacy of C O C O G EN in function-      are not included in seasons.items, which ap-
+level code generation, we evaluate it on two com-        pears strange. We speculate that this issue stems
+monly used datasets: HumanEval (Chen et al.,             from the presence of functions with the same name
+2021) and MBPP (Austin et al., 2021). We retain          within the training set.
+the compiler feedback model in C O C O G EN, and
+conduct tests in a 0-shot scenario, generating 10
+                                                              def sum(a, b):
+code samples for each of the 163 test cases for Hu-
+                                                             common_divisors = [i for i
+manEval and 974 cases for MBPP, totaling 11,370
+                                                             in range(1, min(a, b) + 1)
+samples. The generation and refinement loop iter-
+                                                             if a % i == 0 and b % i == 0]
+ates 3 times, as shown in Table 11 and Table 12.
+                                                             return sum(common_divisors) if
+   The data presented in the table illustrates that          common_divisors else 0
+compilation feedback improves the accuracy of the
+generated code, although its efficacy is somewhat
+limited. We manually review 7 compilation errors            The root cause of this error lies in the model’s
+not resolved in HumanEval after the first iteration,     confusion when a user-defined function name co-
+and find that 6 out of 7 instances are caused by         incides with that of a system library function sum,
+the LLM mistakenly generating code segments en-          representing a category of potential issues.
+closed in Markdown code block markers (‘‘‘),
+resulting in compilation failures. Additionally, an-
+                                                         F.6    Efficiency of Static Analysis
+other instance of compilation error is identified in
+the following generated solution:                        Utilizing static analysis tools to inspect code typ-
+  def is_simple_power(x,                                 ically results in increased latency. To investigate
+ n): return x > 0 and (x                                 whether the latency impacts the usability of C O C O -
+ == 1 or (n != 1 and x ==                                G EN, we measure its latency at each test case. We
+ n**int(round(math.log(x, n))))                          have observed that in experiments, the speed of
+                                                         static analysis and structural query is relatively fast.
+   This code snippet contains five left parentheses      It is because the semantic checker (i.e., pylint),
+and four right parentheses in the return state-          only analyzes the current file and its dependent files.
+ment, causing the syntax error. Interestingly, de-       The average latency is recorded at 1.27 seconds,
+spite the compiler has indicated this syntax error, it   with a minimum of 0.359 seconds and a maximum
+is not rectified over three iterations.                  of 6.984 seconds. We deem this latency to be ac-
+   In MBPP, we manually observe the 7 errors not         ceptable.
+                                                      2351
+                               Table 13: Tables pre-computed by C O C O G EN for error correction
+ Table Name   Description                                                    Element Example
+ M            Stores the a module and its hierarchy in project.              tests.unit.async_.work.__init__
+ M_C          Stores a module and a class inside the module                  Module neo4j._codec.packstream.v1.__init__, Class PackableBuffer
+ M_C_CF       Stores a class, its parent module, and its member functions.   Module neo4j.time.__init__, Class Clock, Function local_offset
+ M_C_V        Stores a class variable, its parent class and module.          Module neo4j._sync.io.tmphhoug1of, Class Bolt, Variable is_reset
+ M_GF         Store a global function and its parent module.                 Module neo4j.time._arithmetic, Function nano_add
+ M_GV         Stores a global variable and its parent module.                neo4j.__init__, Global Variable TRUST_SYSTEM_CA_SIGNED_CERTIFICATES
+
+
+
+                Table 14: A complete list of demonstration examples prompted to the language model
+ Error Type        Example Error Message                         Action                          Example Structural Query
+ UNDEF-P           Unable to import ’keys’                       Confine the search scope in all from Module m where
+                                                                 modules                         m.inSource() and
+                                                                                                 v.getScope() = m select
+                                                                                                 m
+ UNDEF-CM          Instance of ’RootLogger’ has no               Confine the search scope in all from Module m, Class
+                   ’loggerDict’ member                           members in the class            c, Function cf where
+                                                                                                 m.inSource() and
+                                                                                                 m.contains(c) and
+                                                                                                 c.contains(cf) and
+                                                                                                 cf.getScope() = c and
+                                                                                                 c.getName = ’RootLogger’
+                                                                                                 and not cf.isInitMethod()
+                                                                                                 select m, c, cf
+ UNDEF-API         No name ’AsyncBolt5x0’ in                     Confine the search scope in all from Module m, Variable
+                   module ’neo4j._sync.io._bolt5’                names in the module             v where m.inSource()
+                                                                                                 and v.getScope() =
+                                                                                                 m and m.getName() =
+                                                                                                 ’neo4j._sync.io._bolt5’
+                                                                                                 select m,
+                                                                                                 v.getDefinition()
+ API               No value for argument ’xmls’ in               Return the information of the from Module m, Function
+                   function call ’dumpXML’                       function                        f where m.inSource()
+                                                                                                 and m.contains(f) and
+                                                                                                 f.getName() = ’dumpXML’
+                                                                                                 select m, f
+
+
+
+G      Technical Details of Structural Query                                      (function redefined). The tables to retrieve struc-
+       System                                                                     tural project context for these frequently occurred
+                                                                                  errors are presented in Table 13.
+G.1 The Design Principle                                                             Whenever the compiler reports an error, if it is
+In C O C O G EN, we employ the Structural Query                                   a frequently occurring error, its retrieval is done
+Language (SQL) to perform structured queries on                                   from these precomputed data tables. Otherwise,
+code repositories. The SQL syntax used here is                                    the C O C O G EN invokes the LLM to generate an
+CodeQL, a specialized version designed for soft-                                  SQL query statement, which is then executed on
+ware repository mining, capable of conducting                                     the project graph.
+complex control-flow and data-flow analyses on                                       In the CoderEval-Python benchmark, with iter-
+a set of code files.                                                              ation rounds set to 3, related project contexts of
+   We extracted 11 error codes from the compiler                                  93.2% of errors are successfully retrieved. For the
+(shown in Table 4), each corresponding to one                                     remaining 6.8% of cases, there are two reasons for
+of four error categories as in Section 2.2. For                                   failure: first, the LLM does not follow the demon-
+efficiency, two authors manually inspected the                                    strated CodeQL examples and generates queries
+most frequently occurring error codes, precom-                                    that are syntactically or semantically incorrect, thus
+puted six data tables from the project graph, and                                 rejected by the CodeQL query system; second, the
+hard-coded the structural context retrieval proce-                                query does not return anything because the spec-
+dure for the following error codes: E0001 (syntax                                 ified conditions in the query are not satisfied in
+error), E0602 (undefined-variable), E1101 (no-                                    project context.
+member), E0213 (no-self-argument), and E0102
+                                                                             2352
+G.2 Demonstration Examples of Structural                H   Algorithm for Project Database
+    Queries                                                 Construction
+We present a demonstration example in Section 3.3       We present the comprehensive algorithm for
+to compose the structural query. The example fo-        constructing the project database and generat-
+cuses on identifying and addressing instances of        ing code with C O C O G EN. The algorithm for
+missing or incorrectly utilized context entries. We     building the project database is detailed in Al-
+detail several example error messages along with        gorithm 1. It involves identifying source files
+their corresponding structural queries. A compre-       in the project by extracting all files that end
+hensive list of these examples can be found in Ta-      with a .py extension. To parse Python source
+ble 14. The four queries shown in the table are writ-   files, we employ the tree-sitter-python
+ten manually by one of the authors, and designed        parser for generating abstract syntax trees and
+to handle four representative types of compilation      codeql-python to extract the property of a con-
+errors. These sampled error messages are reported       text entry node. To encode passages to vectors, we
+by compilers when generating solutions without          utilize text-embedding-ada-002, a text em-
+project context. The specific four messages are         bedding model provided by OpenAI and accessible
+chosen randomly from the compilation log.               via online APIs (OpenAI, 2022).
+
+
+Algorithm 1 Project Database Construction
+Require: S OURCE F ILE S ET: A set of project source files
+Require: PARSER: A parser for source files
+Require: E NCODER: A passage encoder transforms text to numerical vector
+Ensure: databaseEntries: Entries in the project database
+ 1: databaseEntries ← ∅
+ 2: for each sourceF ile in S OURCE F ILE S ET do
+ 3:   nodesF orV isit ← ⟨⟩
+ 4:   propertyP ref ixSeq ← ⟨⟩
+ 5:   astF ile ← PARSER(sourceF ile)
+ 6:   nodesF orV isit.ADD(astF ile.rootN ode)
+ 7:   while nodesF orV isit is not empty do
+ 8:      currentN ode ← nodesF orV isit.POP()
+ 9:      if currentN ode is P REFIX M ARK then
+10:         propertyP ref ixSeq.POP()
+11:      end if
+12:      if currentN ode.type is in [VARIABLE T YPE , F UNCTION T YPE , C LASS T YPE] then
+13:         nodeP roperty ← G ET P ROPERTIES(currentN ode)
+14:         nodeSchema ← ⟨propertyP ref ixSeq, currentN ode, nodeP roperty⟩
+15:         nodeEmbedding ← E NCODER(nodeSchema)
+16:         databaseEntries.ADD([nodeSchema, nodeEmbedding])
+17:         propertyP ref ixSeq.PUSH(currentN ode)
+18:         nodesF orV isit.PUSH(P REFIX M ARK)
+19:      end if
+20:      for childN ode in currentN ode.CHILDS() do
+21:         nodesF orV isit.PUSH(childN ode)
+22:      end for
+23:   end while
+24: end for
+
+
+
+
+                                                    2353
+

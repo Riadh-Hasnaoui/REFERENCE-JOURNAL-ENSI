@@ -1,0 +1,1106 @@
+          IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026                                                                                       675
+
+
+
+
+               RepoTransBench: A Real-World Multilingual
+             Benchmark for Repository-Level Code Translation
+            Yanli Wang , Yanlin Wang , Suiquan Wang , Daya Guo , Jiachi Chen , Member, IEEE, John Grundy ,
+            Fellow, IEEE, Xilin Liu , Yuchi Ma , Mingzhi Mao , Hongyu Zhang , and Zibin Zheng , Fellow, IEEE
+
+
+             Abstract—Repository-level code translation refers to translat-                                              I. INTRODUCTION
+          ing an entire code repository from one programming language
+          to another while preserving the functionality of the source
+          repository. Many benchmarks have been proposed to evaluate
+          the performance of such code translators. However, previous
+                                                                                             C      ODE translation refers to translating code from one pro-
+                                                                                                    gramming language to another while preserving the func-
+                                                                                             tionality of the source code [1], [2], [3], [4]. Recently, large lan-
+          benchmarks mostly provide fine-grained samples, focusing at                        guage models (LLMs) have demonstrated strong performance
+          either code snippet, function, or file-level code translation. Such
+          benchmarks do not accurately reflect real-world demands, where                     across various tasks. However, the training of these models
+          entire repositories often need to be translated, involving longer                  increasingly faces limitations regarding the availability of open-
+          code length and more complex functionalities. To address this                      source code data. High-quality synthetic data has become es-
+          gap, we propose a new benchmark, named RepoTransBench,                             sential for further improving LLMs’ performance [5], [6]. By
+          which is a real-world multilingual repository-level code trans-                    leveraging code translation, vast amounts of code written in
+          lation benchmark featuring 1,897 real-world repository samples
+          across 13 language pairs with automatically executable test suites.                various programming languages can be transformed into high-
+          Besides, we introduce RepoTransAgent, a general agent frame-                       quality training data, offering a viable solution to this scarcity
+          work to perform repository-level code translation. We evaluate                     [7], [8], [9]. Beyond data synthesis, code translation has broad
+          both our benchmark’s challenges and agent’s effectiveness using                    applications in other areas. It facilitates the refactoring of code
+          several methods and backbone LLMs, revealing that repository-                      written in outdated languages [10], transitions from simpler
+          level translation remains challenging, where the best-performing
+          method achieves only a 32.8% success rate. Furthermore, our                        but slower languages to more complex and faster ones [11],
+          analysis reveals that translation difficulty varies significantly by               and supports programming language migration in software de-
+          language pair direction, with dynamic-to-static language trans-                    velopment [12], [13], [14], [15], [16], [17], [18], [19]. These
+          lation being much more challenging than the reverse direction                      capabilities highlight the significance of code translation in
+          (achieving below 10% vs. static-to-dynamic at 45-63%). Finally,                    addressing diverse challenges across the software engineering
+          we conduct a detailed error analysis and highlight current
+          LLMs’ deficiencies in repository-level code translation, which                     domain. Automatic code translation can significantly reduce
+          could provide a reference for further improvements. We provide                     manual effort and has thus garnered widespread attention in re-
+          the code and data at https://github.com/DeepSoftwareAnalytics/                     cent years [20], [21], [22], [23], [24], [25], [26], [27], [28]. With
+          RepoTransBench.                                                                    the popularity of large language models (LLMs), researchers
+            Index Terms—Repository-level code translation, multilingual                      are trying to translate code with LLMs, yielding promising
+          benchmark, LLM-based agent.                                                        results [29], [30], [31].
+                                                                                                To evaluate the performance of code translation tools, var-
+                                                                                             ious benchmarks have been introduced [32], [33], [34], [35],
+                                                                                             [36], [37], [38], [39], [40]. Based on translation granularity,
+                                                                                             current fine-grained code translation benchmarks can be classi-
+                                                                                             fied into three levels [1]: snippet-level, function-level, and file-
+                                                                                             level. Specifically, snippet-level code translation benchmarks,
+                                                                                             such as CoST [32], XLCost [33], typically focus on evaluat-
+            Received 11 January 2025; revised 29 July 2025 and 29 November 2025;             ing the translation of program segments located between two
+          accepted 11 December 2025. Date of publication 17 December 2025; date of           consecutive code comments. Function-level code translation
+          current version 13 February 2026. This work was supported by CCF-Huawei            benchmarks, such as TransCoder-test [34], CodeXGLUE [35]
+          Populus Grove Fund CCF-HuaweiSE202403. Recommended for acceptance
+          by M. Kechagia. (Corresponding author: Yanlin Wang.)                               and HumanEval-X [36], focus on evaluating the translation
+            Yanli Wang, Yanlin Wang, Suiquan Wang, Daya Guo, Jiachi Chen,                    of a function. File-level code translation benchmarks which
+          Mingzhi Mao, and Zibin Zheng are with Sun Yat-sen University,                      include CodeNet [37], Avatar [38], CodeScope [39] and Code-
+          Guangzhou 510006, China (e-mail: wangyli58@mail2.sysu.edu.cn;
+          wangylin36@mail.sysu.edu.cn).                                                      TransOcean [40] refer to evaluating the translation of a com-
+            John Grundy is with Monash University, Melbourne, VIC 3800, Australia.           plete program file. However, these fine-grained code transla-
+            Xilin Liu and Yuchi Ma is with Huawei Cloud Computing Technologies               tion benchmarks may not meet the demands of real develop-
+          Company, Ltd., Shenzhen 518129, China.
+            Hongyu Zhang is with Chongqing University, Chongqing 400044, China.              ment scenarios, which require the translation of entire reposi-
+            Digital Object Identifier 10.1109/TSE.2025.3645056                               tories. Recently, Pan et al. [1] manually study two open-source
+
+             0098-5589 © 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artificial intelligence and similar technologies.
+          Personal use is permitted, but republication/redistribution requires IEEE permission. See https://www.ieee.org/publications/rights/index.html for more information.
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           676                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+           repositories (Apache Commons CLI [41] and Python Click                    core capabilities: reading files, creating files, executing com-
+           [42]), and find that current LLMs struggle to perform code                mands, searching content, and marking completion, enabling
+           translation for entire repositories. Although this work has con-          repository-level translation through a reasoning-action loop that
+           ducted preliminary research on repository-level code transla-             adapts to diverse programming language ecosystems.
+           tion, we identify the following problems:                                    We evaluate both the benchmark’s challenges and our agent’s
+              • P1: Lack of Large-Scale Multilingual Benchmark.                      effectiveness using several methods and backbone LLMs. Our
+                 Existing repository-level translation studies are severely          experimental results reveal that repository-level code transla-
+                 limited in scope, with most work examining only one or              tion remains challenging for current methods, with the best-
+                 two translation pairs and a handful of repositories. This           performing method achieving only 32.8% success rate. How-
+                 narrow coverage fails to capture the diverse challenges             ever, our RepoTransAgent framework consistently outperforms
+                 posed by different programming paradigms, syntax vari-              baseline approaches, demonstrating improvements of up to
+                 ations, and ecosystem differences that occur across the             21.5% over the error feedback method.
+                 broader landscape of programming languages used in real-               The key contributions of this research are:
+                 world development.                                                     • We introduce a large-scale repository-level code trans-
+              • P2: Labor-Intensive Execution-Based Test Suites Con-                       lation benchmark named RepoTransBench covering 13
+                 struction. Repository-level code translation benchmark                    translation pairs with 1,897 samples and automatic
+                 construction is labor-intensive, requiring extensive manual               execution-based test suites. RepoTransBench demon-
+                 effort to ensure repository executability, generate com-                  strates substantially higher context and dependency com-
+                 prehensive test suites, validate functional correctness, and              plexity than previous benchmarks.
+                 manage complex dependencies.                                           • We develop a multi-agent framework for automated bench-
+              • P3: Lack of General Translation Framework for                              mark construction to handle the complex requirements
+                 Different Translation Pairs. Current translation methods                  of repository-level translation validation and obtain the
+                 often rely on language-specific heuristics tailored to partic-            corresponding execution-based test suites.
+                 ular translation pairs, making them difficult to generalize            • We propose RepoTransAgent, a general agent framework
+                 across diverse programming language combinations.                         for multilingual repository-level code translation based on
+              • P4: Potentially Ignoring the Meta Information of                           reasoning and action paradigms, achieving up to 32.8%
+                 Repositories. Many programming language repositories                      success rate on RepoTransBench.
+                 contain configuration files and resource files, such as                • We conduct an extensive evaluation across multiple di-
+                 CMakeLists.txt for C++ and pom.xml for Java.                              mensions, revealing that translation difficulty varies by
+                 A real-world code repository migration often requires                     different translation pairs and project complexity.
+                 proper handling of resources and correct configuration
+                 management.
+                                                                                                              II. BACKGROUND
+              In this paper, we introduce a multilingual repository-level
+           code translation benchmark, named RepoTransBench, and                        Code translation involves converting source code written in
+           a general agent-based translation framework, named Repo-                  one programming language into another language while pre-
+           TransAgent, to address these limitations.                                 serving the original program’s functionality and logic [1], [2],
+              RepoTransBench encompasses 1,897 repository samples                    [3], [4]. This process is essential in software engineering for
+           across 13 translation pairs covering 7 programming languages,             several reasons, such as migrating legacy systems to modern
+           providing automatic execution-based test suites to evaluate               languages [12], [13], improving code performance by translat-
+           both compilability and functional correctness of trans-                   ing to more efficient languages [10] and enabling cross-platform
+           lated repositories. To construct RepoTransBench, we develop               compatibility [11]. As programming languages continue to
+           a multi-agent framework that automatically generates compre-              evolve, the demand for accurate and efficient code translation
+           hensive test suites and handles the complex requirements of               techniques has grown, making it a critical area of research and
+           repository-level translation validation. Our benchmark demon-             development [20], [21], [22], [23], [24], [25], [26], [27], [28].
+           strates higher complexity than previous work, with repositories           The field has experienced significant technological evolution,
+           containing an average of 23,966 tokens, 2,394 lines of code,              with each advancement enabling translation capabilities at in-
+           177 functions, 35 classes, and 163 import statements.                     creasingly larger code granularities. The development of code
+              RepoTransAgent addresses general translation challenges                translation can be broadly divided into three main approaches
+           through an intelligent agent framework based on the Re-                   based on their underlying technologies: Rule-Based Transla-
+           Act (Reasoning + Acting) paradigm, specifically designed to               tion, Neural Network-Based Translation, and Large Language
+           solve repository-level code translation problems. The agent               Model-Based Translation.
+           iteratively combines reasoning about repository structure and                Rule-Based Translation. The earliest code translation ap-
+           translation requirements with concrete actions to handle the              proaches relied on manually defined rules and grammar spec-
+           complexity of entire software projects. RepoTransAgent can an-            ifications. Existing non-learning-based code translation tech-
+           alyze repository structures, understand cross-file dependencies,          niques can be categorized into several main groups. Parser-
+           manage configuration files, and iteratively refine translations           based tools like ANTLR [43] rely on manually defined grammar
+           based on execution feedback. The agent operates through five              rules to translate source code between languages. Transpilers
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             677
+
+
+
+          such as Babel [44], Emscripten [45], JSweet [46], and GWT                 SantaCoder [70] and more latest models such as the Llama
+          [47] convert source code from one language to another, of-                series [71], [72], [73], the ChatGPT series [74], the DeepSeek
+          ten used to ensure compatibility across platforms or systems.             series [75], and the Claude series [76] have shown remarkable
+          Domain-specific translators like CxGo [48], C2Rust [49], and              performance on traditional code translation tasks. These models
+          JavaToCSharp [50] focus on specific translation pairs, offering           are trained on large code corpus and have strong comprehension
+          targeted translation solutions. Intermediate language compil-             and instruction following abilities, which can perform accurate
+          ers like Haxe [51] compile code to a variety of target lan-               and efficient code translations on previous fine-grained code
+          guages by using an intermediate format. Interface generators              benchmarks. Recent research has explored various techniques
+          such as SWIG [52] create cross-language bindings, allowing                to enhance LLM-based translation capabilities. Rectifier [59]
+          different languages to interact with each other without direct            is a fine-tuned micro model that acts as a general corrector to
+          code translation. While these rule-based approaches demon-                correct the translation errors of unknown LLMs. Vert [77] lever-
+          strate high precision for well-defined translation patterns, they         ages LLM’s strong few-shot learning ability to produce readable
+          face significant limitations in handling complex code struc-              Rust translations with formal guarantees of correctness. Bhat-
+          tures and require substantial manual effort to maintain and ex-           tarai et al. [78] enhance code translation in LLMs with few-
+          tend. Most rule-based methods primarily support snippet-level             shot learning via retrieval-augmented generation. TransAgent
+          code translation [32], [33], which typically refers to evaluating         [79] is an LLM-based multi-agent system for code translation.
+          the translation of program segments that are located between              SpecTra [31] considers the different kinds of specifications that
+          two consecutive code comments, and each program may con-                  can be extracted from a program to enhance the code translation
+          sist of one or more code snippets. Some advanced rule-based               ability of LLMs. Momoko et al. [80] propose an LLM-based
+          tools can handle simple function-level translation where func-            translation scheme that improves the success rate of translating
+          tions can be processed independently without complex external             large-scale C code into compilable Rust code. SolMover [81]
+          dependencies.                                                             can convert smart contracts written in Solidity [82] to Move [83]
+             Neural Network-Based Translation. The introduction of                  with LLMs. CCTrans [84] can transpile concurrent Java files to
+          neural networks marks a paradigm shift in code translation,               JavaScript using multiple workers while maintaining identical
+          enabling more sophisticated translation capabilities through              behavior. GlueTest [85] systematically and semiautomatically
+          learned representations. Early learning-based approaches often            validates translations for non-trivial libraries. UniTrans [29] is a
+          train a neural network to achieve the ability of code translation         unified code translation framework applicable to various LLMs
+          [24], [25], [27], [53]. Aggarwal et al. [10] convert Python 2             to unleash their power in code translation. SDA-Trans [86]
+          code to Python 3 code using trained Moses [54], which is an               is a syntax and domain-aware model for program translation,
+          open-source toolkit for statistical machine translation. Chen             which leverages the syntax structure and domain knowledge to
+          et al. [21] design a tree-to-tree neural network to translate a           enhance the cross-lingual transfer ability.
+          source tree into a target one. DeepAM [19] discusses the limi-               Fig. 1 shows a comparison of code granularities used in
+          tations of bilingual projects, as well as the automatic mining of         different code translation approaches across these technological
+          API mappings to reduce manual effort in code migration. Zheng             eras. Most previous works focus on the translations with a
+          et al. [55] propose an approach for zero-resource NMT using               granularity not exceeding a single code file (left-hand side).
+          maximum expected likelihood estimation. TransCoder [34] is a              Unlike the previous fine-grained granularity code translation,
+          transformer with 6 layers to perform code translation at function         repository-level code translation involves migrating an entire
+          level. Besides, some models pre-trained on multilingual corpora           repository from one language to another. Recently, repository-
+          like Codex [56], CodeT5 [53], and CodeGen [6] demonstrate re-             level code translation has gradually gained the attention of re-
+          markable code translation capability. These neural approaches             searchers [1]. As shown in the right-hand side of Fig. 1, a typical
+          successfully enable practical function-level translation [32],            code repository contains functional code files and test code
+          [33], [34], [35], [36], which refers to translating a function            files and may also include resource files and configuration files.
+          into another programming language, with the data sources often            Functional code files refer to those code files that implement
+          being manually crafted datasets [56] or coding practice websites          specific functionalities of the code repository, such as the files
+          [57]. More advanced neural systems achieve file-level code                located in the readtime/ directory. Test code files refer to the
+          translation [37], [38], [39], [40], [58], [59], which often refers        files used to verify the correctness of the functional code where
+          to translating a complete program file into the target language.          test_readtime.py is an example. Resource files like those
+          The data sources are usually from code contest platforms [60],            in samples/ folder are used to test the functional correctness
+          [61], [62], [63] or task solutions websites [64], [65], [66].             of the functional code. The functional code needs to implement
+          G-TransEval [67] also provides a more fine-grained taxon-                 how to perform I/O operations with these resources. In addition,
+          omy, including token-level, syntax-level, library-level, and              for certain language-specific frameworks, it is necessary to
+          algorithm-level, which is part of a function. However, neural             complete the configuration file correctly, such as the “pom.xml”
+          network-based approaches still struggle with cross-file depen-            file in Java’s Maven [87] repositories.
+          dencies and large-scale context management, limiting their ef-               Compared with previous fine-grained code translation gran-
+          fectiveness beyond file-level translation.                                ularity, repository-level code translation presents three fun-
+             Large Language Model-Based Translation. In recent                      damentally different challenges: challenging context manage-
+          years, large language models such as StarCoder [68], [69],                ment, complex dependency analysis, and difficult environment
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           678                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+
+           Fig. 1.   Comparison of different code translation granularity.
+
+
+
+           setup. Real-world code repositories typically include numerous                                  III. REPOTRANSBENCH
+           functions, classes, and import statements to realize complex
+                                                                                         As illustrated in Fig. 2, the data collection pipeline of Repo-
+           functionalities, requiring translators to understand the entire
+                                                                                     TransBench consists of three steps: data collection, rule-based
+           repository context rather than isolated code fragments with in-
+                                                                                     filtering, and multi-agent-based test suite construction.
+           tricate interdependencies between components across multiple
+           files and modules. The complexity extends beyond code vol-
+           ume to sophisticated dependency management requirements,                  A. Data Collection
+           where files like api.py and utils.py have complex im-                        We conduct a questionnaire among professional developers
+           port relationships (e.g., from .result import Result,                     to identify practical demands for repository-level code trans-
+           from . import utils) that must be correctly analyzed                      lation. We select the top 7 languages from the TIOBE pro-
+           and maintained during translation. Additionally, successful               gramming language rankings [88] selecting Rust and Matlab
+           repository translation necessitates appropriate configuration of          as candidate languages for our translation pair matrix. Addi-
+           ecosystem-specific files and comprehensive resource migration             tionally, we provide custom options for respondents to specify
+           beyond source code, where resource files that perform I/O                 other translation pairs they require. The detailed questionnaire
+           operations with code components must be carefully handled                 and statistical results are available in the artifact.
+           and potentially transformed to maintain functional equivalence.              We receive responses from 21 professional developers, com-
+           Furthermore, unlike artificially crafted datasets used in fine-           prising 86 requests for specific translation pairs. The survey
+           grained translation [37], [38], real repositories typically contain       results reveal diverse translation needs. The highest demand
+           existing test suites that can serve as valuable validation mecha-         is observed for Python↔C++ bidirectional translation, with
+           nisms. Effective repository-level translation must leverage these         developers frequently needing to migrate between Python’s
+           test cases not only for validation but also as specifications for         rapid prototyping capabilities and C++’s performance-critical
+           maintaining functional correctness throughout the translation             applications in systems programming and high-performance
+           process.                                                                  computing. JavaScript→Python translation also shows strong
+              Recent studies have shown interest in repository-level code            demand as organizations seek to consolidate their tech stacks
+           translation. Pan et al. [1] attempt to perform mutual conver-             by moving web-based logic into Python’s rich ecosystem for
+           sion between Python and Java projects [41], [42], but find that           data processing and machine learning workflows.
+           the advanced LLMs are largely ineffective, with success rates                The sustained interest in Python→Java translation reflects the
+           of 8.1% for GPT-4 and 0% for the rest of the models. This                 common enterprise pattern where Python prototypes must be
+           stark performance gap reveals that repository-level translation           productionized in Java environments for scalability and inte-
+           requires fundamentally different approaches from fine-grained             gration with existing enterprise systems. Meanwhile, C→Rust
+           translation, as current LLM-based methods struggle with the               translation demand indicates the growing adoption of Rust
+           challenges of large-scale context management, complex depen-              for systems programming, where developers aim to modern-
+           dency analysis, and comprehensive environment configuration               ize legacy C codebases while gaining memory safety guaran-
+           that are inherent to repository-level code translation.                   tees. The interest in Python→Go translation similarly reflects
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             679
+
+
+
+
+          Fig. 2.   RepoTransBench construction pipeline.
+
+
+
+          organizational shifts toward Go’s concurrency model and de-               Algorithm 1 Rule-Based Repository Filtering
+          ployment simplicity for backend services.                                 Input: Collection of repositories R = {R1 , R2 , . . . , Rn },
+             Repository-level translation becomes particularly valuable                 Language Ltarget , Star threshold θstar
+          in these scenarios because modern software projects involve               Output: Filtered repository collection Rf iltered ⊆ R
+          complex interdependencies, build systems, and architectural                1: function PASSESALLRULES(R, Ltarget , θstar )
+          patterns that cannot be addressed through isolated function or             2:    // Rule 1: Language Dominance
+                                                                                     3: if P (Ltarget , R) = max{P (Li , R) | Li ∈ Languages(R)}
+          class translations. Developers require tools that can maintain                then
+          semantic correctness across entire codebases while preserving              4:       return false
+          project structure and dependency relationships.                            5: end if
+             Based on these survey findings, we expand our benchmark                 6:    // Rule 2: Popularity Threshold
+          to include 13 translation pairs that reflect real-world developer          7: if Stars(R) < θstar then
+                                                                                     8:       return false
+          needs. To ensure repository quality, we rank repositories by star          9: end if
+          count and retain only those with more than 50 stars.                      10:    // Rule 3: Package Blocking
+                                                                                    11: if R ∩ BlockedPackages(Ltarget ) = ∅ then
+                                                                                    12:    if not IsBasicUsage(R) then
+          B. Rule-Based Filtering                                                   13:            return false
+                                                                                    14:    end if
+             We provide a specification of our filtering rules in Algo-             15: end if
+          rithm 1. The rule-based filtering implements three key criteria:          16:    return true
+          Rule 1: Language Dominance. We retain only repositories                   17: end function
+          where the target language constitutes the largest proportion              18:
+                                                                                    19: Rf iltered ← ∅
+          of the codebase. This ensures that the repository is primarily
+                                                                                    20: for each R ∈ R do
+          written in the language we aim to translate. Rule 2: Popularity           21:   if PASSESALLRULES(R, Ltarget , θstar ) then
+          Threshold. We filter repositories based on a minimum star                 22:      Rf iltered ← Rf iltered ∪ {R}
+          threshold θstar to ensure code quality and practical relevance.           23:   end if
+          Rule 3: Package Exclusion. We exclude repositories that                   24: end for
+                                                                                    25: return Rf iltered
+          depend on packages difficult to translate into target languages.
+          The detailed package lists are available at [89]. To illustrate, for
+          Python repositories, we require that (1) Python code comprises
+          the largest share of the codebase, (2) the repository exceeds the         high-quality benchmark construction: Test Case Generator, Test
+          popularity threshold, and (3) it does not have substantial de-            Case Runner, Coverage Analyst, and Test Case Translator.
+          pendencies on excluded packages (e.g., PyTorch, TensorFlow,                  Test Case Generator analyzes the source repository struc-
+          NLTK).                                                                    ture and functionality to generate comprehensive test cases. It
+                                                                                    performs two primary functions: (1) writing public test cases
+                                                                                    that cover the main functionality and API interfaces of the
+          C. Multi-Agent-Based Test Suite Construction
+                                                                                    repository, ensuring that critical code paths are exercised, and
+             Due to the substantial human resources and effort required             (2) identifying insufficient test cases by analyzing code cover-
+          for benchmark construction, and to facilitate scalable expansion          age gaps and generating additional test scenarios to improve
+          of dataset size and translation pair types, we develop a multi-           overall test completeness.
+          agent framework for constructing execution-based repository-                 Test Case Runner focuses on environment setup and test
+          level code translation benchmarks. The framework comprises                execution validation. This agent is responsible for: (1) setting
+          four specialized agents that work collaboratively to ensure               up runnable environments by analyzing project dependencies,
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           680                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+                                                                              TABLE I
+           STATISTICS OF REPOTRANSBENCH COMPARED TO OTHER EXISTING CODE TRANSLATION DATASETS. CONSIDERING THE TRANSLATION OF PYTHON TO JAVA,
+           WE REPORT THE NUMBER OF SAMPLES AND THE AVERAGE NUMBER OF TOKENS, LINES, FUNCTIONS, CLASSES, AND IMPORT STATEMENTS PER SAMPLE OF
+             EACH TASK. # TOKENS COUNTS ARE BASED ON OPENAI’S TIKTOKEN TOKENIZER (https://github.com/openai/tiktoken). # FUNCS, # CLASSES AND #
+                     IMPORTS COUNTS ARE BASED ON TREE-SITTER (https://tree-sitter.github.io). CODE COMMENTS ARE REMOVED BEFORE COMPUTATION
+
+                    Dataset         Year          Source               Level   Config File Evaluation #Samples #Tokens #Lines #Funcs #Classes #Imports
+             TransCoder-test [34]   2020     GeeksforGeeks [57]       Function  Not Req Execution       868      127     12     1       0        0
+             CodeNet [37]           2021   AIZU [62], AtCoder [61]      File    Not Req Execution       200      99      12     1       0        0
+             Avatar [38]            2021      AtCoder [61], etc1        File    Not Req Execution       250      175     18     1       0        1
+                                                                      Snippet   Not Req Similarity      351      33       3     0       0        0
+             CoST [32]           2022     GeeksforGeeks [57]
+                                                                      Function  Not Req Similarity       69      173     15     1       0        0
+                                                                      Snippet   Not Req Similarity      6861     24       2     0       0        0
+             XLCoST [33]         2022     GeeksforGeeks [57]
+                                                                      Function  Not Req Similarity      864      196     19     1       0        0
+             HumanEval-X [36]    2022        HumanEval [56]           Function  Not Req Execution       164      65       8     1       0        0
+             G-TransEval [67]    2023    HumanEval [56], etc2        Function3  Not Req Similarity      400      90      10     1       0        0
+             xCodeEval [58]      2023        Codeforces [60]            File    Not Req Execution       1942     209     22     1       0        1
+             CodeScope [39]      2023        Codeforces [60]            File    Not Req Execution        30      259     28     1       0        1
+             CodeTransOcean [40] 2023 Rosetta Code [66], d2l-ai [65]    File    Not Req Similarity      1029     253     24     2       0        1
+             UniTrans [29]       2024     GeeksforGeeks [57]          Function  Not Req Execution       568      112     11     1       0        0
+             RepoTransBench      2024           GitHub               Repository Require Execution       1897    23966 2394     177     35       163
+
+
+
+                                         TABLE II                                    to the target language while preserving test semantics and as-
+              STATISTICS OF SOURCE LANGUAGES SHOWING CROSS-FILE/INTRA-FILE           sertions. The agent maintains a mapping of equivalent libraries
+             DEPENDENCIES AND TEST COVERAGE. SRC. LANG.: SOURCE LANGUAGE,
+             PROJ.: PROJECTS, SAMP.: SAMPLES, CROSS.: CROSS-FILE DEPENDENCIES,       and frameworks across different programming languages to
+           INTRA.: INTRA-FILE DEPENDENCIES, COV.: COVERAGE. TRANSLATION PAIRS:       ensure translated test cases accurately reflect the original test
+               C→{PYTHON, RUST}, C++→PYTHON, C#→JAVA, JAVA→{C#, GO,                  intentions.
+             PYTHON}, JAVASCRIPT→PYTHON, MATLAB→PYTHON, PYTHON→{C++,
+                    GO, JAVA, RUST}. TOTAL: 13 PAIRS, 1897 TRANSLATIONS                 These agents can perform various operations, including file
+                                                                                     reading/writing, directory traversal, package installation, search
+             Src. Lang. #Proj. #Samp #Cross. #Intra. Line Cov. Branch Cov.           operations, and executing command-line instructions. Through
+             C           122    244    64.3 2494.4 91.71%        63.59%              multi-agent collaboration and iterative refinement, the frame-
+             C++         181    181    94.9 2401.3 86.20%        58.98%              work operates in a coordinated pipeline where each agent’s out-
+             C#           97     97    31.1   600.9 83.52%       80.21%
+             Java        146    438   156.9 1286.5 73.21%        66.86%
+                                                                                     put serves as input for subsequent agents, ultimately ensuring
+             JavaScript 189     189    27.0   707.5 93.56%       88.12%              that source code repositories are executable and successfully
+             Matlab       64     64    2.1   1609.5 61.33%       55.99%              generating corresponding test cases in target languages.
+             Python      171    684   128.1 1006.1 81.29%        79.26%
+             Overall     970    1897   87.9 1443.7 81.89%        72.61%
+                                                                                     D. Statistics of RepoTransBench
+                                                                                        Tables I and II present comprehensive statistics of Repo-
+                                                                                     TransBench. Table I compares RepoTransBench with existing
+           installing required packages, and configuring build systems               code translation benchmarks, while Table II provides detailed
+           (such as Maven for Java projects or pip for Python projects),             statistics across different source languages in our benchmark.
+           and (2) ensuring all test cases pass successfully in the source           Our benchmark represents a paradigm shift from previous fine-
+           language environment.                                                     grained approaches to repository-level translation, demonstrat-
+              Coverage Analyst provides a quantitative assessment of test            ing unprecedented scale and complexity in code translation
+           quality through comprehensive coverage analysis. This agent:              evaluation.
+           (1) writes language-specific test coverage scripts tailored to               Scale and Length Comparison. As shown in Table I, unlike
+           each programming language’s testing frameworks and coverage               previous benchmarks that operate at function, snippet, or single-
+           tools, and (2) obtains detailed test coverage metrics including           file levels, RepoTransBench operates at the repository-level,
+           line coverage, branch coverage, and function coverage. The                encompassing complete software projects with their inherent
+           coverage analysis ensures that our benchmark maintains high-              complexity. Our benchmark contains 1,897 translation samples
+           quality standards, with our current dataset achieving an average          across 13 translation pairs, significantly surpassing the scale of
+           of 81.89% line coverage and 72.61% branch coverage across all             previous work. The average sample in our benchmark contains
+           translation pairs as shown in Table II.                                   23,966 tokens and 2,394 lines of code, representing a dramatic
+              Test Case Translator handles the cross-language translation            increase of over 95× in tokens and 108× in lines compared
+           of test cases to ensure translated repositories can be properly           to the largest previous benchmark (xCodeEval with 209 tokens
+           validated. This agent: (1) selects appropriate target frameworks          and 22 lines per sample).
+           by analyzing the functionality requirements and identifying                  Structural Complexity. As shown in Table I, the repository-
+           equivalent libraries and testing frameworks in the target lan-            level nature of our benchmark introduces structural elements
+           guage, and (2) translates test cases from the source language             absent in previous work. Each sample contains an average of
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             681
+
+
+
+          177 functions, 35 classes, and 163 import statements, demon-              enabling it to handle complex interdependencies, maintain
+          strating the complex interdependencies and architectural pat-             project structure, and ensure functional correctness during
+          terns inherent in real-world software projects. In contrast,              translation.
+          previous benchmarks typically contain at most 2 functions
+          per sample and rarely include classes or substantial import               A. Agent Architecture and Action Space
+          dependencies.
+                                                                                       As illustrated in Fig. 3, RepoTransAgent operates through
+             Dependency Complexity. As shown in Table II, RepoTrans-
+                                                                                    an action space consisting of five core capabilities that enable
+          Bench exhibits substantial dependency complexity that distin-
+                                                                                    repository analysis and translation:
+          guishes it from fine-grained benchmarks. RepoTransBench has
+                                                                                       ReadFile allows the agent to examine existing code files,
+          an average of 87.9 cross-file dependencies and 1,443.7 intra-file
+                                                                                    configuration files, documentation, and dependency specifica-
+          dependencies. The diversity in dependency complexity across
+                                                                                    tions. This action is crucial for understanding the repository
+          different programming languages reflects varied architectural
+                                                                                    structure, identifying key components, and analyzing code pat-
+          patterns: cross-file dependencies range from 2.1 in Matlab to
+                                                                                    terns. The agent uses this capability to verify translation cor-
+          156.9 in Java, while intra-file dependencies range from 600.9
+                                                                                    rectness and debug issues during the translation process.
+          in C# to 2,494.4 in C. The complexity distinguishes repository-
+                                                                                       CreateFile enables the agent to generate new files in the
+          level translation from function-level or file-level translation,
+                                                                                    target language, including code files, configuration files (such as
+          where such cross-module dependencies are absent or minimal.
+                                                                                    pom.xml for Java projects or package.json for JavaScript
+             Configuration Requirements. As shown in Table I, another
+                                                                                    projects), and build scripts. This action is essential for estab-
+          crucial distinction of RepoTransBench is the requirement for
+                                                                                    lishing the translated repository structure and ensuring proper
+          proper configuration files (such as “pom.xml” for Java Maven
+                                                                                    project organization in the target language ecosystem.
+          projects, “package.json” for JavaScript projects, or “require-
+                                                                                       ExecuteCommand provides the agent with the ability to
+          ments.txt” for Python projects). This requirement reflects real-
+                                                                                    execute system commands for environment setup, dependency
+          world translation scenarios where successful code migration
+                                                                                    installation, compilation, and testing. This capability enables
+          depends not only on translating source code but also on cor-
+                                                                                    the agent to validate translations by running build processes
+          rectly configuring build systems, dependency management, and
+                                                                                    and executing test cases, ensuring that the translated repository
+          project structure in the target language ecosystem.
+                                                                                    maintains functional correctness.
+             Cross-Language Coverage. Table II provides detailed
+                                                                                       SearchContent allows the agent to efficiently locate specific
+          statistics across our 13 supported translation pairs, covering
+                                                                                    code patterns, function definitions, class declarations, and im-
+          translations from C, C++, C#, Java, JavaScript, Matlab, and
+                                                                                    port statements across the repository. This search capability is
+          Python to various target languages. Our dataset encompasses
+                                                                                    particularly important for understanding cross-file dependen-
+          970 unique projects, with Python being the most represented
+                                                                                    cies and ensuring consistent translation of related components
+          source language (684 samples from 171 projects) followed by
+                                                                                    throughout the project.
+          Java (438 samples from 146 projects).
+                                                                                       Finished marks the completion of the translation task, indi-
+             Test Coverage Quality. Our multi-agent framework ensures
+                                                                                    cating that the agent has successfully translated the repository
+          high-quality test coverage across all translation pairs. As shown
+                                                                                    and validated its correctness through execution-based testing.
+          in Table II, the overall dataset maintains 81.89% line cover-
+          age and 72.61% branch coverage, with JavaScript achieving
+          the highest coverage (93.56% line coverage, 88.12% branch                 B. Translation Process and Execution Workflow
+          coverage) and Matlab showing the most room for improve-                      RepoTransAgent follows a translation workflow based on
+          ment (61.33% line coverage, 55.99% branch coverage). This                 the ReAct paradigm that begins with comprehensive repository
+          comprehensive test coverage enables reliable execution-based              analysis and proceeds through iterative translation and vali-
+          evaluation of translation quality, moving beyond similarity met-          dation cycles. At the start of each translation task, the agent
+          rics used in previous benchmarks to assess actual functional              is initialized as a code translator and provided with basic in-
+          correctness.                                                              formation about the current working directory and translation
+             Translation Pair Classification. We classify the 13 trans-             requirements, including the source language, target language,
+          lation pairs from the type system perspective, which can                  project name, and other relevant details.
+          be categorized into four groups: static-to-dynamic transla-                  The translation process initiates with the agent’s reason-
+          tions (C/C++/Java→Python, Matlab→Python), dynamic-to-                     ing phase, where it formulates a plan in the [Thought]
+          static translations (Python→C++/Java/Go/Rust), static-to-static           section to analyze the repository structure systematically.
+          translations (C→Rust, C#→Java, Java→C#/Go), and dynamic-                  As demonstrated in the example execution sequence, the
+          to-dynamic translation (JavaScript→Python).                               agent first reasons that it needs to examine the files in the
+                                                                                    project directory, then executes the corresponding action using
+                                                                                    ExecuteCommand(command=“ls -a”) to explore the
+                                IV. REPOTRANSAGENT
+                                                                                    repository contents. The system provides feedback to the agent
+            We propose RepoTransAgent, a general agent framework                    through two components: [Result] indicating the execution
+          designed for repository-level code translation. RepoTransAgent            status (successfully executed in this case), and [Observation]
+          adopts a holistic understanding of entire software repositories,          containing the actual command output that reveals source files,
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           682                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+
+           Fig. 3.   Overview of the RepoTransAgent.
+
+
+
+           examples, test scripts, documentation, and other repository                  • RQ3 (Impact of Dependency Complexity): How does
+           components.                                                                    dependency complexity affect the difficulty and perfor-
+              Through multiple rounds of repository analysis, the agent                   mance of repository-level code translation?
+           develops a comprehensive understanding of the project struc-                 • RQ4 (Error Analysis): What are the main types of errors
+           ture and dependencies. Once sufficient context is gathered,                    that occur in repository-level code translation and what are
+           the agent begins the translation process by identifying critical               their underlying causes?
+           components that require translation, such as core functionality
+           modules. The agent employs a thoughtful approach where it                 B. Model Selection
+           reasons about implementation requirements and develops tar-
+                                                                                        As shown in Table III, we select 8 advanced LLMs from
+           geted translation strategies. For example, when encountering a
+                                                                                     four different companies as our subject LLMs, which include 4
+           function like busy_wait_milliseconds, the agent uses
+                                                                                     open-source and 4 closed-source LLMs representing the state-
+           CreateFile(filepath=“...”) to create the correspond-
+                                                                                     of-the-art in large language model capabilities.
+           ing Python file and implements the function while preserving
+                                                                                        For open-source LLMs, we include Alibaba’s Qwen3-235B-
+           the original functionality and adapting it appropriately for the
+           target language ecosystem.                                                A22B and its reasoning variant Qwen3-235B-A22B-think, both
+                                                                                     released in April 2025 with 235B parameters and 32K con-
+              Throughout the entire translation process, the agent main-
+                                                                                     text windows. These models represent Alibaba’s latest ad-
+           tains contextual awareness of the project structure, ensuring
+                                                                                     vancement in large-scale language modeling. Additionally, we
+           that translated components integrate seamlessly with the overall
+                                                                                     evaluate DeepSeek’s two flagship models: DeepSeek-Chat and
+           repository architecture. The agent leverages its action space
+                                                                                     DeepSeek-Reasoner, both featuring 236B parameters with ex-
+           in an iterative manner, continuously reading source files to
+                                                                                     tended 128K context windows. DeepSeek-Chat was released in
+           understand implementation details, creating translated files with
+                                                                                     March 2025, while DeepSeek-Reasoner, released in May 2025,
+           language-appropriate adaptations, executing commands to val-
+                                                                                     incorporates enhanced reasoning capabilities that have demon-
+           idate translation correctness, and refining the implementation
+                                                                                     strated superior performance on complex reasoning tasks.
+           based on execution feedback until the translation task is com-
+                                                                                        For closed-source LLMs, we examine four leading mod-
+           pleted or a timeout occurs.
+                                                                                     els from major AI companies. From Anthropic, we evaluate
+                                                                                     Claude-Sonnet-4, released in May 2025 with a 200K context
+                                V. EXPERIMENTAL SETUP                                window, representing one of the most capable reasoning mod-
+                                                                                     els available. Google’s Gemini-2.5-Flash-Lite, released in June
+           A. Research Questions
+                                                                                     2025 with a 64K context window, offers efficient performance
+             We aim to answer the following key research questions                   with reduced computational requirements. From OpenAI, we
+           (RQs) that explore the utility of RepoTransBench and Repo-                include two models: GPT-4.1, released in April 2025 with
+           TransAgent:                                                               an impressive 1M context window enabling processing of ex-
+             • RQ1 (Performance of LLM-based Translation Meth-                       tremely long documents, and o3-mini, released in January 2025
+               ods): How do different LLM-based translation methods                  with a 200K context window, designed for efficient reasoning
+               perform in repository-level code translation tasks?                   tasks.
+             • RQ2 (Performance Differences Across translation                          Notably, most of the LLMs used in our experiments support
+               pairs): What are the performance differences across dif-              substantial context windows ranging from 32K to 1M tokens,
+               ferent programming translation pairs?                                 which significantly aids in understanding and processing long
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             683
+
+
+
+                                                                            TABLE III
+                                                                 THE SELECTION OF BACKBONE LLMS
+
+                         Source                 Model Name              Company          Size       Context Window           Release Date
+                                        Qwen3-235B-A22B                  Alibaba         235B               32K                Apr 2025
+                          Open        Qwen3-235B-A22B-think              Alibaba         235B               32K                Apr 2025
+                         Source          DeepSeek-Chat                  DeepSeek         236B              128K                Mar 2025
+                                        DeepSeek-Reasoner               DeepSeek         236B              128K                May 2025
+                                          Claude-Sonnet-4               Anthropic          -               200K                May 2025
+                         Closed         Gemini-2.5-Flash-Lite            Google            -                64K                Jun 2025
+                         Source               GPT-4.1                    OpenAI            -                1M                 Apr 2025
+                                              o3-mini                    OpenAI            -               200K                Jan 2025
+
+
+          sequences of text or code. This extended context capability is                 translation tasks. It reflects the fine-grained performance
+          particularly valuable for tasks requiring comprehensive under-                 at the individual test case level.
+          standing of large-scale content or complex multi-step reasoning.
+                                                                                                                        1  Ti
+                                                                                                                           R
+                                                                                                               APR =                             (5)
+                                                                                                                       R i=1 Ni
+          C. Evaluation Metrics
+                                                                                        where Ti represents the number of passed test cases for
+             We evaluate the translation and debugging performance by                   the i-th translation task, Ni represents the total number of
+          the following metrics:                                                        test cases for the i-th translation task, and R is the total
+            • SR (Success Rate): The metric SR measures the percent-                    number of translation tasks.
+               age of translation tasks that successfully pass all test               • AMPR (Average Module Pass Rate): The metric AMPR
+               cases. A translation task is considered successful if and                measures the average percentage of test modules passed
+               only if all test cases in the task are passed.                           across all translation tasks. A test module is considered
+                 Let Ti represent the number of test cases that pass for the            passed if and only if all test cases within that module are
+               i-th translation task, and Ni represent the total number of              passed.
+               test cases for the i-th translation task. The success indicator            Let Mi represent the total number of test modules for
+               for the i-th task is defined as:                                         the i-th translation task, and Pi represent the number of
+                                          
+                                           1 if Ti = Ni                                 modules that pass all their test cases. The module pass
+                                   Si =                                    (1)          indicator for the j-th module in the i-th task is defined as:
+                                            0    otherwise
+                                                                                                  
+                The Success Rate is calculated as:                                                  1 if all test cases in module j of task i pass
+                                                                                         Mi,j =
+                                                                                                    0 otherwise
+                                                 1 
+                                                    R
+                                        SR =           Si                    (2)                                                                  (6)
+                                                 R i=1
+                                                                                                    Mi
+                                                                                        Then Pi = j=1 Mi,j , and the Average Module Pass Rate
+               where R is the total number of translation tasks (reposito-              is calculated as:
+               ries) in the benchmark.
+                                                                                                                       1  Pi
+                                                                                                                          R
+             • CR (Compilation Rate): The metric CR measures the                                            AMPR =                                (7)
+               percentage of translation tasks that successfully compile                                               R i=1 Mi
+               without any compilation errors.
+                                                                                          where R is the total number of translation tasks in the
+                 Let Ci represent the compilation indicator for the i-th
+                                                                                          benchmark.
+               translation task:
+                                                                                      It is worth noting that many previous works use similarity-
+                           1 if the i-th task compiles successfully                 based metrics like BLEU [90], CodeBLEU [8], or other metrics
+                   Ci =                                                (3)
+                            0   otherwise                                           which calculate the overlapping tokens between references and
+                The Compilation Rate is calculated as:                              translations [10], [12], [40], [91], [92] to evaluate the quality
+                                                                                    of translations. However, similarity-based metrics ignore the
+                                                 1 
+                                                    R
+                                                                                    syntactic correctness and functional correctness of transla-
+                                       CR =            Ci                    (4)    tions [34]. On the one hand, translations with high similarity
+                                                 R i=1
+                                                                                    to the reference cannot avoid having grammatical errors and
+               where R is the total number of translation tasks in the              functional errors. On the other hand, equivalent programs with
+               benchmark.                                                           different implementations may have low similarity. Therefore,
+             • APR (Average Pass Rate): The metric APR measures the                 we decide to use execution-based metrics mentioned above to
+               average percentage of test cases passed across all                   evaluate the performance.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           684                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+                                                                          TABLE IV
+                                               PERFORMANCE EVALUATION RESULTS ACROSS DIFFERENT LLMS AND METHODS
+
+                     Method                        SR       CR      APR      AMPR      Method                      SR      CR      APR      AMPR
+                     TranslationOnlyQwen3          0.0%    26.2%    18.6%    16.2%     TranslationOnlyClaude     0.0%     28.0%    16.4%    14.7%
+                     ErrorFeedbackQwen3           12.4%    30.5%    23.0%    20.5%     ErrorFeedbackClaude       11.3%    37.5%    26.8%    24.3%
+                     RepoTransAgentQwen3          16.9%    34.4%    26.4%    23.6%     RepoTransAgentClaude      32.8%    54.8%    44.8%    41.3%
+                     TranslationOnlyQwen3-think    0.0%    25.9%    18.7%    16.7%     TranslationOnlyGemini     0.0%     32.5%     6.1%    5.2%
+                     ErrorFeedbackQwen3-think     13.8%    30.9%    22.9%    20.8%     ErrorFeedbackGemini       4.1%     31.2%    10.3%    9.2%
+                     RepoTransAgentQwen3-think    19.1%    36.0%    27.3%    25.0%     RepoTransAgentGemini      11.3%    34.4%    21.6%    19.9%
+                     TranslationOnlyDeepSeek       0.0%    27.0%    17.2%    15.2%     TranslationOnlyGPT-4.1    0.0%     26.5%    19.6%    17.4%
+                     ErrorFeedbackDeepSeek        13.9%    30.2%    24.3%    21.6%     ErrorFeedbackGPT-4.1      15.6%    37.7%    29.0%    26.1%
+                     RepoTransAgentDeepSeek       22.5%    36.5%    30.4%    27.9%     RepoTransAgentGPT-4.1     32.8%    53.3%    45.4%    40.8%
+                     TranslationOnlyDeepSeek-R    0.0%     10.9%    1.5%      1.3%     TranslationOnlyo3-mini    0.2%     33.3%     6.0%    5.4%
+                     ErrorFeedbackDeepSeek-R      0.9%     10.8%    2.3%      1.9%     ErrorFeedbacko3-mini      8.7%     38.5%    11.4%    10.8%
+                     RepoTransAgentDeepSeek-R     1.2%     10.9%    2.5%      2.1%     RepoTransAgento3-mini     12.0%    41.0%    24.2%    23.0%
+
+
+
+           D. Execution Environment                                                     The evaluation reveals a substantial performance gap be-
+                                                                                     tween leading closed-source models and open-source alterna-
+              To prevent LLMs from generating malicious code that could
+                                                                                     tives. Claude and GPT-4.1 demonstrate superior performance
+           execute on the local machine and cause damage, we run the
+           generated code in a sandbox (an isolated environment). We use             with RepoTransAgent achieving 32.8% SR for both models,
+                                                                                     significantly outperforming open-source models such as Qwen3
+           Docker [93] as our code execution space, and bridge Docker’s
+           network with the local machine, allowing it to access the in-             (16.9%), DeepSeek-Chat (22.5%), and Gemini (11.3%). No-
+           ternet to ensure the dependencies in the “pom.xml” file can be            tably, reasoning-focused models do not show clear advantages
+                                                                                     over their standard counterparts. Qwen3-think achieves 19.1%
+           successfully installed.
+                                                                                     compared to Qwen3’s 16.9%, representing only a modest im-
+                               VI. EVALUATION RESULTS                                provement. More surprisingly, DeepSeek-Reasoner performs
+                                                                                     dramatically worse than DeepSeek-Chat (1.2% vs 22.5%),
+           A. RQ1: Performance of LLM-Based Translation Methods
+                                                                                     which can be attributed to its excessively long reasoning chains
+              Table IV presents comprehensive evaluation results across              that lead to context management difficulties, request time-
+           different LLMs and methodologies on our RepoTransBench                    outs, and other technical issues that hinder effective translation
+           benchmark. The results reveal significant variations in                   performance.
+           repository-level code translation capabilities and highlight the
+           effectiveness of our proposed approach.
+              The results demonstrate that repository-level code transla-              Finding 2: Open-source models generally underperform
+           tion remains a challenging task for current LLMs. Even the                  leading closed-source models (Claude and GPT-4.1).
+           best-performing configuration (RepoTransAgent with Claude                   Reasoning-based models exhibit no clear advantages,
+           and GPT-4.1) achieves only 32.8% success rate, indicating                   with DeepSeek-Reasoner performing significantly worse
+           that existing models struggle significantly with the complexity             than DeepSeek-Chat due to context management and
+           of entire software repositories. However, our RepoTransAgent                request timeout issues resulting from overly long reasoning
+           framework consistently demonstrates superior performance                    chains.
+           across all evaluated models. For instance, with Claude, Repo-
+           TransAgent achieves 32.8% SR compared to 0.0% for Transla-                   An important observation is that direct translation approaches
+           tionOnly and 11.3% for ErrorFeedback, while with GPT-4.1, it              (TranslationOnly) consistently fail to produce repositories that
+           achieves 32.8% SR versus 0.0% and 15.6% respectively. This                pass all test cases, with 0.0% success rate across most mod-
+           consistent improvement across different LLMs validates the                els (except o3-mini with 0.2%). However, these approaches
+           effectiveness of our agent-based approach for repository-level            can still achieve partial success, with compilation rates rang-
+           code translation.                                                         ing from 10.9% (DeepSeek-Reasoner) to 33.3% (o3-mini),
+                                                                                     and some test cases passing as evidenced by non-zero APR
+             Finding 1: Our RepoTransAgent framework consistently                    values. For example, TranslationOnly with Claude achieves
+             outperforms baseline approaches across all evaluated back-              28.0% compilation rate and 16.4% average pass rate, in-
+             bone models. However, repository-level code translation re-             dicating that while complete functional correctness is ex-
+             mains highly challenging for current LLM-based methods,                 tremely difficult to achieve through direct translation, partial
+             with the best-performing method achieving only a 32.8%                  syntactic correctness and limited functional correctness are
+             success rate.                                                           attainable.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             685
+
+
+
+                                                                           TABLE V
+                                                PERFORMANCE OF REPOTRANSAGENT ACROSS DIFFERENT TRANSLATION PAIRS
+
+            Translation Pair       RepoTransAgentQwen3          RepoTransAgentQwen3-think       RepoTransAgentDeepSeek        RepoTransAgentDeepSeek-R
+                                  SR CR APR AMPR                SR CR APR AMPR                 SR CR APR AMPR                 SR CR APR AMPR
+            C#→Java                8.2   8.2      8.2    8.2    9.3     9.3   9.3      9.3      9.3   10.3   10.3    10.3     3.1    3.1    3.1     3.1
+            C++→Python            58.0   85.6    76.0    71.0   50.3   83.4   71.3     66.2    55.8   81.8   72.7    69.1     0.6    5.0   1.5     1.5
+            C→Python              43.4   91.0    63.1    56.3   33.6   84.4   62.0     52.6    43.4   80.3   62.3    56.1     1.6    5.7   1.6     1.6
+            C→Rust                 6.6   10.7     9.7    8.2    12.3   14.8   13.7     13.1    23.8   23.8   23.8    23.8     0.0    0.0   0.0     0.0
+            JavaScript→Python     28.0   82.0    48.2    40.5   24.3   77.8   50.5     39.1    32.8   79.4   55.4    45.5     8.5   90.5   19.4    15.7
+            Java→C#                0.0   8.9      0.0    0.0    0.7     4.1   0.7      0.7      5.5    7.5    7.5     7.5     0.0    0.0    0.0     0.0
+            Java→Go               17.1   20.5    19.5    17.8   12.3   13.7   13.5     13.0    19.9   24.0   23.4    19.9     0.0    0.0   0.0     0.0
+            Java→Python           43.8   80.8    70.3    67.8   43.2   82.9   70.2     67.6    50.7   80.8   71.9    69.1     0.7    6.2   2.0     2.0
+            Matlab→Python         21.9   59.4    39.4    34.2   15.6   59.4   36.1     31.1    26.6   53.1   39.0    36.9     0.0   12.5   0.0     0.0
+            Python→C++             0.6   3.5      0.6    0.6    0.6     7.0   0.6      0.6      1.2   4.7     1.2     1.2     0.0    0.0    0.0     0.0
+            Python→Go             12.3   14.0    13.4    12.9   9.4     9.9   9.9      9.4     14.0   18.1   17.5    15.2     0.0    0.0   0.0     0.0
+            Python→Java            0.6   1.2      1.2    1.2    1.2     1.2   1.7      1.2      1.8   2.9     2.3     1.8     0.0    0.0    0.0     0.0
+            Python→Rust            5.3   5.8      5.8    5.8    4.7     4.7   4.7      4.7      8.8   8.8     8.8     8.8     0.0    0.0    0.0     0.0
+
+            Translation Pair       RepoTransAgentClaude           RepoTransAgentGemini          RepoTransAgentGPT-4.1          RepoTransAgento3-mini
+                                  SR CR APR AMPR                 SR CR APR AMPR                SR CR APR AMPR                 SR CR APR AMPR
+            C#→Java               28.9   34.0    33.0    33.0   8.2    10.3   11.1     10.3    20.6   22.7   25.3    22.7    3.1     4.1   4.1     4.1
+            C++→Python            63.0   97.8    83.2    80.4   21.0   84.5   56.4     51.9    55.2   96.1   78.3    75.4    3.9    99.4   55.1    51.5
+            C→Python              61.5   98.4    79.7    72.8   37.7   77.0   56.3     50.0    54.9   90.2   76.9    68.5    37.7   87.7   57.6    52.4
+            C→Rust                47.5   57.4    54.3    48.8   22.1   27.0   25.2     24.6    47.5   59.0   54.0    49.2    67.2   70.5   69.1    68.2
+            JavaScript→Python     53.4   96.3    74.8    67.4   3.2    95.8   29.3     24.4    43.4   86.2   68.5    60.0    34.9   94.7   47.7    43.9
+            Java→C#               19.2   30.8    24.0    24.0   0.0     1.4   0.7      0.7     21.2   23.3   25.5    25.2    0.7     1.4   0.7     0.7
+            Java→Go               36.3   43.8    43.0    36.3   14.4   16.4   16.4     16.4    33.6   47.3   45.7    34.2    4.1     4.1   4.1     4.1
+            Java→Python           45.9   98.6    79.8    77.0   38.4   86.3   64.1     62.7    58.2   86.3   79.8    77.8    3.4    97.3   56.3    54.7
+            Matlab→Python         48.4   95.3    67.8    65.4   14.1   35.9   26.0     22.8    34.4   71.9   59.8    57.7    4.7    96.9   20.3    19.7
+            Python→C++             3.5   26.3     6.2    4.1    0.0     1.2   0.7      0.0      9.9   38.0   11.1    10.5    0.6     0.6   0.6     0.6
+            Python→Go             18.7   31.6    29.3    23.4   1.2     1.2   1.2      1.2     19.9   33.3   31.4    21.1    1.2     1.2   1.2     1.2
+            Python→Java            5.8   8.8      8.2    8.2    0.0     0.0   0.0      0.0      7.0   7.0     9.0     7.0     1.8    1.8    1.8     1.8
+            Python→Rust           11.7   17.5    17.1    15.2   1.2     1.8   1.8      1.8     26.3   35.7   34.5    32.7    1.8     1.8   1.8     1.8
+
+
+
+            Finding 3: The translation-only method rarely produces                   information, memory management details, and structured inter-
+            repositories that pass all test cases. However, it can still             faces that can be effectively simplified and adapted to Python’s
+            achieve partial success with some repositories being compi-              more flexible paradigm.
+            lable and passing individual test cases, highlighting the gap               Conversely, Python-to-static-language translations face se-
+            between syntactic and complete functional correctness.                   vere challenges across all evaluated models. Python→Java
+                                                                                     achieves only 0.0-7.0% success rates, Python→C++ reaches
+                                                                                     merely 0.0-9.9%, and Python→Rust performs between 1.2-
+          B. RQ2: Performance Differences Across Translation Pairs                   26.3%. This dramatic performance gap reflects the funda-
+             Table V presents detailed performance analysis of Repo-                 mental challenge of inferring static type information, mem-
+          TransAgent across 13 different translation pairs and multiple              ory management strategies, and explicit interface definitions
+          LLMs. The results reveal significant insights about the inherent           from Python’s dynamic and implicit programming model. The
+          difficulties and characteristics of different programming lan-             translation process must essentially reverse-engineer the im-
+          guage translation combinations.                                            plicit contracts and assumptions present in dynamically-typed
+             The most striking pattern in our results is the fundamen-               code.
+          tal asymmetry between translating from statically-typed lan-
+          guages to dynamically-typed languages versus the reverse di-
+                                                                                      Finding 4: Translation from statically-typed languages to
+          rection. Translations from static languages (C, C++, Java) to
+                                                                                      dynamically-typed achieves substantially higher success rates
+          Python consistently achieve high success rates across most
+                                                                                      (45-63%) compared to the reverse direction (typically below
+          models: Claude achieves 61.5% for C→Python, 63.0% for
+                                                                                      10%), revealing a fundamental asymmetry in translation dif-
+          C++→Python, and 45.9% for Java→Python, while GPT-4.1
+                                                                                      ficulty due to the challenges of inferring explicit type and
+          reaches 54.9%, 55.2%, and 58.2% respectively. This success
+                                                                                      interface information from dynamic code.
+          stems from the fact that static languages provide explicit type
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           686                                                                    IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+
+           Fig. 4. The effect of code length and functional complexity on translation performance. The light colors (       ) represent non-successful outcomes, while
+           dark colors (   ) represent successful outcomes. The first two groups (        ) in each subplot show success/non-success results, while the last two groups
+           (     ) show compilation/non-compilation results. To improve clarity, outliers where metrics exceed the 95th percentile have been omitted.
+
+
+
+              Our analysis reveals that different LLM backbones exhibit                   dimensions. For cross-file dependencies, successful transla-
+           surprising specialization patterns for specific translation pairs,             tions consistently exhibit lower median values compared to
+           likely reflecting their training data composition and archi-                   failed translations, indicating that repositories with fewer inter-
+           tectural biases. Most notably, o3-mini demonstrates excep-                     module dependencies are more amenable to successful trans-
+           tional performance on C→Rust translation with 67.2% success                    lation. Similarly, intra-file dependencies show that successful
+           rate, significantly outperforming leading models like Claude                   translations tend to have simpler internal dependency struc-
+           (47.5%) and GPT-4.1 (47.5%) on the same pair. This suggests                    tures. The pattern extends to basic size metrics, where suc-
+           that o3-mini’s training included substantial Rust-related content              cessful translations typically involve repositories with fewer
+           or system-level programming examples that enhanced its un-                     lines of code, fewer functions, and fewer classes. This con-
+           derstanding of memory safety patterns and ownership concepts                   sistent trend across all complexity dimensions suggests that
+           critical for C-to-Rust translation.                                            current LLMs struggle systematically with increased reposi-
+              Similarly, we observe that certain models excel at specific                 tory complexity, regardless of whether the complexity stems
+           paradigm shifts while struggling with others. For instance,                    from structural dependencies, code volume, or functional
+           Claude shows strong performance across most translation                        richness.
+           pairs but particularly excels at translating to Python (achiev-
+           ing the highest success rates for C→Python, C++→Python,                          Finding 6: Repository complexity across all dimensions
+           and Matlab→Python), suggesting robust training on Python                         (cross-file dependencies, intra-file dependencies, code length,
+           codebases. In contrast, Gemini demonstrates highly inconsis-                     and structural complexity) inversely correlates with transla-
+           tent performance, achieving strong compilation rates for some                    tion success, indicating that current LLMs struggle system-
+           pairs (95.8% for JavaScript→Python compilation) but near-                        atically with complex repository structures.
+           zero functional success rates, indicating potential gaps in under-
+           standing semantic equivalence across languages. These patterns
+           suggest that training data distribution and architectural choices              D. RQ4: Error Analysis
+           significantly influence model performance on specific language                    We conduct an error analysis across three rounds of exper-
+           combinations.                                                                  iments, ultimately identifying common errors in repository-
+                                                                                          level code translation. These errors are classified into five cat-
+             Finding 5: Different LLM backbones demonstrate special-                      egories: E1 (Configuration File Issues), E2 (Limited Under-
+             ized advantages for specific translation pairs (e.g., o3-mini                standing Ability Issues), E3 (Incomplete Generation Issues), E4
+             excelling at C→Rust with 67.2% vs. Claude’s 47.5%), likely                   (Language Feature Issues), E5 (Encoding Issues). Due to space
+             reflecting training data composition and architectural biases                constraints, we provide two cases for each category.
+             that favor particular programming languages.                                    E1. Configuration File Issues often arise when build-related
+                                                                                          content (e.g., “CMakeLists.txt” in a C++ CMake project) is
+                                                                                          not configured correctly. Fig. 5 shows an error due to an
+           C. RQ3: Impact of Dependency Complexity                                        unresolved dependency as the package “nonexistent-lib” can-
+              Fig. 4 presents a comprehensive analysis of how repository                  not be found through CMake’s package configuration system.
+           complexity characteristics affect translation performance across               Beyond this common error, we observe other configuration-
+           different dimensions. We examine the relationship between                      related issues including version compatibility problems, miss-
+           various complexity metrics and translation outcomes to un-                     ing dependency declarations in build files (e.g., “package.json”,
+           derstand the fundamental challenges posed by repository-level                  “requirements.txt”, “Cargo.toml”), and platform-specific con-
+           code translation.                                                              figuration errors. Some LLMs occasionally generate inap-
+              The analysis reveals a clear inverse relationship between                   propriate content for configuration files, leading to build
+           repository complexity and translation success across multiple                  failures.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                             687
+
+
+
+
+          Fig. 5.   Error Type 1: Configuration File Issues.
+
+
+
+
+                                                                                    Fig. 7.   Error Type 3: Incomplete Generation Issues.
+
+
+
+
+          Fig. 6.   Error Type 2: Limited Understanding Ability Issues.
+                                                                                    Fig. 8.   Error Type 4: Language Feature Issues.
+
+            Finding 7: Unlike fine-grained code translation works,
+            repository-level code translation requires proper configura-            function bodies, we observe other generation issues including
+            tion of files such as the “CMakeLists.txt” file in C++ reposi-          missing import statements for used packages, incomplete class
+            tories. This can lead to dependency-related issues (e.g., non-          or struct definitions, and truncated method implementations.
+            existent dependencies, version mismatches, etc.). Solving               These problems often occur when LLMs struggle with long
+            these problems requires a clear understanding of the related            code sequences or when they generate example-style code while
+            calls and the latest dependencies.                                      omitting essential elements.
+
+             E2. Limited Understanding Ability Issues usually arise                  Finding 9: Some LLMs may struggle to continue generating
+          due to unfamiliarity with the code context during translation.             due to limited instruction following capability, and others
+          Fig. 6 shows two methods with identical names and parameter                may tend to generate example code with some elements omit-
+          signatures in a Go struct, leading to a redeclaration error. This          ted. These issues can be automatically identified by depen-
+          occurs because the previously generated method is overlooked               dency analysis and syntax checking. Then we can fix these
+          when generating new functions, often due to insufficient context           issues by regenerating or replacing them with stronger LLMs.
+          awareness in long codebases. Beyond this example, we observe
+          other context-related issues including incorrect function calls              E4. Language Feature Issues occur frequently in
+          with mismatched argument types, improper imports due to mis-              repository-level code translation due to its functional complex-
+          understanding repository structure, and variable scope conflicts.         ity. Fig. 8 shows a case where a static method attempts to access
+          These errors typically stem from LLMs’ limited ability to main-           a non-static inner class UrlEncoder, which violates Java’s
+          tain comprehensive understanding of the entire codebase during            static context rules. This error demonstrates the fundamental
+          translation.                                                              misunderstanding of static versus non-static member accessi-
+                                                                                    bility in Java. Beyond this example, we observe other language-
+            Finding 8: Due to the long code length and complex reposi-              specific issues including attempts to instantiate abstract classes,
+            tory structure, a lack of understanding of the repository con-          direct access to private member variables from external classes,
+            text may result in generating inappropriate code. To mitigate           and incorrect use of language-specific keywords or modifiers.
+            these issues, taking measures to enhance the focus on relevant          These problems typically arise when LLMs perform token-
+            context within the repository might be helpful.                         by-token translation without considering the target language’s
+                                                                                    semantic constraints and access control mechanisms.
+             E3. Incomplete Generation Issues often occur due to
+          LLMs’ limitation in instruction following and code generation
+                                                                                     Finding 10: When translating a repository to another lan-
+          abilities. Fig. 7 shows an example where the LLM fails to com-
+                                                                                     guage, some LLMs may lack sufficient understanding of lan-
+          plete a long Rust function, leaving unclosed delimiters and in-
+                                                                                     guage features, leading to related issues. Providing LLMs
+          complete statements. The generation terminates abruptly in the
+                                                                                     with more information about the language features in the
+          middle of a HashMap insertion, resulting in syntax errors due
+                                                                                     prompt may help improve the translation performance.
+          to missing closing braces and parentheses. Beyond incomplete
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           688                                                               IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+                                                                                     inherent randomness in their outputs, which could affect the
+                                                                                     reproducibility of our results. To mitigate this threat, we em-
+                                                                                     ploy consistent experimental settings and analyze performance
+                                                                                     patterns across multiple samples rather than isolated instances.
+                                                                                     Additionally, our evaluation focuses on objective metrics (com-
+           Fig. 9.   Error Type 5: Encoding Issues.
+                                                                                     pilation success, test passage) that are less susceptible to gen-
+                                                                                     eration variance compared to subjective quality assessments.
+              E5. Encoding Issues occur due to incompatible repository               Another potential threat concerns the comprehensiveness of
+           encoding formats and can lead to compilation failures when                functional correctness evaluation. Our evaluation primarily
+           using special characters. Fig. 9 shows an example where a Java            relies on execution-based metrics using existing test suites
+           source file contains an emoji character in a string literal, but the      from source repositories. While passing all test cases provides
+           compiler is configured to use US-ASCII encoding, which can-               strong evidence of functional correctness, it may not capture all
+           not handle Unicode characters beyond the basic ASCII range.               edge cases or guarantee complete semantic equivalence. How-
+           Beyond emoji usage, we observe other encoding-related issues              ever, this approach represents a significant advancement over
+           including problems with non-English characters in comments                similarity-based metrics used in previous work, as it directly
+           or string literals, issues when reading files with different en-          validates the operational correctness of translated code. Real-
+           coding formats, and compilation errors in multilingual environ-           world test suites from production repositories provide more re-
+           ments. These problems typically arise when the build system’s             alistic evaluation scenarios compared to artificially constructed
+           default encoding configuration is insufficient for the characters         benchmarks. The repository selection and filtering process may
+           present in the translated code.                                           introduce bias toward certain types of projects. Our filtering
+                                                                                     criteria (star count, language composition, executability) may
+                                                                                     favor well-maintained, popular repositories while excluding
+             Finding 11: Non-US-ASCII characters commonly occur
+                                                                                     experimental or domain-specific projects. This bias is inten-
+             in repositories, and encoding-related issues can sometimes
+                                                                                     tional to ensure benchmark quality and practical relevance, as
+             arise when reading or writing resources. These problems can
+                                                                                     successful repository-level translation tools should prioritize
+             be resolved by configuring correct encoding format of the
+                                                                                     handling well-structured, maintainable codebases that represent
+             repository.
+                                                                                     common development scenarios. Finally, the temporal validity
+                                                                                     of our benchmark presents a consideration, as programming
+                               VII. THREATS TO VALIDITY
+                                                                                     languages, frameworks, and development practices evolve con-
+              Internal Threats. The first potential internal threat concerns         tinuously. However, our focus on fundamental language fea-
+           the scope of evaluated LLMs. While we evaluate 8 state-of-                tures and well-established frameworks ensures that our findings
+           the-art LLMs across different categories (open-source, closed-            remain relevant across reasonable time horizons. The automated
+           source, and reasoning-focused models), the rapidly evolving               benchmark construction framework we develop can facilitate
+           landscape of LLMs means that newer models may exhibit                     future updates and extensions to maintain benchmark currency.
+           different performance characteristics. However, our evaluation
+           includes leading models from major providers (OpenAI, An-
+                                                                                                            VIII. RELATED WORK
+           thropic, Google, Alibaba, DeepSeek) that represent the current
+           state-of-the-art, ensuring broad coverage of existing capabili-              Many benchmarks have been introduced to compare the
+           ties. Additionally, we do not apply fine-tuning methods to these          performance of different translation techniques objectively.
+           LLMs specifically for repository-level translation, which may             CoST [32] and XLCost [33] introduce a snippet and function-
+           impact their performance. This limitation is partially mitigated          level code translation benchmark. CodeXGLUE [35] includes a
+           by including specialized code models that have been pre-trained           dataset for function-level Java-C# code translation. TransCoder-
+           on code-related tasks. Another potential threat is the selection          test is the evaluation dataset for TransCoder [34], which in-
+           of programming translation pairs. Our benchmark focuses                   cludes the function-level code translation on Python, Java, and
+           on 13 translation pairs across 7 programming languages, with              C++. Some other benchmarks like HumanEval-X [36] source
+           emphasis on commonly used languages in software develop-                  from HumanEval [56] to construct a function-level code trans-
+           ment. While this covers major programming paradigms (object-              lation benchmark. G-TransEval [67] provides a more fine-
+           oriented, functional, systems programming), the results may               grained taxonomy, including token-level, syntax-level, library-
+           not generalize to less common languages or domain-specific                level, and algorithm-level, which is part of a function. CodeNet
+           languages. However, our language selection is based on TIOBE              [37], Avatar [38], xCodeEval [58] CodeScope [39] and Code-
+           rankings and developer survey data, ensuring relevance to real-           TransOcean [40] introduce file-level code translation bench-
+           world translation needs. The inclusion of diverse language com-           marks which source from code contest platforms like code-
+           binations (e.g., C ↔ Python, Java ↔ Go, Python ↔ Rust)                    forces [60], atcoder [61], aizu [62], Google Code Jam [63],
+           provides insights into various translation scenarios encountered          etc. or task solutions websites like samples from.Net [64], d2lai
+           in practice.                                                              [65], rosetta code [66], etc. Although these benchmarks can
+              External Threats. The primary external threat involves                 evaluate the capabilities of existing code translation techniques
+           LLMs’ generation variability. Large language models exhibit               to some extent, they cannot evaluate the performance of current
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+          WANG et al.: REPOTRANSBENCH: A REAL-WORLD MULTILINGUAL BENCHMARK                                                                                            689
+
+
+
+          techniques on real-world repository-level code translation tasks.                [11] M. Szafraniec, B. Roziere, H. Leather, F. Charton, P. Labatut, and
+          Recently, pan et al. [1] manually study two open-source repos-                        G. Synnaeve, “Code translation with compiler representations,” 2022,
+                                                                                                arXiv:2207.03578.
+          itories (Apache Commons CLI [41] and Python Click [42]) and                      [12] A. T. Nguyen, T. T. Nguyen, and T. N. Nguyen, “Lexical statistical
+          find that current LLMs struggle to complete the translation tasks                     machine translation for language migration,” in Proc. 9th Joint Meeting
+          of entire repositories. However, they do not provide a sufficient                     Foundations Softw. Eng., 2013, pp. 651–654.
+                                                                                           [13] A. T. Nguyen, T. T. Nguyen, and T. N. Nguyen, “Migrating code with
+          number of repositories and corresponding automatic test suites                        statistical machine translation,” in Proc. 36th Int. Conf. Softw. Eng.
+          for evaluation. Besides, the resource and configuration files are                     Companion, 2014, pp. 544–547.
+          ignored in this research. Recently, Pan et al. [1] manually study                [14] M. Mossienko, “Automated Cobol to java recycling,” in Proc. 7th Eur.
+                                                                                                Conf. Softw. Maintenance Reeng., Piscataway, NJ, USA: IEEE Press,
+          two open-source repositories (Apache Commons CLI [41] and                             2003, pp. 40–50.
+          Python Click [42]) and find that current LLMs struggle to                        [15] A. E. Hassan and R. C. Holt, “A lightweight approach for migrating web
+          complete the translation tasks of entire repositories. AlphaTrans                     frameworks,” Inf. Softw. Technol., vol. 47, no. 8, pp. 521–532, 2005.
+                                                                                           [16] T. T. Bartolomei, K. Czarnecki, and R. Lämmel, “Swing to SWT and
+          [94] is proposed as a neuro-symbolic compositional technique                          back: Patterns for API migration by wrapping,” in Proc. IEEE Int. Conf.
+          that decomposes repositories into fragments and translates them                       Softw. Maintenance, Piscataway, NJ, USA: IEEE Press, 2010, pp. 1–10.
+          in reverse call order with GraalVM-based validation. TRACY                       [17] H. Zhong, S. Thummalapenta, T. Xie, L. Zhang, and Q. Wang, “Mining
+                                                                                                API mapping for language migration,” in Proc. 32nd ACM/IEEE Int.
+          [95] is a benchmark proposed to evaluate the execution effi-                          Conf. Softw. Eng., 2010, vol. 1, pp. 195–204.
+          ciency of function-level code translation. However, our main                     [18] A. T. Nguyen, H. A. Nguyen, T. T. Nguyen, and T. N. Nguyen,
+          contribution is introducing a real-world multilingual bench-                          “Statistical learning approach for mining API usage mappings for code
+                                                                                                migration,” in Proc. 29th ACM/IEEE Int. Conf. Automated Softw. Eng.,
+          mark for verifying the equivalence of repository-level code                           2014, pp. 457–468.
+          translation.                                                                     [19] X. Gu, H. Zhang, D. Zhang, and S. Kim, “DeepAM: Migrate APIS with
+                                                                                                multi-modal sequence to sequence learning,” 2017, arXiv:1704.07734.
+                                      IX. CONCLUSION                                       [20] D. Bahdanau, “Neural machine translation by jointly learning to align
+                                                                                                and translate,” 2014, arXiv:1409.0473.
+             This paper addresses the gap between existing fine-grained                    [21] X. Chen, C. Liu, and D. Song, “Tree-to-tree neural networks for program
+                                                                                                translation,” in Proc. Adv. Neural Inf. Process. Syst., vol. 31, 2018, pp.
+          code translation benchmarks and real-world software devel-                            2552–2562.
+          opment demands by introducing RepoTransBench, a com-                             [22] M. Artetxe, G. Labaka, and E. Agirre, “Unsupervised statistical machine
+          prehensive repository-level benchmark with 1,897 samples                              translation,” 2018, arXiv:1809.01272.
+                                                                                           [23] J. Devlin, “Bert: Pre-training of deep bidirectional transformers for
+          across 13 translation pairs, and RepoTransAgent, an intelligent                       language understanding,” 2018, arXiv:1810.04805.
+          agent framework based on the ReAct paradigm for systematic                       [24] Z. Feng et al., “CodeBert: A pre-trained model for programming and
+          repository translation. Our evaluation reveals that repository-                       natural languages,” 2020, arXiv:2002.08155.
+                                                                                           [25] D. Guo et al., “GraphCodeBert: Pre-training code representations with
+          level translation remains challenging, with the best-performing                       data flow,” 2020, arXiv:2009.08366.
+          method achieving only a 32.8% success rate. We also observe                      [26] W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W. Chang, “Uni-
+          strong directional asymmetry in translation difficulty (static-to-                    fied pre-training for program understanding and generation,” 2021,
+                                                                                                arXiv:2103.06333.
+          dynamic achieving 45-63% vs. reverse direction below 10%),                       [27] D. Guo, S. Lu, N. Duan, Y. Wang, M. Zhou, and J. Yin, “Unix-
+          model-specific advantages for certain translation pairs reflect-                      coder: Unified cross-modal pre-training for code representation,” 2022,
+          ing training biases, and inverse correlation between repository                       arXiv:2203.03850.
+                                                                                           [28] Q. Zheng et al., “CodeGEEX: A pre-trained model for code generation
+          complexity and translation success. This paper provides the                           with multilingual benchmarking on humaneval-x,” in Proc. 29th ACM
+          community with both a challenging benchmark and practical                             SIGKDD Conf. Knowl. Discovery Data Mining, 2023, pp. 5673–5684.
+          guidance for future research.                                                    [29] Z. Yang et al., “Exploring and unleashing the power of large language
+                                                                                                models in automated code translation,” Proc. ACM Softw. Eng., vol. 1,
+                                                                                                no. FSE, pp. 1585–1608, 2024.
+                                         REFERENCES                                        [30] K. Lano and H. Siala, “Using model-driven engineering to automate
+           [1] R. Pan et al., “Lost in translation: A study of bugs introduced by large         software language translation,” Automated Softw. Eng., vol. 31, no. 1, p.
+               language models while translating code,” in Proc. IEEE/ACM 46th Int.             20, 2024.
+               Conf. Softw. Eng., 2024, pp. 1–13.                                          [31] V. Nitin and B. Ray, “Spectra: Enhancing the code translation ability
+           [2] Q. Sun et al., “A survey of neural code intelligence: Paradigms, advances        of language models by generating multi-modal specifications,” 2024,
+               and beyond,” 2024, arXiv:2403.14734.                                             arXiv:2405.18574.
+           [3] H. F. Eniser et al., “Towards translating real-world code with LLMs: A      [32] M.-Y. Zhu, K. Suresh, and C. K. Reddy, “Multilingual code snip-
+               study of translating to rust,” 2024, arXiv:2405.11514.                           pets training for program translation,” in Proc. AAAI Conf. Ar-
+           [4] S. Dou et al., “What’s wrong with your code generated by large language          tif. Intell., 2022. [Online]. Available: https://api.semanticscholar.org/
+               models? An extensive study,” 2024, arXiv:2407.06153.                             CorpusID:245216916
+           [5] J. Austin et al., “Program synthesis with large language models,” 2021,     [33] M. Zhu, A. Jain, K. Suresh, R. Ravindran, S. Tipirneni, and C. K. Reddy,
+               arXiv:2108.07732.                                                                “Xlcost: A benchmark dataset for cross-lingual code intelligence,” 2022,
+           [6] E. Nijkamp et al., “CodeGen: An open large language model for code               arXiv:2206.08474.
+               with multi-turn program synthesis,” 2022, arXiv:2203.13474.                 [34] M.-A. Lachaux, B. Roziere, L. Chanussot, and G. Lample, “Unsuper-
+           [7] Y. Xie, A. Naik, D. Fried, and C. Rose, “Data augmentation for code              vised translation of programming languages,” 2020, arXiv:2006.03511.
+               translation with comparable corpora and multiple references,” 2023,         [35] S. Lu et al., “CodeXGLUE: A machine learning benchmark dataset for
+               arXiv:2311.00317.                                                                code understanding and generation,” 2021, arXiv:2102.04664.
+           [8] S. Ren et al., “CodeBLEU: A method for automatic evaluation of code         [36] “humaneval-x.” Accessed: Nov. 10, 2025. [Online]. Available: https://
+               synthesis,” 2020, arXiv:2009.10297.                                              huggingface.co/datasets/THUDM/humaneval-x
+           [9] D. Hendrycks et al., “Measuring coding challenge competence with            [37] R. Puri et al., “CodeNet: A large-scale AI for code dataset for learning
+               apps,” 2021. [Online]. Available: https://arxiv.org/abs/2105.09938               a diversity of coding tasks,” 2021, arXiv:2105.12655.
+          [10] K. Aggarwal, M. Salameh, and A. Hindle, “Using machine translation          [38] W. U. Ahmad, M. G. R. Tushar, S. Chakraborty, and K.-W. Chang,
+               for converting python 2 to python 3 code,” PeerJ PrePrintsTechRep.,              “Avatar: A parallel corpus for java-python program translation,” 2021,
+               2015.                                                                            arXiv:2108.11590.
+
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+           690                                                                     IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 52, NO. 2, FEBRUARY 2026
+
+
+
+           [39] W. Yan et al., “Codescope: An execution-based multilingual multitask        [69] A. Lozhkov et al., “Starcoder 2 and the stack v2: The next generation,”
+                multidimensional benchmark for evaluating LLMs on code understand-               2024, arXiv:2402.19173.
+                ing and generation,” 2023, arXiv:2311.08588.                                [70] L. B. Allal et al., “Santacoder: Don’t reach for the stars!,” 2023,
+           [40] W. Yan, Y. Tian, Y. Li, Q. Chen, and W. Wang, “Codetransocean:                   arXiv:2301.03988.
+                A comprehensive multilingual benchmark for code translation,” 2023,         [71] H. Touvron et al., “Llama: Open and efficient foundation language
+                arXiv:2310.04951.                                                                models,” 2023, arXiv:2302.13971.
+           [41] “Apache commons cli.” Accessed: Nov. 10, 2025. [Online]. Available:         [72] H. Touvron et al., “Llama 2: Open foundation and fine-tuned chat
+                https://commons.apache.org/proper/commons-cli/                                   models,” 2023, arXiv:2307.09288.
+           [42] “Click.” Accessed: Nov. 10, 2025. [Online]. Available: https://click.       [73] A. Dubey et al., “The llama 3 herd of models,” 2024, arXiv:2407.21783.
+                palletsprojects.com/en/8.1.x/                                               [74] OpenAI,        “Gpt-4      technical     report,”   2023     Available:
+           [43] “Antlr.” Accessed: Nov. 10, 2025. [Online]. Available: https://www.antlr.        https://arxiv.org/abs/2303.08774.
+                org/                                                                        [75] DeepSeek-AI, “Deepseek-v2: A strong, economical, and efficient
+           [44] “Babel.” Accessed: Nov. 10, 2025. [Online]. Available: https://babeljs.          mixture-of-experts language model,” 2024.
+                io/                                                                         [76] Anthropic, “The Claude 3 model family: Opus, sonnet, haiku.” [Online].
+           [45] “Emscripten.” Accessed: Nov. 10, 2025. [Online]. Available: https://             Available: https://api.semanticscholar.org/CorpusID:268232499
+                emscripten.org/                                                             [77] A. Z. Yang, Y. Takashima, B. Paulsen, J. Dodds, and D. Kroening,
+           [46] “Jsweet.” Accessed: Nov. 10, 2025. [Online]. Available: https://www.             “Vert: Verified equivalent rust transpilation with few-shot learning,”
+                jsweet.org/                                                                      2024, arXiv:2404.18852.
+           [47] “Gwt.” Accessed: Nov. 10, 2025. [Online]. Available: https://www.           [78] M. Bhattarai, J. E. Santos, S. Jones, A. Biswas, B. Alexandrov,
+                gwtproject.org/overview.html                                                     and D. O’Malley, “Enhancing code translation in language mod-
+           [48] “Cxgo.” Accessed: Nov. 10, 2025. [Online]. Available: https://github.            els with few-shot learning via retrieval-augmented generation,” 2024,
+                com/gotranspile/cxgo                                                             arXiv:2407.19619.
+           [49] “c2rust.’’ Accessed: Nov. 10, 2025. [Online]. Available: https://github.    [79] Z. Yuan, W. Chen, H. Wang, K. Yu, X. Peng, and Y. Lou,
+                com/immunant/c2rust                                                              “TransAGENT: An LLM-based multi-agent system for code translation,”
+           [50] “Javatocsharp.” Accessed: Nov. 10, 2025. [Online]. Available: https://           2024, arXiv:2409.19894.
+                github.com/paulirwin/JavaToCSharp                                           [80] M. Shiraishi and T. Shinagawa, “Context-aware code segmenta-
+           [51] “Haxe.” Accessed: Nov. 10, 2025. [Online]. Available: https://haxe.org/          tion for c-to-rust translation using large language models,” 2024,
+           [52] “Swig.” Accessed: Nov. 10, 2025. [Online]. Available: https://swig.org/          arXiv:2409.10506.
+           [53] Y. Wang, W. Wang, S. Joty, and S. C. Hoi, “Codet5: Identifier-aware         [81] R. Karanjai, L. Xu, and W. Shi, “Teaching machines to code: Smart
+                unified pre-trained encoder-decoder models for code understanding and            contract translation with LLMs,” 2024, arXiv:2403.09740.
+                generation,” 2021, arXiv:2109.00859.                                        [82] “Solidity.” Accessed: Nov. 10, 2025. [Online]. Available: https://
+           [54] P. Koehn et al., “Moses: Open source toolkit for statistical ma-                 soliditylang.org/
+                chine translation,” in Proc. 45th Annu. Meeting Assoc. Comput.              [83] “Move.” Accessed: Nov. 10, 2025. [Online]. Available: https://github.
+                Linguistics Companion Vol. Proc. Demo Poster Sessions, 2007,                     com/move-language/move
+                pp. 177–180.                                                                [84] W. Yang, Y. Guo, and Y. Xue, “CCTrans: A java-to-javascript translation
+           [55] H. Zheng, Y. Cheng, and Y. Liu, “Maximum expected likelihood                     with concurrency runtime,” 2024, arXiv:2408.09481.
+                estimation for zero-resource neural machine translation,” in Proc. IJCAI,   [85] M. S. Abid et al., “Gluetest: Testing code translation via language
+                2017, pp. 4251–4257.                                                             interoperability,” in Proc. IEEE Int. Conf. Softw. Maintenance Evol.
+           [56] M. Chen et al., “Evaluating large language models trained on code,”              (ICSME), 2024, pp. 612–617, doi: 10.1109/ICSME58944.2024.00061.
+                2021, arXiv:2107.03374.                                                     [86] F. Liu, J. Li, and L. Zhang, “Syntax and domain aware model
+           [57] “Geeksforgeeks,” [Online]. Available: https://www.geeksforgeeks.org/             for unsupervised program translation,” in Proc. IEEE/ACM 45th Int.
+           [58] M. A. M. Khan, M. S. Bari, X. L. Do, W. Wang, M. R. Parvez, and                  Conf. Softw. Eng. (ICSE), Piscataway, NJ, USA: IEEE Press, 2023,
+                S. Joty, “xcodeeval: A large scale multilingual multitask benchmark              pp. 755–767.
+                for code understanding, generation, translation and retrieval,” 2023,       [87] “maven.” Accessed: Nov. 10, 2025. [Online]. Available: https://maven.
+                arXiv:2303.03004.                                                                apache.org/
+           [59] X. Yin, C. Ni, T. N. Nguyen, S. Wang, and X. Yang, “Rectifier: Code         [88] “Tiobe-index.” Accessed: Nov. 10, 2025. [Online]. Available: https://
+                translation with corrector via LLMs,” 2024, arXiv:2407.07472.                    www.tiobe.com/tiobe-index/
+           [60] “Codeforces.” Accessed: Nov. 10, 2025. [Online]. Available: https://        [89] “GitHub.” Accessed: Nov. 10, 2025. [Online]. Available: https://github.
+                codeforces.com/                                                                  com/DeepSoftwareAnalytics/RepoTransBench
+           [61] “Atcoder.” Accessed: Nov. 10, 2025. [Online]. Available: https://atcoder.   [90] K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu, “Bleu: a method
+                jp/                                                                              for automatic evaluation of machine translation,” in Proc. 40th Annu.
+           [62] “Aizu.” Accessed: Nov. 10, 2025. [Online]. Available: https://                   Meeting Assoc. Comput. Linguistics, 2002, pp. 311–318.
+                onlinejudge.u-aizu.ac.jp                                                    [91] S. Karaivanov, V. Raychev, and M. Vechev, “Phrase-based statis-
+           [63] “Googlecodejam.” Accessed: Nov. 10, 2025. [Online]. Available: https://          tical translation of programming languages,” in Proc. ACM Int.
+                codingcompetitionsonair.withgoogle.com/                                          Symp. New Ideas, New Paradigms, Reflections Program. Softw., 2014,
+           [64] “Dotnetsamples.” Accessed: Nov. 10, 2025. [Online]. Available: https://          pp. 173–184.
+                learn.microsoft.com/en-us/samples/dotnet/try-samples/101-linqsamples/       [92] A. V. M. Barone and R. Sennrich, “A parallel corpus of python functions
+           [65] “d2lai.” Accessed: Nov. 10, 2025. [Online]. Available: https://github.           and documentation strings for automated code documentation and code
+                com/d2l-ai/d2l-zh                                                                generation,” 2017, arXiv:1707.02275.
+           [66] “Rosettacode.” Accessed: Nov. 10, 2025. [Online]. Available: https://       [93] “Docker.” Accessed: Nov. 10, 2025. [Online]. Available: https://www.
+                rosettacode.org/wiki/Rosetta_Code                                                docker.com/
+           [67] M. Jiao, T. Yu, X. Li, G. Qiu, X. Gu, and B. Shen, “On the evaluation       [94] A. R. Ibrahimzada et al., “Alphatrans: A neuro-symbolic compositional
+                of neural code translation: Taxonomy and benchmark,” in Proc. 38th               approach for repository-level code translation and validation,” Proc.
+                IEEE/ACM Int. Conf. Automated Softw. Eng. (ASE), Piscataway, NJ,                 ACM Softw. Eng., vol. 2, no. FSE, pp. 2454–2476, 2025.
+                USA: IEEE Press, 2023, pp. 1529–1541.                                       [95] Z. Gong, Z. Sun, D. Huang, Q. Liang, J. M. Zhang, and D. Hao, “Tracy:
+           [68] R. Li et al., “Starcoder: May the source be with you!,” 2023,                    Benchmarking execution efficiency of LLM-based code translation,”
+                arXiv:2305.06161.                                                                2025, arXiv:2508.11468.
+
+
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:56:06 UTC from IEEE Xplore. Restricti
+

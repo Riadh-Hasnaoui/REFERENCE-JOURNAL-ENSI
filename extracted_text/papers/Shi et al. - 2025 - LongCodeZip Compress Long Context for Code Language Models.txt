@@ -1,0 +1,1101 @@
+                                                                                                                                                                                         2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)
+
+
+
+
+                                                                                                                                                                            LongCodeZip: Compress Long Context for Code
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) | 979-8-3503-5733-2/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASE63991.2025.00020
+
+
+
+
+                                                                                                                                                                                         Language Models
+                                                                                                                                                                                               Yuling Shi1 , Yichun Qian2 , Hongyu Zhang3 , Beijun Shen1 , Xiaodong Gu1∗
+                                                                                                                                                                                                                  1
+                                                                                                                                                                                                                  Shanghai Jiao Tong University, Shanghai, China
+                                                                                                                                                                                                                     2
+                                                                                                                                                                                                                       Stanford University, Stanford, CA, USA
+                                                                                                                                                                                                                    3
+                                                                                                                                                                                                                      Chongqing University, Chongqing, China
+                                                                                                                                                                                           {yuling.shi, bjshen, xiaodong.gu}@sjtu.edu.cn, ycqian@stanford.edu, hyzhang@cqu.edu.cn
+
+
+                                                                                                                                                                           Abstract—Code generation under long contexts is becoming                  generation efficiency. At the same time, processing longer
+                                                                                                                                                                        increasingly critical as Large Language Models (LLMs) are                    inputs with LLMs results in rapidly increasing API costs,
+                                                                                                                                                                        required to reason over extensive information in the code-                   especially when pricing models are expensive [17], [18].
+                                                                                                                                                                        base. While recent advances enable code LLMs to process
+                                                                                                                                                                        long inputs, high API costs and generation latency remain                    Second, LLMs struggle to identify and utilize relevant content
+                                                                                                                                                                        substantial bottlenecks. Existing context pruning techniques, such           amid lengthy inputs [19], [20]. Third, even though recent
+                                                                                                                                                                        as LLMLingua, achieve promising results for general text but                 LLMs support extended context windows to 128k tokens, these
+                                                                                                                                                                        overlook code-specific structures and dependencies, leading to               limits can still be reached when processing large files and
+                                                                                                                                                                        suboptimal performance in programming tasks. In this paper, we               long conversation histories, leading to context truncation and
+                                                                                                                                                                        propose LongCodeZip, a novel plug-and-play code compression
+                                                                                                                                                                        framework designed specifically for code LLMs. LongCodeZip                   degraded outputs [21].
+                                                                                                                                                                        employs a dual-stage strategy: (1) coarse-grained compression,                  These issues are particularly pronounced in code LLMs.
+                                                                                                                                                                        which identifies and ranks function-level chunks using conditional           Unlike natural language text, source code is highly struc-
+                                                                                                                                                                        perplexity with respect to the instruction, retaining only the               tured with complex dependencies spanning across functions,
+                                                                                                                                                                        most relevant functions; and (2) fine-grained compression, which             classes, and files. Dependencies between variable declarations,
+                                                                                                                                                                        segments retained functions into blocks based on perplexity and
+                                                                                                                                                                        selects an optimal subset under an adaptive token budget to                  function definitions, and their uses often extend beyond what
+                                                                                                                                                                        maximize relevance. Evaluations across multiple tasks, including             current context windows can accommodate. As a result, LLMs
+                                                                                                                                                                        code completion, summarization, and question answering, show                 frequently produce code that fails to compile, violates existing
+                                                                                                                                                                        that LongCodeZip consistently outperforms baseline methods,                  patterns, or ignores critical constraints when the relevant
+                                                                                                                                                                        achieving up to a 5.6× compression ratio without degrading                   context exceeds their window size [22]. Consequently, context
+                                                                                                                                                                        task performance. By effectively reducing context size while
+                                                                                                                                                                        preserving essential information, LongCodeZip enables LLMs to                compression has emerged as a key demand for enabling long-
+                                                                                                                                                                        better scale to real-world, large-scale code scenarios, advancing            context code understanding.
+                                                                                                                                                                        the efficiency and capability of code intelligence applications1 .              Existing approaches to address long context limitations
+                                                                                                                                                                                                                                                     have notable shortcomings when applied to code. General
+                                                                                                                                                                                               I. I NTRODUCTION
+                                                                                                                                                                                                                                                     text compression methods like LLMLingua [23] and Selective
+                                                                                                                                                                                                                                                     Context [24] fail to account for code-specific characteristics
+                                                                                                                                                                           LLMs specialized for code have revolutionized software                    and often break code structure. Retrieval-augmented genera-
+                                                                                                                                                                        development by demonstrating remarkable capabilities in code                 tion (RAG) [25] reduce context length by selecting relevant
+                                                                                                                                                                        completion [1], [2], translation [3], [4], program synthesis [5],            code snippets from the repository context, but it merely rely
+                                                                                                                                                                        [6], [7] and program repair [8], [9]. Models like DeepSeek-                  on text similarities, and may overlook implicit dependencies
+                                                                                                                                                                        Coder [10], Qwen2.5-Coder [11], Seed-Coder [12] can reason                   within the context. Traditional code compressors such as Di-
+                                                                                                                                                                        over diverse programming languages and significantly enhance                 etCode [26] and SlimCode [27] improve syntax and structure
+                                                                                                                                                                        productivity. As code LLMs are increasingly deployed for                     awareness but are generally limited to function-level pruning
+                                                                                                                                                                        real-world tasks like repository-level question answering [13]               or short code examples, leaving compression of long context
+                                                                                                                                                                        and long-context code completion [1], there is a growing                     for code largely unaddressed.
+                                                                                                                                                                        demand for handling contexts that span tens of thousands                        To overcome these limitations, we introduce LongCodeZip,
+                                                                                                                                                                        of tokens. This need has motivated efforts to extend LLM                     a training-free, model-agnostic, and plug-and-play context
+                                                                                                                                                                        context windows [14], [11], [15]. However, effective handling                compression framework for code LLMs. Our approach lever-
+                                                                                                                                                                        of long code contexts remains a central bottleneck. Three                    ages the inherent structure of code through a novel two-
+                                                                                                                                                                        major challenges arise in such long code context scenarios.                  stage compression strategy that preserves code semantics
+                                                                                                                                                                        First, as the input context grows, the quadratic complexity of               while significantly reducing token consumption. First, we per-
+                                                                                                                                                                        the transformer attention mechanism [16] leads to decreased                  form coarse-grained compression by identifying and ranking
+                                                                                                                                                                          1 Our code and data are available at https://github.com/YerbaPage/         function-level chunks based on their relevance to the instruc-
+                                                                                                                                                                        LongCodeZip                                                                  tion. Then, within the selected functions, it applies perplexity-
+                                                                                                                                                                          * Xiaodong Gu is the corresponding author                                  based block detection followed by fine-grained block-level
+
+
+                                                                                                                                                                    2643-1572/25/$31.00 ©2025 IEEE                                             141
+                                                                                                                                                                    DOI 10.1109/ASE63991.2025.00020
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                      Related Code from Large Codebase                                   Related Code from Large Codebase
+                                    ## In
+                                   class
+                                        In utils.py
+                                            utils.py
+                                                                                                        ## In
+                                                                                                            In config.py
+                                                                                                                config.py
+                                     ... Account:
+                                    ...
+                                                                                                       class
+                                                                                                         ... Config:
+                                        def __init__(self, user_id, email):                             ... def Config:
+                                                                                                                  __init__(self, lr=1e-3, epochs=10, beta1=0.9,
+                                                                                                         class
+                                                                                                        class Config:
+                                              self.user_id = user_id vec_b):
+                                     def cosine_similarity(vec_a,
+                                           cosine_similarity(vec_a,                                                          beta2=0.999,
+                                                                                                               def __init__(self,
+                                                                                                                    __init__(self,          weight_decay=0.01):
+                                                                                                                                     lr=1e-3,  epochs=10, beta1=0.9,
+                                                                                                                                                           beta1=0.9,
+                                    def                                     vec_b):                           def                   lr=1e-3,  epochs=10,
+                                           dotself.email
+                                          dot  == sum(a*b
+                                                             =for
+                                                   sum(a*b for email
+                                                                   a, bb in
+                                                                  a,      in zip(vec_a,
+                                                                              zip(vec_a, vec_b))
+                                                                                            vec_b))               self.lr = lrbeta2=0.999,    weight_decay=0.01):
+                                              ...                                                                 self.epochs beta2=0.999,
+                                                                                                                               = epochs      weight_decay=0.01):
+                                           norm_a
+                                          norm_a    = math.sqrt(sum(a*a
+                                                   = math.sqrt(sum(a*a for     for aa in
+                                                                                       in vec_a))
+                                                                                           vec_a))                  self.lr =  lr
+                                        def   get_account_by_id(self,         user_id):                            self.lr = lr
+                                                                                                                  self.beta1
+                                           norm_b
+                                          norm_b    = math.sqrt(sum(b*b
+                                                   = math.sqrt(sum(b*b         for  b  in  vec_b))
+                                                                              for b in vec_b))                      self.beta1===beta1
+                                                                                                                   self.beta1      beta1
+                                                                                                                                  beta1
+                                              account
+                                           return   dot /=/ (norm_a
+                                                            db.query_account(user_id)
+                                                             (norm_a ** norm_b)
+                                                                          norm_b)                                 self.beta2
+                                                                                                                    self.beta2===beta2
+                                                                                                                                   beta2
+                                          return   dot
+                                              return   account                                                     self.beta2     beta2
+                                                                                                                  self.weight_decay    = weight_decay
+                                     ...
+                                    ...                                                                             ...
+                                        ...                                                                        ...
+                                                                                                                  ...
+
+
+                                     Similarity Relevance                      Similarity : 1st         Dependency Relevance                      Similarity : 9th
+
+                                                                              Mutual Info: 1st                                                   Mutual Info: 1st
+                                    Code to be completed                                                Code to be completed
+                                   def get_email_by_id(user_id: int) -> str:                           def train_model(model, dataloader, config: Config):
+
+                                        # TODO: get the email by user_id                                     # TODO: set up optimizer
+
+                                        # Expected completion:                                               # Expected completion:
+                                        # account = get_account_by_id(user_id)                               # optimizer = torch.optim.AdamW(lr=config.lr, ...)
+
+
+
+                                                Fig. 1: Challenge for RAG, a similariy-based context compression method.
+                 compression to maximize relevance under an adaptive token                                  retrieves and appends relevant code snippets to the prompt,
+                 budget. To the best of our knowledge, LongCodeZip is the                                   leveraging embedding models such as UniXcoder [30] or
+                 first framework specifically designed for long-context code                                CodeBERT [31], and similarity measures such as cosine
+                 compression and to introduce perplexity-based block detec-                                 similarity. While RAG effectively reduces context length, it
+                 tion, providing an efficient and general-purpose solution that                             primarily relies on surface-level lexical similarity between
+                 preserves task-critical content within strict token limitations.                           snippets. Consequently, it often fails to capture code segments
+                    We evaluate LongCodeZip across multiple code benchmarks                                 with deeper semantic or functional dependencies—particularly
+                 with long contexts, including Long Code Completion [1],                                    when such relationships are implicit, abstracted, or span mul-
+                 Long Module Summarization [21], and RepoQA [13]. Re-                                       tiple components.
+                 sults demonstrate that our approach achieves up to a 5.6×                                     Consider the examples in Figure 1. In the first scenario, the
+                 compression ratio without sacrificing performance, generalizes                             task is to complete an get_email_by_id function. Retriev-
+                 well across tasks and models (even with only 0.5B model as                                 ing Account class and the get_account_by_id function
+                 the compressor), and significantly reduces generation time and                             proves effective, as they share similar function and parameter
+                 token costs.                                                                               names. In this case, RAG works well due to strong lexical
+                    Our main contributions include:                                                         and structural overlap. In the second scenario, however, the
+                   1) A novel long-context, code-specific hierarchical compres-                             task is to implement a train_model function that relies on
+                       sion approach that performs function-level chunking and                              configuration values defined in a separate Config class. Here,
+                       selection, followed by perplexity-based block detection                              crucial context like Config is often missed, since RAG may
+                       and block-level pruning.                                                             not identify these implicit or non-lexical dependencies. This
+                   2) An adaptive budget allocation and 0/1 knapsack selection                              omission can lead to incomplete or incorrect code generation.
+                       mechanism that prioritizes relevant blocks and maximizes                                This example highlights the need for context selection
+                       critical detail within the token budget.                                             criteria that extend beyond surface-level similarity. In both
+                   3) A comprehensive evaluation demonstrating that Long-                                   scenarios, an effective similarity measure should assign high
+                       CodeZip outperforms baselines on code completion, sum-                               relevance to get_account_by_id in the first case and,
+                       marization, and question answering tasks, achieving up to                            critically, to Config in the second—even when there is
+                       a 5.6× compression ratio without sacrificing performance.                            minimal lexical overlap between the configuration class and
+                                                                                                            the training function.
+                                           II. M OTIVATION
+                                                                                                                                      III. M ETHODOLOGY
+                    Code generation under long context is becoming increas-
+                 ingly important in LLM-based software development. Such                                    A. Problem Formulation
+                 tasks often require referencing numerous related files across                                 Given a long code context c = {c1 , . . . , cn } with n tokens
+                 an entire project repository, resulting in input contexts that                             and a task instruction q = {q1 , ..., qm }, the goal of context
+                 span tens of thousands of tokens. However, these long contexts                             compression is to produce a compressed context c′ ⊆ c
+                 typically contain scattered and redundant information, which                               such that |c′ | ≤ B, where B is the computational budget
+                 can distract the model and degrade output quality. Moreover,                               in tokens. The objective is to maximize task performance
+                 the substantial computational cost of processing such large                                while satisfying the budget constraint. For instance, in the
+                 inputs further exacerbates latency and resource constraints,                               code completion task, the instruction could be: ”Complete the
+                 creating a significant bottleneck for practical deployment.                                following function [code to be completed]”. The long context
+                    Retrieval-augmented generation (RAG) [28], [29] provides                                could consist of the unfinished code along with retrieved code
+                 an efficient way to condense overly lengthy contexts. RAG                                  snippets.
+
+
+
+
+                                                                                                      142
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                                      ① Coarse-grained Compression                                               ② Fine-grained Compression
+
+                                       Insturction                                                                          Compressed Context
+                                                                                                                            # Relevant code blocks:
+                                       # Please complete the function:
+                                       def train_model(model, dataloader, config: Config):
+                                                                                                                            class Config:
+                                                                                                                                def __init__(self, …):
+                                                                                                                                                                  512
+                                           # TODO: set up optimizer                                                                 self.lr = lr                tokens
+                                           # Expected completion:
+                                                                                                                                    ...
+                                                                                                                                                                           LLM
+                                                                                                                            # Please complete the function:
+                                           # optimizer = torch.optim.AdamW(lr=config.lr, ...)                               def train_model(model, …):
+
+
+
+
+                                                                             Approx. Mutual
+                                                                                                                                              Block Selection
+                                                                              Information
+
+
+                                                                                               AMI=0.3                       Relevant Function
+                                        Related Code from Codebase
+                                         # In config.py                                       AMI=0.2                        class Config:
+                                        # ...
+                                           In config.py
+                                                                                              AMI=0.4                            def __init__(self, …):
+                                        ...
+                                          class
+                                       class     Config:
+                                             Config:                                                                                 self.lr = lr
+                                        class   Config:
+                                           def def  __init__(self,
+                                                __init__(self,         lr=1e-3,
+                                                                 lr=1e-3,        epochs=10,
+                                                                           epochs=10,        beta1=0.9,
+                                                                                      beta1=0.9,                                     self.epochs = epochs
+                                             def __init__(self,      lr=1e-3,
+                                                                 beta2=0.999,
+                                                           beta2=0.999,        epochs=10,  beta1=0.9,
+                                                                                weight_decay=0.01):
+                                                                          weight_decay=0.01):                                        ...
+                                                        = lr =beta2=0.999,
+                                                    self.lr
+                                                self.lr          lr           weight_decay=0.01):
+                                                  self.lr
+                                                self.epochs == lr
+                                                    self.beta1    = beta1
+                                                                epochs                                          Function          def __str__(self, …):
+                                                  self.beta1
+                                                    self.beta2
+                                                self.beta1      = =beta1
+                                                            = beta1 beta2
+                                                  self.beta2
+                                                    ...
+                                                self.beta2      = beta2
+                                                            = beta2                                             Selection             return f"Config(…}, \
+                                                                                                                                               epochs=…\
+                                                  ...
+                                                self.weight_decay   = weight_decay                                                             ..."
+                                                ...                                                                               ...                                      Token
+                                                                                                                                                                         Perplexity
+
+
+                                                                    Fig. 2: Overview of the LongCodeZip framework.
+                   Rather than relying solely on embedding similarity between                                          compression stage (Section III-D), each retained function is
+                 q and c, we propose to select context snippets based on their                                         further segmented into semantic blocks via perplexity-based
+                 mutual information, specifically, how much they reduce the                                            chunking. An adaptive retention ratio is assigned to each
+                 perplexity (PPL) of generating q. Specifically, for each candi-                                       function according to its estimated importance. Within each
+                 date context c, we define the approximated mutual information                                         function, the most relevant blocks are selected by formulating
+                 AMI(c, q) as the reduction in perplexity when c is provided:                                          the problem as a 0/1 knapsack optimization, ensuring that the
+                                                                                                                       retained content maximizes relevance while fitting within the
+                               AMI(c, q) = PPL(q) − PPL(q | c)                                            (1)
+                                                                                                                       allocated token budget.
+                 where PPL(q | c) is the conditional perplexity of q given c,                                             By combining coarse-grained filtering with fine-grained
+                 lower values indicate higher likelihood of q [23]:                                                    pruning, LongCodeZip achieves a balance between aggressive
+                                                  N
+                                                                          !                                            compression and semantic preservation, thereby improving
+                                               1 X                                                                     both efficiency and task performance.
+                        PPL(q|c) = exp −              log P (qi |q<i , c)   (2)
+                                              N i=1
+                                                                                                                       C. Coarse-Grained Compression: Relevant Function Selec-
+                 Similarly, PPL(q) denotes the perplexity of q without the
+                                                                                                                       tion
+                 context:
+                                               N
+                                                                   !                                                      The coarse-grained compression aims to select high-level
+                                            1 X                                                                        code chunks that are most relevant to the task instruction. This
+                           PPL(q) = exp −         log P (qi |q<i )     (3)
+                                            N i=1                                                                      process consists of three steps:
+                 Here, P denotes the model’s next-token prediction probability,                                        Function-Level Chunking. We first split the source code into
+                 and q<i is the sequence of preceding tokens before qi . A                                             chunks along function or class boundaries. Functions naturally
+                 higher AMI score indicates that c enables the model to better                                         encapsulate coherent logic and exhibit strong modularity [31].
+                 predict q, capturing both surface-level and dependency-based                                          Chunking at this level ensures that retained code segments are
+                 relevance. We therefore compress long contexts by retaining                                           both syntactically valid and semantically self-contained, which
+                 code snippets with the highest mutual information, ensuring                                           is essential for preserving program integrity.
+                 that the most essential information for code generation is                                            Instruction-aware Relevance Ranking. To measure the rel-
+                 preserved.                                                                                            evance of each chunk to the task instruction, we employ an
+                                                                                                                       instruction-aware ranking mechanism based on approximated
+                 B. Overview                                                                                           mutual information (1). Chunks are scored and ranked in
+                    The overview of LongCodeZip is illustrated in Figure 2.                                            descending order, allowing us to prioritize those most infor-
+                 Given input of long source code, a task instruction, and a token                                      mative for the given task.
+                 budget, LongCodeZip follows a coarse-to-fine compression                                              Budget-Constrained Function Selection. Finally, we greedily
+                 pipeline. In the coarse-grained compression stage (Section                                            select the top-ranked chunks under a coarse-grained token
+                 III-C), the source code is divided into function-level chunks,                                        budget Bcoarse , which is the division of the final token budget
+                 which are ranked by their relevance to the instruction using                                          B by the configurable fine-grained compression ratio Rfine .
+                 conditional perplexity. The top N functions are then selected                                         This greedy selection balances efficiency and coverage: a
+                 under a coarse budget, effectively filtering out irrelevant code                                      larger budget allows more functions to pass into the fine-
+                 and avoiding unnecessary computation. In the fine-grained                                             grained stage, potentially improving downstream quality but at
+
+
+
+
+                                                                                                                 143
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                  Algorithm 1: Pseudo code of Adaptive Fine-Grained                        uniform compression ratio across all of them is suboptimal.
+                  Budget Allocation                                                        To address this, we introduce an adaptive budget allocation
+                   Input: Large functions {f1 , ..., fN } with min-max                     mechanism that distributes the fine-grained token budget pro-
+                           normalized AMI scores {AMI1 , ..., AMIN } and                   portionally to function importance. Functions with higher AMI
+                           token counts {T1 , ..., TN }; total token budget                scores receive more token budgets, preserving greater detail,
+                           for large functions Blarge ; baseline retention                 while very small functions Fsmall (shorter than five lines) are
+                           ratio Rbase ; importance parameter β                            kept in full. Algorithm 1 summarizes the procedure.
+                   Output: Function-wise adjusted retention rates                             We first define the baseline retention ratio for large func-
+                             {R1 , ..., RN }                                               tions:                          P
+                                                                                                                      B − j∈Fsmall Tj
+                   R ← ∅ // Initialize retention rate map                                                    Rbase = P                 ,               (4)
+                   for fi ∈ {f1 , ..., fN } do                                                                             k∈Flarge Tk
+                       Rbiased,i ← Rbase · (1 + β · (2 × AMIi − 1)); //
+                                                                                           where B is the final token budget, Fsmall and Flarge represent
+                        Compute biased rate
+                                                                                           the sets of small and large functions respectively, and Tj
+                       Clamp Rbiased,i to [0, 1];
+                                                                                           denotes the number of tokens in function j.
+                    for fi ∈ {f1 , ..., fN } do                                               For functions f1 , . . . , fN selected in the coarse-grained
+                                               Blarge
+                        Ri ← Rbiased,i · P Rbiased,j  ·Tj ; // Adjust rate                 stage, we perform min-max normalization to all AMI scores
+                                             i
+
+                    return R1 , ..., RN ;                                                  to AMInorm,i .
+                                                                                              For each large function fi , and its normalized AMI score
+                                                                                           AMInorm,i ∈ [0, 1], a biased retention ratio is then computed
+                                                                                           as
+                 higher computational cost, while a smaller budget accelerates
+                 processing at the risk of discarding useful code. Chunks                         Rbiased,i = Rbase · (1 + β · (2 × AMInorm,i − 1)),   (5)
+                 not selected are replaced with placeholders (e.g., comment
+                 markers or ellipses), which preserve the global structure while           where Rbase is the baseline retention ratio for large functions
+                 reducing overall context length.                                          (Equation 4). The importance parameter β adjusts sensitivity
+                                                                                           to importance. When the importance parameter is set to 0,
+                 D. Fine-Grained Compression: Intra-Function Pruning                       there is no bias, meaning all functions are treated equally. A
+                    After selecting relevant function-level chunks in the first            more positive β increases the emphasis on important functions,
+                 stage, we apply finer-grained compression to further reduce               allocating more tokens to them. All retention rates are clamped
+                 context length while preserving critical content. This process            to [0, 1] and globally rescaled so that the total number of
+                 involves three steps:                                                     retained tokens matches the target token budget for large
+                 Block-Level Chunking. The main challenge in intra-function                functions Blarge :
+                 compression is pruning code without breaking internal logic.
+                 To address this, each function is segmented into smaller,                                                     Blarge
+                                                                                                         Ri = Rbiased,i · P                    ,       (6)
+                 semantically coherent blocks. A naive idea is to split code by                                             j Rbiased,j · Tj
+                 whitespace lines, but such line-based heuristics often misalign           where Tj represents the number of tokens in the j-th function.
+                 with semantic boundaries. Inspired by techniques in natu-                 This adjustment preserves the relative importance between
+                 ral language processing [32], we employ a perplexity-based                functions while ensuring the global constraint is satisfied.
+                 method to identify semantic block boundaries within code.                 Dynamic Block Selection. For each function, LongCodeZip
+                 While perplexity-based grouping has shown effectiveness in                identifies a subset of blocks to retain, aiming to maximize the
+                 natural language segmentation, it remains under-explored in               total relevance within the constraints of the allocated token
+                 code. Consecutive lines in code often form strong semantic                budget. This strategy ensures that the compressed context
+                 associations, making perplexity a useful signal. Within a                 achieves the highest possible information density. We formu-
+                 semantically coherent region, perplexity tends to decrease as             late this selection as a classic 0/1 knapsack problem: each
+                 context accumulates [32]. We treat each line of code as the               block is treated as an item, where the value corresponds to its
+                 smallest atomic unit and group consecutive lines based on                 normalized AMI score and the weight corresponds to its token
+                 their perplexity scores, calculated as in (3). When a line’s              length. The detailed procedure is outlined in Algorithm 2.
+                 perplexity exhibits a sharp local increase, exceeding that of its         We employ a dynamic programming approach to compute the
+                 neighbors by at least α times of the standard deviation over all          optimal subset of blocks that satisfies the budget constraint
+                 lines, we mark it as a block boundary. Such high-perplexity               while maximizing the cumulative value.
+                 lines typically mark the beginning of a new block, reflecting
+                 underlying semantic or structural changes. This perplexity-                                IV. E XPERIMENTAL S ETUP
+                 guided aggregation allows blocks to capture meaningful code
+                 segments while preserving the code structure.                             A. Research Questions (RQs)
+                 Adaptive Budget Allocation. Functions selected in the                       RQ1: Can LongCodeZip effectively compress code context
+                 coarse-grained stage vary in importance. Hence, applying a                while preserving the downstream performance?
+
+
+
+
+                                                                                     144
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                  Algorithm 2: Knapsack Block Selection for Code                            3) Random Baselines: Random Token randomly removes
+                  Compression                                                               individual tokens, while Random Line randomly removes the
+                   Input: Blocks {b1 , ..., bN } with min-max normalized                    whole lines of code.
+                           AMI scores {AMI1 , ..., AMIN } and token                         4) Retrieval-based Methods: RAG (Sliding Window) uses
+                           counts {T1 , ..., TN }; token budget of this                     fixed-size overlapping chunks, whereas RAG (Function
+                           function Bi ; user-defined preserved set P                       Chunking) splits code at function boundaries. Both methods
+                   Output: Selected blocksPBselected ⊆ {b1 , ..., bN }                      use the state-of-the-art code embedding model UniXCoder-
+                   Bremain ← max(0, Bi − j∈P Tj );                                          base [30], [29].
+                   // Compute remaining budget                                              5) Code Compression Methods: We compare against the
+                   if Bremain = 0 then                                                      compression components from DietCode [26] and Slim-
+                       return P;                                                            Code [27]. DietCode was originally implemented for Python
+                                                                                            and Java, while SlimCode supports only Java. To enable direct
+                    K ← ∅;
+                                                                                            comparison on other benchmarks, we reproduce the SlimCode
+                    for i = 1 to N do
+                                                                                            for Python with tree-sitter2 .
+                        if i ∈
+                             / P then
+                             add (i, Ti , AMIi ) to K;                                      6) Text Compression Methods: We also include several
+                                                                                            state-of-the-art prompt compression methods for natural lan-
+                    Bselected ← 0/1 Knapsack DP(K, Bremain ) ∪ P;                           guages, including LLMLingua [23], LongLLMLingua [33],
+                    return Bselected ;                                                      and LLMLingua-2 [34].
+                                                                                               All methods are evaluated on a diverse set of code LLMs,
+                                                                                            covering both earlier models like Deepseek-Coder-6.7B [10]
+                    RQ2: How does different parts of LongCodeZip contribute                 and latest models like Qwen2.5-Coder-7B [11] and Seed-
+                 to the performance?                                                        Coder-8B [12]. Specifically, we use the instruct version of
+                    RQ3: Does LongCodeZip exhibit cross-model generaliza-                   these models from Huggingface3 . To further demonstrate the
+                 tion capabilities?                                                         generalizability of LongCodeZip, we also extend our evalua-
+                    RQ4: What is the efficiency benefit of LongCodeZip in                   tion to state-of-the-art closed-source models, including GPT-
+                 downstream tasks?                                                          4o4 and Claude-3.7-Sonnet5 .
+
+                 B. Datasets
+                                                                                            D. Evaluation Metrics
+                    We evaluate our method on long code context benchmarks
+                 across three common tasks: code completion, code summa-                       The evaluation of LongCodeZip encompasses two primary
+                 rization, and code question answering. These tasks reflect                 dimensions: compression efficiency and downstream genera-
+                 practical developer needs and assess whether compressed code               tion performance with compressed context. We report com-
+                 retains sufficient information for downstream performance.                 pression Ratio on all tasks:
+                 For each task, we construct prompts following the benchmark                                                           |Coriginal |
+                 papers [1], [21], [13]. Dataset statistics are shown in Table I.                                        Ratio =                         (7)
+                                                                                                                                      |Ccompressed |
+                    The Long Code Completion dataset [1] targets the code
+                 completion task under long-context of relevant functions. To               where |Ccompressed | and |Coriginal | denote the number of tokens
+                 highlight long-context difficulties, we filtered the test set to           in the compressed and original contexts respectively.
+                 500 Python examples with input contexts longer than 5,000                     For the code completion task, We follow LongCoder [1]
+                 tokens. The Long Module Summarization dataset [21] contains                to evaluate the performance of the models in terms of Exact
+                 216 examples from 43 Python repositories. To focus on the                  Match (EM) and Edit Similarity (ES).
+                 challenging long-context scenario, we also further filtered the               For the code summarization task, we follow [21] to use a
+                 original dataset to 139 examples that have more than 2,000                 third party model GPT-4 O - MINI 6 to evaluate which summary
+                 context tokens. RepoQA [13] is a multilingual benchmark                    better explains the code between the ground truth and the gen-
+                 that contains 600 long code question answering tests across                erated one. This LLM-as-Judge evaluation strategy is widely
+                 60 repositories and 6 programming languages. It requires the               adopted in both NLP and software engineering domains [35],
+                 model to locate and return a function within the long context              [36], as it has been demonstrated to align well with human
+                 using a natural language instruction, similar to a retrieval task.         preferences and provides more nuanced evaluation compared
+                 C. Baselines and Models                                                    to traditional metrics [37], [38]. The model chooses the better
+                    We evaluate LongCodeZip against a variety of competitive                summary after reviewing both options alongside the code. To
+                 baselines:
+                                                                                              2 https://tree-sitter.github.io/tree-sitter/
+                 1) No Compression: The full code context is used without any                 3 https://huggingface.co/models
+                 compression, representing the upper bound of performance.                    4 https://openai.com/index/hello-gpt-4o/
+                 2) No Context: The model is evaluated with only the task                     5 https://www.anthropic.com/news/claude-3-7-sonnet
+
+                 instruction, without any context, representing the lower bound.              6 https://platform.openai.com/docs/models/gpt-4o-mini
+
+
+
+
+                                                                                      145
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                              TABLE I: Datasets used for evaluating long-context code compression.
+                          Dataset                      # Examples   Avg. Context Len.       Avg. Ground Truth Len.                    Languages
+                          Long Code Completion            500            9,328.2                      12.4                           Python
+                          Long Module Summarization       139            10,809.6                    1,758.1                         Python
+                          Repo QA                         600            11,524.6                     156.0              Python, Java, JS, Rust, Go, C++
+
+                 avoid bias, we prompt it twice with the order reversed. We                          TABLE II: Results on Long Code Completion
+                 then compute CompScore as:                                                  Model                     Method                      ES     EM      Ratio
+                                        1                                                                              No Compression             57.14   34.40   1.0x
+                         CompScore = [P(so ≻ ŝ) + (1 − P(ŝ ≻ so ))]           (8)                                    No Context                 41.29   13.20     -
+                                        2
+                                                                                                                       Random Token               44.86   13.40   4.4x
+                 where P(so ≻ ŝ) is the probability that the referee model                                            Random Line                50.54   21.20   4.5x
+
+                 prefers the generated summary so over the reference ŝ, and                                           RAG (Sliding Window)       58.48   31.60   4.2x
+                                                                                             D EEPSEEK -C ODER -6.7B   RAG (Function Chunking)    57.93   30.80   5.7x
+                 P(ŝ ≻ so ) is the probability for the reverse order. Scomp ranges                                    LLMLingua                  43.61   14.00   5.6x
+                 from 0 to 100, with 50 indicating equal preference.                                                   LLMLingua-2                46.23   15.00   4.4x
+                                                                                                                       LongLLMLingua              54.09   26.40   4.8x
+                    For the code QA task, we follow [13] to evaluate the                                               DietCode                   51.57   20.20   3.4x
+                 retrieval accuracy of needle functions, reporting the percent-                                        SlimCode                   48.84   19.80   4.5x
+
+                 age of models that retrieve a correct match above a BLEU                                              LongCodeZip                60.58   35.40   5.3x
+
+                 similarity threshold of 0.8 between the generated function fo                                         No Compression             56.36   31.80   1.0x
+                                                                                                                       No Context                 38.14    9.60     -
+                 and the target function fˆ: BLEU(fˆ, fo ) > 0.8.                                                      Random Token               39.10    8.40   4.4x
+                                                                                                                       Random Line                39.73   12.40   4.5x
+                 E. Implementation Details                                                                             RAG (Sliding Window)       50.81   24.60   2.8x
+                                                                                             Q WEN 2.5-C ODER -7B      RAG (Function Chunking)    52.79   26.00   3.1x
+                    We tailored hyperparameters for each distinct task, consis-                                        LLMLingua                  21.56    5.40   3.4x
+                 tently mirroring the generation model with our compression                                            LLMLingua-2                41.29   12.20   4.4x
+                                                                                                                       LongLLMLingua              23.88    9.00   3.2x
+                 model. For code completion, which demands focused context,                                            DietCode                   43.91   13.20   3.4x
+                 we set the token budget B to 2k, the fine-grained ratio (Rfine )                                      SlimCode                   40.85   12.20   4.5x
+                 to 0.8, and the importance adjustment parameter (β) to 0.5.                                           LongCodeZip                57.55   32.40   4.3x
+                 Conversely, code summarization necessitates understanding                                             No Compression             64.04   40.20   1.0x
+                                                                                                                       No Context                 41.88   13.60     -
+                 broader context within large modules; consequently, we in-
+                                                                                                                       Random Token               45.35   13.40   4.4x
+                 creased B to 5k, reduced Rfine to 0.3, and maintained β at                                            Random Line                50.10   21.20   4.5x
+                 0.5. For the RepoQA task, where the objective is to precisely                                         RAG (Sliding Window)       58.51   32.40   2.8x
+                 replicate entire functions, we set B to 2k and Rfine to 1.0 to              S EED -C ODER -8B         RAG (Function Chunking)    60.52   35.00   3.7x
+                                                                                                                       LLMLingua                  44.36   14.40   4.5x
+                 ensure the structural integrity of functions. These values for                                        LLMLingua-2                46.69   15.40   4.4x
+                 B, β, and Rfine were determined through experiments on a                                              LongLLMLingua              54.84   26.40   4.2x
+                                                                                                                       DietCode                   51.43   18.80   3.4x
+                 small held-out set that did not overlap with the test data. All                                       SlimCode                   50.45   19.80   4.5x
+                 experiments were conducted on a system equipped with an                                               LongCodeZip                63.11   37.40   5.6x
+                 Intel Xeon Gold 6254 CPU and an NVIDIA A100-80G GPU.
+                                           V. R ESULTS
+                                                                                            method. This demonstrates that our method not only preserves
+                 A. RQ1: Effectiveness on Code Compression                                  more critical information for code completion but also does
+                    Tables II, III, and IV present the evaluation results of                so with significantly greater compression efficiency.
+                 our approach on three downstream tasks, respectively. The                     In contrast to the code completion results, RAG-based
+                 best scores among compression methods are bolded. Across                   methods do not show clear advantages over other baselines on
+                 all three tasks and multiple backbone models, LongCodeZip                  the Long Module Summarization task. However, our approach
+                 consistently outperforms compression baselines by substantial              remains the most competitive, achieving a CompScore of
+                 and statistically significant margins (p < 0.001 via Wilcoxon              28.01 with Deepseek-Coder-6.7B at a 2.5× compression ra-
+                 signed-rank test on 10 repeated experiments), even when                    tio—surpassing other compression baselines by a considerable
+                 operating at comparable or stricter compression ratios.                    margin. This highlights the effectiveness of our method in
+                    Specifically, on the Long Code Completion task, RAG-                    preserving relevant semantic content for summarization, even
+                 based methods achieve higher ES and EM scores than other                   with shorter input contexts.
+                 baseline methods, but still fall short of our approach. For                   On the RepoQA task, LLMLingua and LLMLingua-2
+                 instance, with Qwen2.5-Coder-7B, RAG (Function Chunking)                   exhibit poor performance because token-level compression
+                 achieves an ES score of 52.79 and an EM score of 26.00 at                  corrupts code syntax and structure, while LongLLMLin-
+                 a 3.1× compression ratio. In contrast, our approach achieves               gua improves this dramatically by performing coarse-grained
+                 57.55 ES and 32.40 EM at a stricter 4.3× compression ratio,                document-level to fine-grained token-level compression, us-
+                 representing a 28% shorter compressed context than the RAG                 ing instruction-aware contrastive perplexity to preserve code
+
+
+
+
+                                                                                      146
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                      TABLE III: Results on Long Module Summarization                                                TABLE IV: Results on RepoQA
+                    Model                     Method                    CompScore   Ratio           Method                  Py     C++    Java   TS     Rust   Go     Avg. Ratio
+                                              No Compression              19.09     1.0x                                   D EEPSEEK -C ODER -6.7 B
+                                              No Context                  2.49        -
+                                                                                                    No Compression          21.0   30.0   44.0   49.0   27.0   59.0   38.3 1.0x
+                                              Random Token                11.88     1.8x            No Context              0.0    0.0    0.0    0.0    0.0    0.0     0.0   -
+                                              Random Line                 17.62     1.8x
+                                                                                                    Random Token            0.0     1.0   2.0    1.0    0.0    6.0    1.7 3.6x
+                                              RAG (Sliding Window)        22.95     2.1x            Random Line             3.0    12.0   9.0    7.0    5.0    8.0    7.3 3.5x
+                    D EEPSEEK -C ODER -6.7B   RAG (Function Chunking)     18.47     2.1x
+                                              LLMLingua                   17.65     2.1x            RAG (Sliding Window) 49.0      55.0   53.0   67.0   47.0   62.0   55.5   3.5x
+                                              LongLLMLingua               21.62     1.7x            RAG (Function Chunking) 42.0   40.0   30.0   36.0   49.0   57.0   42.3   4.0x
+                                              LLMLingua-2                 18.48     2.1x            LLMLingua                0.0    2.0    6.0    1.0    2.0    4.0    2.5   3.6x
+                                              DietCode                    17.35     2.1x            LLMLingua-2              1.0    1.0    4.0    0.0    0.0    3.0    1.5   4.6x
+                                              SlimCode                    20.24     2.2x            LongLLMLingua           52.0   54.0   65.0   62.0   56.0   67.0   59.3   3.0x
+                                                                                                    DietCode                13.0     -    28.0     -      -      -    20.5   3.7x
+                                              LongCodeZip                 28.01     2.5x            SlimCode                15.0     -    35.0     -      -      -    25.0   4.3x
+                                              No Compression              56.00     1.0x            LongCodeZip             76.0   69.0   80.0   75.0   73.0   79.0   75.3 5.3x
+                                              No Context                  6.13        -
+                                                                                                                             Q WEN 2.5-C ODER -7B
+                                              Random Token                34.09     1.8x
+                                              Random Line                 46.19     1.8x            No Compression          84.0   77.0   89.0   93.0   83.0   90.0   86.0 1.0x
+                                                                                                    No Context              0.0    0.0    0.0    0.0    0.0    0.0     0.0   -
+                                              RAG (Sliding Window)        53.50     1.7x
+                    Q WEN 2.5-C ODER -7B      RAG (Function Chunking)     40.84     2.1x            Random Token            1.0     3.0    4.0    2.0   4.0     7.0    3.5 3.6x
+                                              LLMLingua                   39.81     1.7x            Random Line             6.0    11.0   22.0   10.0   9.0    13.0   11.8 3.5x
+                                              LongLLMLingua               46.72     1.5x
+                                                                                                    RAG (Sliding Window) 64.0      65.0   68.0   72.0   57.0   79.0   67.5   3.7x
+                                              LLMLingua-2                 52.99     2.1x
+                                                                                                    RAG (Function Chunking) 54.0   47.0   59.0   39.0   58.0   69.0   54.3   4.3x
+                                              DietCode                    35.67     2.1x
+                                                                                                    LLMLingua                5.0    7.0    9.0   11.0    4.0   16.0    8.7   4.1x
+                                              SlimCode                    44.13     2.2x
+                                                                                                    LLMLingua-2              1.0    2.0    8.0    1.0    1.0    4.0    2.8   4.6x
+                                              LongCodeZip                 56.47     1.7x            LongLLMLingua           70.0   63.0   71.0   68.0   78.0   78.0   71.3   4.3x
+                                                                                                    DietCode                17.0     -    35.0     -      -      -    26.0   3.7x
+                                              No Compression              44.95     1.0x
+                                                                                                    SlimCode                20.0     -    48.0     -      -      -    34.0   4.3x
+                                              No Context                  17.42       -
+                                                                                                    LongCodeZip             92.0   78.0   87.0   85.0   86.0   95.0   87.2 4.5x
+                                              Random Token                34.16     1.8x
+                                              Random Line                 41.27     1.8x                                       S EED -C ODER -8B
+                                              RAG (Sliding Window)        42.54     3.0x            No Compression          73.0   52.0   70.0   81.0   57.0   81.0   69.0 1.0x
+                    S EED -C ODER -8B         RAG (Function Chunking)     43.19     2.1x            No Context              0.0    0.0    0.0    0.0    0.0    0.0     0.0   -
+                                              LLMLingua                   32.00     3.1x
+                                              LongLLMLingua               49.73     2.4x            Random Token            2.0    3.0     4.0   1.0    1.0    10.0   3.5 3.6x
+                                              LLMLingua-2                 53.88     3.2x            Random Line             5.0    6.0    17.0   6.0    4.0    18.0   9.3 3.5x
+                                              DietCode                    44.74     2.1x            RAG (Sliding Window) 58.0      51.0   66.0   64.0   57.0   74.0   61.7   3.9x
+                                              SlimCode                    46.01     2.2x            RAG (Function Chunking) 49.0   40.0   50.0   30.0   47.0   64.0   46.7   4.5x
+                                              LongCodeZip                 55.07     3.5x            LLMLingua                4.0    3.0    9.0    8.0    5.0   10.0    6.5   4.3x
+                                                                                                    LLMLingua-2              1.0    2.0    4.0    1.0    1.0    6.0    2.5   4.6x
+                                                                                                    LongLLMLingua           71.0   60.0   74.0   65.0   74.0   83.0   71.2   5.1x
+                                                                                                    DietCode                16.0     -    32.0     -      -      -    24.0   3.7x
+                                                                                                    SlimCode                25.0     -    50.0     -      -      -    37.5   4.3x
+                 segments highly relevant to the instruction. Nonetheless, our                      LongCodeZip             83.0   70.0   92.0   74.0   78.0   87.0   80.7 5.3x
+                 approach consistently achieves the best performance across
+                 all models. Notably, on Deepseek-Coder-6.7B, our approach
+                 surpasses LongLLMLingua by 16% in overall score while
+                 compressing the context to half the length. This underscores                        We also conduct comprehensive comparisons with re-
+                 the superior effectiveness of our method in both information                     cent advanced approaches in code completion, including A3 -
+                 retention and aggressive compression for long code under-                        CodGen [39], cAST [40], RepoGenix [41], and RLCoder [42]
+                 standing.                                                                        across all evaluated models. As shown in Table VI, Long-
+                    Notably, LongCodeZip demonstrates strong generalizability                     CodeZip consistently outperforms these advanced RAG meth-
+                 across state-of-the-art closed-source models. As comprehen-                      ods across the most competitive open-source and closed-source
+                 sively shown in Table V, on GPT-4o, LongCodeZip achieves                         models, SeedCoder and Claude-3.7-Sonnet. Our method can
+                 an ES score of 64.72 (vs. 65.13 no-compression baseline) on                      more efficiently retain essential information, achieving higher
+                 Long Code Completion at a 4.3x compression ratio, closely                        information density under the same token budget. This demon-
+                 matching the performance of the uncompressed input while                         strates the broad applicability and consistent effectiveness of
+                 significantly reducing context length. For the RepoQA task,                      our approach across diverse model architectures and capabili-
+                 LongCodeZip even surpasses the no-compression baseline,                          ties. Notably, these RAG-based retrieval methods are comple-
+                 achieving 88.9 average score on GPT-4o, demonstrating that                       mentary to our compression approach and could potentially be
+                 removing irrelevant context can improve performance on                           combined with our framework to further enhance performance
+                 complex reasoning tasks. On the more powerful Claude-3.7-                        by first retrieving relevant content and then applying our
+                 Sonnet, LongCodeZip achieves 66.27 ES (vs. 66.24 base-                           compression techniques.
+                 line) with the same compression efficiency. For the RepoQA                          Overall, our method achieves effectiveness on par with or
+                 task, LongCodeZip also surpasses the no-compression baseline                     better than the No Compression setting, and consistently out-
+                 on Claude-3.7-Sonnet, achieving 90.7 average score, further                      performs all compression baselines across tasks and backbone
+                 demonstrating the effectiveness of our approach.                                 models even under more aggressive compression.
+
+
+
+
+                                                                                            147
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                                                          TABLE V: Results with Closed-source Models
+                                                                Long Code Completion                               Long Module Summarization                           RepoQA
+                                                    C LAUDE -3.7-S ONNET                  GPT-4 O            C LAUDE -3.7-S ONNET       GPT-4 O          C LAUDE -3.7-S ONNET      GPT-4 O
+                          Method
+                                                     ES       EM      Ratio         ES      EM      Ratio    CompScore    Ratio     CompScore   Ratio    Avg Acc     Ratio      Avg Acc    Ratio
+                          No Compression            66.24    41.20      1.0x    65.13      40.80    1.0x       60.72       1.0x       58.42       1.0x    89.7       1.0x        87.8      1.0x
+                          No Context                43.97    14.20        -     42.92      14.00      -         6.58         -        6.41          -     0.0          -          0.0        -
+                          Random Token              47.61    14.00      4.4x    46.51      13.80    4.4x       37.45       1.8x       35.83       1.8x    3.8        3.6x         3.8      3.6x
+                          Random Line               52.61    22.20      4.5x    51.42      21.80    4.5x       50.12       1.8x       48.24       1.8x    12.2       3.5x        12.1      3.5x
+                          RAG (Sliding Window)      61.44    34.00      2.8x    60.03      33.20    2.8x       58.03       1.7x       55.85       1.7x    73.8       3.7x        73.0      3.7x
+                          RAG (Function Chunking)   63.55    36.80      3.1x    62.01      36.00    3.1x       44.56       2.1x       42.76       2.1x    55.0       4.3x        52.5      4.3x
+                          LLMLingua                 46.58    15.20      3.4x    45.53      14.80    3.4x       43.21       1.7x       41.57       1.7x    2.8        4.1x         2.7      4.1x
+                          LLMLingua-2               49.02    16.20      4.4x    47.90      15.80    4.4x       57.85       2.1x       55.48       2.1x    3.0        4.6x         2.8      4.6x
+                          LongLLMLingua             57.58    27.80      3.2x    56.24      27.20    3.2x       50.86       1.5x       48.89       1.5x    74.5       4.8x        73.2      4.8x
+                          DietCode                  54.00    19.80      3.4x    52.76      19.40    3.4x       38.82       2.1x       37.21       2.1x    26.7       3.7x        25.5      3.7x
+                          SlimCode                  53.03    20.80      4.5x    51.78      20.40    4.5x       48.11       2.2x       46.13       2.2x    38.3       4.3x        37.0      4.3x
+                          LongCodeZip               66.27    40.20      4.3x    64.72      38.80    4.3x       61.47       1.7x       59.04       1.7x    88.9       5.1x        88.9      5.1x
+
+
+                 TABLE VI: Comparison with Advanced RAG Methods on                                                                      TABLE VIII: Cross-model Results
+                 Long Code Completion
+                                                                                                                         Compression Model               DS-6.7B    Seed-8B      Qwen-7B           Avg. ES
+                    Model                      Method                          ES          EM        Ratio               No Compression                   57.14       64.04        56.36            59.18
+                                                                                                                         No Context                       41.29       41.88        38.14            40.44
+                                               No Compression              64.04          40.20       1.0x
+                                                                                                                         D EEPSEEK -C ODER -6.7B          60.58       61.48        56.55            59.54
+                                               A3 -CodGen                  58.70          33.10       3.8x               S EED -C ODER -8B                60.86       63.11        55.95            59.97
+                    S EED -C ODER -8B          cAST                        57.35          30.90       4.1x               Q WEN 2.5-C ODER -0.5B           61.12       62.68        56.58            60.13
+                                               RepoGenix                   60.28          34.70       3.5x               Q WEN 2.5-C ODER -1.5B           60.89       62.79        56.18            59.95
+                                               RLCoder                     58.14          32.30       4.0x               Q WEN 2.5-C ODER -3B             60.74       63.10        56.79            60.21
+                                                                                                                         Q WEN 2.5-C ODER -7B             61.34       62.62        57.55            60.58
+                                               LongCodeZip                 63.11          37.40       5.6x
+                                               No Compression              66.24          41.20       1.0x
+                                               A3 -CodGen                  60.15          35.80       3.8x
+                    C LAUDE -3.7-S ONNET       cAST                        58.92          33.60       4.1x
+                                               RepoGenix                   62.48          37.40       3.5x             ranking with similarity-based ranking, and compare against
+                                               RLCoder                     62.76          37.90       4.0x             random function ranking to establish a lower bound. For fine-
+                                               LongCodeZip                 66.27          40.20       4.3x             grained ablations, we test four variants: removing fine-grained
+                                                                                                                       compression entirely (coarse-grained selection only), remov-
+                                   TABLE VII: Ablation Study Results                                                   ing adaptive budget allocation (uniform budget allocation),
+                                                                                                                       replacing meta-chunking with simple line-based chunking, and
+                   Configuration                                 ES                      EM            Ratio
+                                                                                                                       using random line selection within selected functions.
+                   LongCodeZip                                  57.55                    32.40         4.3x
+                   Coarse-grained Ablations:                                                                              Different components contribute varying degrees to perfor-
+                     w/ Similarity-based Ranking            49.66 (-7.89)       25.20 (-7.20)          4.3x            mance. The coarse-grained ranking mechanism is most critical
+                     w/ Random Ranking                      39.76 (-17.79)      11.50 (-20.90)         4.4x
+                                                                                                                       - conditional perplexity-based ranking outperforms similarity-
+                   Fine-grained Ablations:                                                                             based approaches by 7.89% and random selection by 17.79%
+                     w/o Fine-grained Compression           56.10 (-1.45)           31.20 (-1.20)      4.2x
+                     w/o Adaptive Budget Allocation         55.21 (-2.34)           29.40 (-3.00)      4.3x            in ES score. This demonstrates that semantic relevance through
+                     w/ Line Chunking                       55.98 (-1.57)           31.20 (-1.20)      4.3x            conditional perplexity is superior to lexical similarity. For fine-
+                     w/ Random Line Selection               55.07 (-2.48)           29.00 (-3.40)      4.3x
+                                                                                                                       grained components, adaptive budget allocation improves ES
+                                                                                                                       by 2.34%, enabling important functions to retain more detail.
+                     Finding 1
+                                                                                                                       Perplexity-based chunking outperforms simple line chunking
+                    LongCodeZip is effective across various downstream                                                 by 1.57% in ES while being more computationally efficient, as
+                    tasks, with up to 5.6x compression ratio without sacri-                                            line-by-line compression ranking would incur higher overhead
+                    ficing downstream performance.                                                                     compared to block-based analysis. Knapsack-based selection
+                                                                                                                       outperforms random line selection by 2.48% in ES, confirming
+                                                                                                                       relevance-guided selection helps compression quality.
+                 B. RQ2: Ablation Study
+                    To understand the contribution of each component in Long-
+                 CodeZip, we conduct an ablation study on the Long Code                                                   Finding 2
+                 Completion task using Qwen2.5-Coder-7B. For all ablations,
+                                                                                                                         Coarse-grained conditional perplexity ranking has the
+                 the total token budget and other hyper-parameters are set the
+                                                                                                                         most impact on the performance of LongCodeZip, while
+                 same as the full method. We systematically remove or modify
+                                                                                                                         fine-grained optimizations further improve the compres-
+                 key components to analyze their individual impact. For coarse-
+                                                                                                                         sion information density.
+                 grained ablations, we replace our conditional perplexity-based
+
+
+
+
+                                                                                                                 148
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                                          TABLE IX: Efficiency Analysis of Different Methods
+                          Method                    Comp. Time (s)   Comp. GPU Mem (GB)      Gen. Time (s)           Gen. GPU Mem (GB)   Ratio      ES            EM
+                          No Compression                 0.0                 0.0                 15.70                   Base + 3.48     1.0x     56.36       31.80
+                          No Context                     0.0                 0.0                 0.68                    Base + 0.06       -      38.14       9.60
+                          RAG (Function Chunking)       0.53                1.07                 7.57                    Base + 1.13     3.1x     52.79       26.00
+                          LLMLingua-2                    0.65               4.71                 6.53                    Base + 0.79     4.4x     41.29       12.20
+                          DietCode                      15.23                0.0                 7.26                    Base + 1.03     3.4x     43.91       13.20
+                          SlimCode                      0.35                0.0                  6.48                    Base + 0.78     4.5x     40.85       12.20
+                          LongCodeZip                    2.58            Base + 0.69             6.59                    Base + 0.81     4.3x     57.55       32.40
+                         Note: Comp.: Compression, Gen.: Generation, Mem: Memory. Base model parameters memory: 28.37 GB.
+
+
+                 C. RQ3: Transferability                                                                        60
+                                                                                                                                                 LongCodeZip
+                                                                                                                                                 RAG (Sliding)
+                    Table VIII presents the cross-model performance (ES) of                                     55                               RAG (Function)
+                                                                                                                                                 LLMLingua-2
+                 our approach in the long code completion task. Each row                                                                         SlimCode
+                                                                                                                                                 DietCode
+                 denotes the model used for context compression, while each                                     50                               Random Token
+
+
+
+
+                                                                                                         ES Score
+                                                                                                                                                 Random Line
+                 column specifies the model used for code generation given the                                                                   No Compression
+                                                                                                                45                               No Context
+                 compressed context as the input. The results show that our
+                 approach generalizes well across different model architectures
+                                                                                                                40
+                 and sizes, regardless of which compression or generation
+                 model is used for downstream tasks. Models released at dif-                                    35     5%   10% 15% 20% 25% 30% 35% 40%
+                 ferent times, from DeepSeek-Coder in 2023 [10] to Qwen2.5-                                                     Remaining Context
+                 Coder in 2024 [11] and Seed-Coder in 2025 [12], achieve
+                                                                                                  Fig. 3: Performance (ES) vs remaining context (%).
+                 similarly strong performance with only minor differences
+                 in average ES scores. Notably, even small models (e.g.,                     cost savings when using expensive commercial LLM APIs,
+                 Qwen2.5-Coder-0.5B) are highly effective, highlighting the                  where pricing is primarily based on input token count. More
+                 strong transferability of our method. Using such small models               importantly, as demonstrated in RQ3, the compression over-
+                 will significantly reduce compression time and memory over-                 head can be effectively mitigated by using a lightweight 0.5B
+                 head, making our approach particularly suitable for resource-               model without sacrificing quality. And the efficiency gains can
+                 constrained scenarios.                                                      also be further enhanced through techniques like quantiza-
+                                                                                             tion [43], making our approach highly practical for real-world
+                     Finding 3                                                              deployment scenarios where cost efficiency is paramount.
+                    Our LongCodeZip generalizes well across different types
+                    and sizes of models in the cross-model setting, using a                     Finding 4
+                    0.5B model can also bring promising performance.                           Our LongCodeZip achieves 4.3× compression ratio with
+                                                                                               only 2.6s overhead, reduces generation time from 15.7s to
+                 D. RQ4: Efficiency Analysis                                                   6.6s, yet it still maintains high downstream performance.
+                    To evaluate the practical efficiency of LongCodeZip, we an-
+                 alyze the Long Code Completion task using Qwen2.5-Coder-                                                    VI. D ISCUSSION
+                 7B by measuring both compression overhead and downstream
+                 benefits. We select several representative baselines based on               A. Compression vs Performance
+                 their downstream performance in Table IX. The GPU memory                       Understanding the relationship between compression ra-
+                 costs represent peak memory usage per stage, with generation                tio and model performance is essential for evaluating the
+                 memory cost referring to additional memory for forward                      effectiveness of code compression methods in long-context
+                 propagation during generation beyond base model parameters                  scenarios. Figure 3 presents the ES score versus the per-
+                 (28.37GB). Due to the space limit, we only report the results               centage of remaining context, showing Qwen2.5-Code-7B
+                 with several representative baselines. Note that SlimCode and               results for representative methods on the Long Code Com-
+                 DietCode require no GPU memory for compression because                      pletion task. LongCodeZip consistently achieves the highest
+                 they are not based on neural models.                                        ES scores across all compression ratios, demonstrating its
+                    Table IX demonstrates that LongCodeZip achieves superior                 strong ability to identify and retain the most relevant context
+                 compression efficiency while maintaining the best perfor-                   for code completion. Notably, LongCodeZip can effectively
+                 mance. While our method requires a slightly higher compres-                 leverage additional context, resulting in substantial perfor-
+                 sion overhead of 2.58s and additional GPU memory compared                   mance gains—especially at severe compression ratios (with
+                 to the baselines, it significantly reduces input token costs by             remaining context less than 10%) where context is extremely
+                 77% and decreases generation latency from 15.70s to 6.59s                   limited. This gain becomes less pronounced at more relaxed
+                 compared to no compression. This also translates to substantial             compression ratios, which is reasonable since our method
+
+
+
+
+                                                                                       149
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                           Code to be Completed                                               Relevant Function from Context                             AMI
+                         def execute_blind(self, code, **kwargs):                        0    def evaluate_blind(self, code, **kwargs):
+                                                                                         1                                                                      Compessed Context
+                                 prefix = kwargs.get(‘prefix’, self.get('prefix', ''))   2       prefix = kwargs.get('prefix', self.get('prefix', ''))         def evaluate_blind(self, code, **kwargs):
+                                 suffix = kwargs.get('suffix', self.get('suffix', ''))   3       suffix = kwargs.get('suffix', self.get('suffix', ''))
+                                                                                         4                                                                         prefix = kwargs.get('prefix', self.get('prefix', ''))
+                                 action = self.actions.get('execute_blind', {})          5       action = self.actions.get('evaluate_blind', {})                   suffix = kwargs.get('suffix', self.get('suffix', ''))
+                                 payload_action = action.get('execute_blind')            6       payload_action = action.get('evaluate_blind‘)
+                                                                                         7       call_name = action.get('call', 'inject‘)                          action = self.actions.get('evaluate_blind', {})
+                                                                                         8                                                                         payload_action = action.get('evaluate_blind‘)
+                          Ground Truth Completion                                        9       if not action or not payload_action:                              call_name = action.get('call', 'inject‘)
+                                                                                         10          return
+                                 call_name = action.get('call', 'inject')                11                                                                        # ...
+                                                                                         12      expected_delay = self._get_expected_delay()
+                                                                                         13                                                                        return getattr(self, call_name)(
+                                                                                         14      if '%(code_b64)s' in payload_action:                                  code = execution_code,
+                           Perplexity Distribution                                       15          execution_code = payload_action % ({                              prefix = prefix,
+                                                                                         16              'code_b64' : base64.urlsafe_b64encode(code),                  suffix = suffix,
+                                                                                         17              ‘delay’ : expected_delay                                  )
+                                                                                         18          })
+                                                                                         19      else:
+                                                                                         20          execution_code = payload_action % ({
+                                                                                         21              'code' : code,                                              Code to be Completed
+                           Perplexity
+
+
+
+
+                                                                                         22              'delay' : expected_delay
+                                                                                         23          })
+                                                                                         24
+                                                                                         35      return getattr(self, call_name)(                               Predicted Completion
+                                                                                         26          code = execution_code,
+                                                                                                                                                                   call_name = action.get('call', 'inject')
+                                                                                         27          prefix = prefix,
+                                                                                         28          suffix = suffix,
+                                                                                         29      )
+
+
+
+                                                         Fig. 4: Example of fine-grained compression process on long code completion.
+                 ranks and selects the most relevant functions early on, so the                                                  This adaptive design allows LongCodeZip to accommodate
+                 marginal benefit of extra context diminishes. In contrast, most                                                 different deployment scenarios and cost constraints.
+                 baselines perform close to random selection, and adding more
+                                                                                                                                                           VII. T HREATS TO VALIDITY
+                 context does not significantly improve their ES scores. Among
+                 the baselines, RAG-based methods do exhibit improvement as                                                         While our evaluation is comprehensive, several threats to
+                 more context is retained, but their overall ES scores remain                                                    validity should be acknowledged. 1) A primary threat con-
+                 significantly lower than those of LongCodeZip.                                                                  cerns the accuracy of our evaluation for the summarization
+                                                                                                                                 evaluation relies on LLM-generated scores, which may differ
+                 B. Case Study                                                                                                   from human expert assessments and potentially suffer from
+                    We illustrate the effectiveness of LongCodeZip through a                                                     ordering effects. To mitigate this, we followed the original
+                 case study in Figure 4, focusing on the fine-grained com-                                                       paper [21] to average scores over different prompt orderings
+                 pression stage (coarse-grained design choice is discussed in                                                    and employed GPT-4o-mini as an independent referee. These
+                 Section II). Our method identifies semantic boundaries at                                                       practices reduce bias and improve the objectivity of our results.
+                 positions where a line’s perplexity sharply increases relative                                                  2) Our findings may be specific to the datasets, programming
+                 to its neighbors. The method tends to separate out major,                                                       languages, or LLMs used. To improve generalizability, we
+                 independent functional modules, and also naturally groups to-                                                   evaluated our approach across diverse datasets, languages,
+                 gether smaller, closely related segments. Some of our detected                                                  model families, and in cross-model settings. This diversity
+                 boundaries align with double newlines, which is consistent                                                      provides convincing evidence on the generalizability of our
+                 with common programming practices in codes with good code                                                       findings. 3) There is a risk of data leakage if models are ex-
+                 smell. The resulting compressed blocks, highlighted by boxes                                                    posed to benchmark data during training. To exclude potential
+                 in the right panel, preserve the key information need for                                                       effects of data leakage, we used DeepSeek-Coder-6.7B [10],
+                 completion. The preserved blocks closely matches the code to                                                    which was trained only on data available before March 2023,
+                 be completed. This shows our approach effectively compresses                                                    while all the benchmarks we evaluated were released after that
+                 code while retaining relevant and useful content to the task.                                                   date [1], [21], [13]. This step helps ensure the integrity and
+                    In our experiments, we have also observed some common                                                        reliability of our results.
+                 failure modes. In particular, when the context either lacks
+                                                                                                                                                               VIII. R ELATED W ORK
+                 information relevant to the task instruction or when it is
+                 difficult to align an ambiguous instruction with any segment of                                                 A. Large Language Models for Code
+                 the context, our method may struggle to identify and preserve                                                     General-purpose LLMs such as GPT [44], Gemini [45],
+                 useful blocks.                                                                                                  [46], Qwen [47], [48] and DeepSeek [49] demonstrate strong
+                                                                                                                                 code capabilities through large-scale pretraining on diverse
+                 C. Necessity of Two-staged Compression                                                                          data. To better perform on code-related tasks, a series of code-
+                    While the coarse-grained step provides the largest compres-                                                  specialized LLMs have been proposed. CodeX [50] adapts
+                 sion gains by removing entire irrelevant functions, the fine-                                                   GPT architecture and is pretrained on a large corpus of
+                 grained compression step is crucial for balancing the trade-off                                                 GitHub code using next-token prediction. Similarly, Code-
+                 between compression overhead and task model cost. Users can                                                     Gen [51] adopts a decoder-only architecture, with a focus
+                 disable the fine-grained step for faster, cheaper compression                                                   on multi-turn program synthesis and open-source availability.
+                 when using less expensive models. However, for powerful but                                                     StarCoder [52], on the contrary, adopts a fill-in-the-middle
+                 costly APIs like Claude-3.7-Sonnet, the precise pruning from                                                    objective for improved bidirectional context modeling. CodeL-
+                 the fine-grained step becomes critical, yielding substantial cost                                               lama [14] extends LLaMA with code-specific tokenization
+                 reductions that justify the additional computational overhead.                                                  and longer contexts. CodeT5+[53] employs span denoising in
+
+
+
+
+                                                                                                                          150
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                 an encoder-decoder framework. More recent models further                 input in long-context scenarios. DietCode [26] combines static
+                 incorporate instruction tuning and reinforcement learning (RL)           frequency-based filtering with CodeBERT attention heuristics
+                 to improve alignment and generalization. WizardCoder [54]                to discard low-impact tokens, but its reliance on model-specific
+                 fine-tunes StarCoder [52] with Evol-Instruct and ChatGPT [55]            attention reduces adaptability across different architectures.
+                 feedback. DeepSeek-Coder [10] combines instruction tuning,               SlimCode[27] applies rule-based token pruning using token
+                 RL and compiler feedback to optimize for correctness and                 types and program dependency graphs, which may not gener-
+                 human preference. Qwen2.5-Coder [11] also undergoes in-                  alize well across languages or tasks. However, these existing
+                 struction tuning and RL, with a focus on long-context fidelity           methods mainly focus on compressing single functions for
+                 through multi-stage alignment.                                           short context tasks.
+                    These models have demonstrated remarkable performance                    Additionally, advanced RAG-based approaches have been
+                 in downstream tasks such as code generation [51], [56], code             developed for enhancing repository-level code completion
+                 summarization [57], [58], and code question answering [59],              by retrieving relevant context, including A3 -CodGen [39],
+                 [60]. Despite increasingly longer context windows, LLMs                  which incorporates third-party library information; cAST [40],
+                 exhibit significant limitations in long context scenarios, es-           which leverages structural chunking via abstract syntax trees;
+                 pecially when relevant information appears in the middle of              RepoGenix [41], which combines analogous and relevant
+                 a prompt [19], [20] or when code completion requires cross-              contexts; and RLCoder [42], which trains stronger retrievers
+                 function or structural dependencies [21], [61]. To address these         for improved context selection. Unlike these approaches that
+                 challenges, a number of long code benchmarks have been                   are specifically designed for repository-level code completion,
+                 introduced, such as LongCodeBench [62], LongCodeU [63],                  we propose a training-free code context compression technique
+                 YABLoCo [64], and LongCodeArena [21]. In parallel, re-                   that provides broader applicability across diverse long-context
+                 cent research has tailored models to code tasks specifi-                 code tasks including summarization and question answering
+                 cally. LongCoder [1] adopts a sliding window mechanism                   by preserving essential semantic information while enabling
+                 for self-attention to enhance long-context code completion.              existing LLMs to operate effectively within constrained input
+                 HiRoPE [65] leverages the hierarchical structure of source               lengths. Our contribution lies in the synergistic integration and
+                 code to enable length extrapolation without additional training.         significant code-aware approach to address the unique struc-
+                 aiXcoder-7B-v2 [66] introduces reinforcement learning-based              tural and semantic characteristics of programming languages.
+                 fine-tuning to guide LLMs in utilizing long-range context for               To the best of our knowledge, our approach is the first
+                 repository-level code completion. Complementing these archi-             to explicitly target long-context compression in code LLMs,
+                 tectural and training advancements, we propose an efficient              providing a training-free and model-agnostic solution that
+                 code context compression technique that preserves essential              efficiently preserves task-relevant content under tight token
+                 semantic information while enabling LLMs to operate effec-               budgets.
+                 tively within constrained input lengths.
+                                                                                                                IX. C ONCLUSION
+                 B. Context Compression of Large Language Models                             In this paper, we have introduced LongCodeZip, a training-
+                    Context compression strategies can be categorized into hard           free, model-agnostic and plug-and-play framework for long-
+                 prompt methods and soft prompt methods [67], [68], [69],                 context code compression. Our two-stage hierarchical ap-
+                 [70]. Soft prompt methods [71], [72], [73] summarize input               proach combines function-level selection with block-level
+                 into dense vectors or prefix embeddings. While memory-                   pruning. Comprehensive experiments across code completion,
+                 efficient, they require fine-tuning on the target model, making          summarization, and question answering tasks demonstrate that
+                 them impractical in closed-source settings like using GPT-               LongCodeZip achieves up to a 5.6x compression ratio without
+                 4. In contrast, hard prompt methods directly manipulate the              sacrificing task performance, consistently outperforms existing
+                 input by removing or rephrasing less informative content.                baselines, and significantly reduces computational costs. The
+                 LLMLingua [23], LongLLMLingua [33], and Selective Con-                   framework exhibits strong cross-model generalization and
+                 text [24] use learned or statistical importance scores to prune          maintains competitive performance even with a lightweight
+                 uninformative tokens or sentences. LLMLingua-2 [34] ad-                  0.5B compression model. As the first framework specifically
+                 vances this by employing data distillation from GPT-4 to train           designed for long-context code compression, LongCodeZip
+                 a token classification model, achieving efficient and faithful           enables code LLMs to scale more efficiently to real-world,
+                 compression. AttentionRAG [74] prunes the context based on               large-scale software development scenarios.
+                 the attention between queries and retrieved contexts.
+                    However, these methods are primarily designed for nat-                                     ACKNOWLEDGMENT
+                 ural language, and often fail to capture the structural and                 We thank anonymous reviewers for their constructive com-
+                 semantic regularities of source code, leading to suboptimal              ments. We also thank Maoquan Wang and Yanfu Yan for help-
+                 performance in code-related tasks. This has led to a growing             ful discussions on improving this work. This research is funded
+                 body of research focused on code-specific compression. Short-            by the National Key Research and Development Program of
+                 enDoc [75] targets docstring compression specifically, whereas           China (Grant No. 2023YFB4503802) and the Natural Science
+                 our method targets source code, which typically dominates the            Foundation of Shanghai (Grant No. 25ZR1401175).
+
+
+
+
+                                                                                    151
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                                               R EFERENCES                                               [22] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by
+                                                                                                              chatgpt really correct? rigorous evaluation of large language models for
+                  [1] D. Guo, C. Xu, N. Duan, J. Yin, and J. McAuley, “Longcoder: A long-                     code generation,” Advances in Neural Information Processing Systems,
+                      range pre-trained language model for code completion,” in International                 vol. 36, pp. 21 558–21 572, 2023.
+                      Conference on Machine Learning. PMLR, 2023, pp. 12 098–12 107.                     [23] H. Jiang, Q. Wu, C.-Y. Lin, Y. Yang, and L. Qiu, “LLMLingua:
+                  [2] T. Liu, C. Xu, and J. McAuley, “Repobench: Benchmarking repository-                     Compressing Prompts for Accelerated Inference of Large Language
+                      level code auto-completion systems,” arXiv preprint arXiv:2306.03091,                   Models,” in Proceedings of the 2023 Conference on Empirical Methods
+                      2023.                                                                                   in Natural Language Processing, H. Bouamor, J. Pino, and K. Bali, Eds.
+                  [3] Y. Wang, Y. Wang, S. Wang, D. Guo, J. Chen, J. Grundy, X. Liu, Y. Ma,                   Singapore: Association for Computational Linguistics, Dec. 2023, pp.
+                      M. Mao, H. Zhang et al., “Repotransbench: A real-world benchmark                        13 358–13 376.
+                      for repository-level code translation,” arXiv preprint arXiv:2412.17744,           [24] Y. Li, B. Dong, F. Guerin, and C. Lin, “Compressing Context to Enhance
+                      2024.                                                                                   Inference Efficiency of Large Language Models,” in Proceedings of the
+                  [4] C. Wang, T. Yu, J. Wang, D. Chen, W. Zhang, Y. Shi, X. Gu, and                          2023 Conference on Empirical Methods in Natural Language Process-
+                      B. Shen, “Evoc2rust: A skeleton-guided framework for project-level c-                   ing, H. Bouamor, J. Pino, and K. Bali, Eds. Singapore: Association
+                      to-rust translation,” arXiv preprint arXiv:2508.04295, 2025.                            for Computational Linguistics, Dec. 2023, pp. 6342–6353.
+                  [5] W. Zeng, Y. Wang, C. Hu, Y. Shi, C. Wan, H. Zhang, and X. Gu, “Prun-               [25] X. Cheng, X. Wang, X. Zhang, T. Ge, S.-Q. Chen, F. Wei, H. Zhang,
+                      ing the unsurprising: Efficient code reasoning via first-token surprisal,”              and D. Zhao, “xRAG: Extreme Context Compression for Retrieval-
+                      arXiv preprint arXiv:2508.05988, 2025.                                                  augmented Generation with One Token,” May 2024.
+                  [6] K. Zhang, D. Wang, J. Xia, W. Y. Wang, and L. Li, “Algo: Synthesizing              [26] Z. Zhang, H. Zhang, B. Shen, and X. Gu, “Diet code is healthy:
+                      algorithmic programs with generated oracle verifiers,” Advances in                      Simplifying programs for pre-trained models of code,” in Proceedings
+                      Neural Information Processing Systems, vol. 36, pp. 54 769–54 784,                      of the 30th ACM Joint European Software Engineering Conference and
+                      2023.                                                                                   Symposium on the Foundations of Software Engineering, ser. ESEC/FSE
+                  [7] Y. Shi, S. Wang, C. Wan, and X. Gu, “From code to correctness: Closing                  2022. New York, NY, USA: Association for Computing Machinery,
+                      the last mile of code generation with hierarchical debugging,” arXiv                    Nov. 2022, pp. 1073–1084.
+                      preprint arXiv:2410.01215, 2024.                                                   [27] Y. Wang, X. Li, T. N. Nguyen, S. Wang, C. Ni, and L. Ding, “Natural
+                  [8] S. Chen, S. Lin, X. Gu, Y. Shi, H. Lian, L. Yun, D. Chen, W. Sun, L. Cao,               is the best: Model-agnostic code simplification for pre-trained large
+                      and Q. Wang, “Swe-exp: Experience-driven software issue resolution,”                    language models,” Proceedings of the ACM on Software Engineering,
+                      arXiv preprint arXiv:2507.23361, 2025.                                                  vol. 1, no. FSE, pp. 586–608, 2024.
+                  [9] H. Li, Y. Shi, S. Lin, X. Gu, H. Lian, X. Wang, Y. Jia, T. Huang,                  [28] Z. Li, C. Li, M. Zhang, Q. Mei, and M. Bendersky, “Retrieval augmented
+                      and Q. Wang, “Swe-debate: Competitive multi-agent debate for software                   generation or long-context llms? a comprehensive study and hybrid
+                      issue resolution,” arXiv preprint arXiv:2507.23348, 2025.                               approach,” in Proceedings of the 2024 Conference on Empirical Methods
+                 [10] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen,                            in Natural Language Processing: Industry Track, 2024, pp. 881–893.
+                      X. Bi, Y. Wu, Y. Li et al., “Deepseek-coder: When the large language               [29] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan, Y. Mao, J.-
+                      model meets programming–the rise of code intelligence,” arXiv preprint                  G. Lou, and W. Chen, “Repocoder: Repository-level code completion
+                      arXiv:2401.14196, 2024.                                                                 through iterative retrieval and generation,” in Proceedings of the 2023
+                 [11] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu, J. Zhang,                   Conference on Empirical Methods in Natural Language Processing,
+                      B. Yu, K. Lu et al., “Qwen2. 5-coder technical report,” arXiv preprint                  2023, pp. 2471–2484.
+                      arXiv:2409.12186, 2024.                                                            [30] D. Guo, S. Lu, N. Duan, Y. Wang, M. Zhou, and J. Yin, “Unixcoder:
+                 [12] Y. Zhang, J. Su, Y. Sun, C. Xi, X. Xiao, S. Zheng, A. Zhang, K. Liu,                    Unified cross-modal pre-training for code representation,” arXiv preprint
+                      D. Zan, T. Sun et al., “Seed-coder: Let the code model curate data for                  arXiv:2203.03850, 2022.
+                      itself,” arXiv preprint arXiv:2506.03524, 2025.                                    [31] Z. Feng, D. Guo, D. Tang, N. Duan, X. Feng, M. Gong, L. Shou, B. Qin,
+                 [13] J. Liu, J. Le Tian, V. Daita, Y. Wei, Y. Ding, Y. K. Wang, J. Yang,                     T. Liu, D. Jiang et al., “Codebert: A pre-trained model for programming
+                      and L. Zhang, “Repoqa: Evaluating long context code understanding,”                     and natural languages,” arXiv preprint arXiv:2002.08155, 2020.
+                      in First Workshop on Long Context Foundation Models ICML, 2024.                    [32] J. Zhao, Z. Ji, Y. Feng, P. Qi, S. Niu, B. Tang, F. Xiong, and Z. Li, “Meta-
+                 [14] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi,              chunking: Learning efficient text segmentation via logical perception,”
+                      J. Liu, R. Sauvestre, T. Remez et al., “Code llama: Open foundation                     arXiv preprint arXiv:2410.12788, 2024.
+                      models for code,” arXiv preprint arXiv:2308.12950, 2023.                           [33] H. Jiang, Q. Wu, X. Luo, D. Li, C.-Y. Lin, Y. Yang, and L. Qiu,
+                 [15] J. Zhang, Y. Fan, W. Lin, R. Chen, H. Jiang, W. Chai, J. Wang, and                      “LongLLMLingua: Accelerating and Enhancing LLMs in Long Context
+                      K. Wang, “Gam-agent: Game-theoretic and uncertainty-aware collabo-                      Scenarios via Prompt Compression,” in Proceedings of the 62nd Annual
+                      ration for complex visual reasoning,” arXiv preprint arXiv:2505.23399,                  Meeting of the Association for Computational Linguistics (Volume 1:
+                      2025.                                                                                   Long Papers), L.-W. Ku, A. Martins, and V. Srikumar, Eds. Bangkok,
+                 [16] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,                 Thailand: Association for Computational Linguistics, Aug. 2024, pp.
+                      Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” Advances in                  1658–1677.
+                      neural information processing systems, vol. 30, 2017.                              [34] Z. Pan, Q. Wu, H. Jiang, M. Xia, X. Luo, J. Zhang, Q. Lin, V. Rühle,
+                 [17] J. Zhang, Y. Fan, K. Cai, Z. Huang, X. Sun, J. Wang, C. Tang,                           Y. Yang, C.-Y. Lin et al., “Llmlingua-2: Data distillation for efficient
+                      and K. Wang, “Drdiff: Dynamic routing diffusion with hierarchical                       and faithful task-agnostic prompt compression,” in Findings of the
+                      attention for breaking the efficiency-quality trade-off,” 2025. [Online].               Association for Computational Linguistics ACL 2024, 2024, pp. 963–
+                      Available: https://arxiv.org/abs/2509.02785                                             981.
+                 [18] J. Zhang, Z. Huang, Y. Fan, N. Liu, M. Li, Z. Yang, J. Yao,                        [35] Y. Liu, D. Iter, Y. Xu, S. Wang, R. Xu, and C. Zhu, “G-eval: Nlg
+                      J. Wang, and K. Wang, “KABB: Knowledge-aware bayesian bandits                           evaluation using gpt-4 with better human alignment,” in Proceedings
+                      for dynamic expert coordination in multi-agent systems,” in Forty-                      of the 2023 Conference on Empirical Methods in Natural Language
+                      second International Conference on Machine Learning, 2025. [Online].                    Processing, 2023, pp. 2511–2522.
+                      Available: https://openreview.net/forum?id=AKvy9a4jho                              [36] H. Song, H. Su, I. Shalyminov, J. Cai, and S. Mansour, “Finesure: Fine-
+                 [19] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and              grained summarization evaluation using llms,” in Proceedings of the
+                      P. Liang, “Lost in the middle: How language models use long contexts,”                  62nd Annual Meeting of the Association for Computational Linguistics
+                      arXiv preprint arXiv:2307.03172, 2023.                                                  (Volume 1: Long Papers), 2024, pp. 906–922.
+                 [20] J. Li, M. Wang, Z. Zheng, and M. Zhang, “Loogle: Can long-                         [37] R. Wang, J. Guo, C. Gao, G. Fan, C. Y. Chong, and X. Xia, “Can llms
+                      context language models understand long contexts?” arXiv preprint                       replace human evaluators? an empirical study of llm-as-a-judge in soft-
+                      arXiv:2311.04939, 2023.                                                                 ware engineering,” Proceedings of the ACM on Software Engineering,
+                 [21] E. Bogomolov, A. Eliseeva, T. Galimzyanov, E. Glukhov, A. Shapkin,                      vol. 2, no. ISSTA, pp. 1955–1977, 2025.
+                      M. Tigina, Y. Golubev, A. Kovrigin, A. van Deursen, M. Izadi et al.,               [38] J. He, J. Shi, T. Y. Zhuo, C. Treude, J. Sun, Z. Xing, X. Du, and D. Lo,
+                      “Long code arena: a set of benchmarks for long-context code models,”                    “From code to courtroom: Llms as the new software judges,” arXiv
+                      arXiv preprint arXiv:2406.11612, 2024.                                                  preprint arXiv:2503.02246, 2025.
+
+
+
+
+                                                                                                   152
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+                 [39] D. Liao, S. Pan, X. Sun, X. Ren, Q. Huang, Z. Xing, H. Jin, and                    [60] W. Peng, Y. Shi, Y. Wang, X. Zhang, B. Shen, and X. Gu, “Swe-qa:
+                      Q. Li, “A 3-codgen: A repository-level code generation framework                        Can language models answer repository-level code questions?” arXiv
+                      for code reuse with local-aware, global-aware, and third-party-library-                 preprint arXiv:2509.14635, 2025.
+                      aware,” IEEE Transactions on Software Engineering, 2024.                           [61] H. Yu, B. Shen, D. Ran, J. Zhang, Q. Zhang, Y. Ma, G. Liang, Y. Li,
+                 [40] Y. Zhang, X. Zhao, Z. Wang, C. Yang, J. Wei, and T. Wu, “cAST: En-                      Q. Wang, and T. Xie, “Codereval: A benchmark of pragmatic code
+                      hancing Code Retrieval-Augmented Generation with Structural Chunk-                      generation with generative pre-trained models,” in Proceedings of the
+                      ing via Abstract Syntax Tree,” Jun. 2025.                                               46th IEEE/ACM International Conference on Software Engineering,
+                 [41] M. Liang, X. Xie, G. Zhang, X. Zheng, P. Di, W. Jiang, H. Chen,                         2024, pp. 1–12.
+                      C. Wang, and G. Fan, “RepoGenix: Dual Context-Aided Repository-                    [62] S. Rando, L. Romani, A. Sampieri, Y. Kyuragi, L. Franco, F. Galasso,
+                      Level Code Completion with Language Models,” in Proceedings of the                      T. Hashimoto, and J. Yang, “Longcodebench: Evaluating coding llms at
+                      39th IEEE/ACM International Conference on Automated Software En-                        1m context windows,” arXiv preprint arXiv:2505.07897, 2025.
+                      gineering (ASE ’24). New York, NY, USA: Association for Computing                  [63] J. Li, X. Guo, L. Li, K. Zhang, G. Li, Z. Tao, F. Liu, C. Tao, Y. Zhu,
+                      Machinery, 2024, pp. 2466–2467.                                                         and Z. Jin, “Longcodeu: Benchmarking long-context language models
+                 [42] Y. Wang, Y. Wang, D. Guo, J. Chen, R. Zhang, Y. Ma, and Z. Zheng,                       on long code understanding,” arXiv preprint arXiv:2503.04359, 2025.
+                      “Rlcoder: Reinforcement learning for repository-level code completion,”            [64] A. Valeev, R. Garaev, V. Lomshakov, I. Piontkovskaya, V. Ivanov, and
+                      arXiv preprint arXiv:2407.19487, 2024.                                                  I. Adewuyi, “Yabloco: Yet another benchmark for long context code
+                 [43] E. Frantar, S. Ashkboos, T. Hoefler, and D. Alistarh, “Gptq: Accurate                   generation,” arXiv preprint arXiv:2505.04406, 2025.
+                      post-training quantization for generative pre-trained transformers,” in            [65] K. Zhang, G. Li, H. Zhang, and Z. Jin, “Hirope: Length extrapo-
+                      The Eleventh International Conference on Learning Representations.                      lation for code models using hierarchical position,” arXiv preprint
+                      OpenReview, 2023.                                                                       arXiv:2403.19115, 2024.
+                 [44] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman,                [66] J. Li, H. Zhu, H. Liu, X. Shi, H. Zong, Y. Dong, K. Zhang, S. Jiang,
+                      D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat et al., “Gpt-4                       Z. Jin, and G. Li, “aixcoder-7b-v2: Training llms to fully utilize
+                      technical report,” arXiv preprint arXiv:2303.08774, 2023.                               the long context in repository-level code completion,” arXiv preprint
+                 [45] G. Team, R. Anil, S. Borgeaud, J.-B. Alayrac, J. Yu, R. Soricut,                        arXiv:2503.15301, 2025.
+                      J. Schalkwyk, A. M. Dai, A. Hauth, K. Millican et al., “Gemini: a family           [67] Z. Li, Y. Liu, Y. Su, and N. Collier, “Prompt compression for large
+                      of highly capable multimodal models,” arXiv preprint arXiv:2312.11805,                  language models: A survey,” arXiv preprint arXiv:2410.12388, 2024.
+                      2023.                                                                              [68] X. Liu, Y. Wang, J. Ma, and L. Zhang, “Video compression commander:
+                                                                                                              Plug-and-play inference acceleration for video large language models,”
+                 [46] G. Team, P. Georgiev, V. I. Lei, R. Burnell, L. Bai, A. Gulati, G. Tanzer,
+                                                                                                              arXiv preprint arXiv:2505.14454, 2025.
+                      D. Vincent, Z. Pan, S. Wang et al., “Gemini 1.5: Unlocking multimodal
+                                                                                                         [69] X. Liu, Z. Wang, Y. Han, Y. Wang, J. Yuan, J. Song, B. Zheng, L. Zhang,
+                      understanding across millions of tokens of context,” arXiv preprint
+                                                                                                              S. Huang, and H. Chen, “Global compression commander: Plug-and-
+                      arXiv:2403.05530, 2024.
+                                                                                                              play inference acceleration for high-resolution large vision-language
+                 [47] J. Bai, S. Bai, Y. Chu, Z. Cui, K. Dang, X. Deng, Y. Fan, W. Ge,
+                                                                                                              models,” arXiv preprint arXiv:2501.05179, 2025.
+                      Y. Han, F. Huang et al., “Qwen technical report,” arXiv preprint
+                                                                                                         [70] X. Liu, Z. Wen, S. Wang, J. Chen, Z. Tao, Y. Wang, X. Jin, C. Zou,
+                      arXiv:2309.16609, 2023.
+                                                                                                              Y. Wang, C. Liao et al., “Shifting ai efficiency from model-centric to
+                 [48] A. Yang, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Li, D. Liu,                     data-centric compression,” arXiv preprint arXiv:2505.19147, 2025.
+                      F. Huang, H. Wei et al., “Qwen2. 5 technical report,” arXiv preprint               [71] J. Mu, X. Li, and N. Goodman, “Learning to compress prompts with gist
+                      arXiv:2412.15115, 2024.                                                                 tokens,” Advances in Neural Information Processing Systems, vol. 36,
+                 [49] D. Guo, D. Yang, H. Zhang, J. Song, R. Zhang, R. Xu, Q. Zhu, S. Ma,                     pp. 19 327–19 352, 2023.
+                      P. Wang, X. Bi et al., “Deepseek-r1: Incentivizing reasoning capability            [72] Z. Li, Y. Su, and N. Collier, “500xCompressor: Generalized Prompt
+                      in llms via reinforcement learning,” arXiv preprint arXiv:2501.12948,                   Compression for Large Language Models,” Aug. 2024.
+                      2025.                                                                              [73] C. Wang, Y. Yang, R. Li, D. Sun, R. Cai, Y. Zhang, and C. Fu, “Adapting
+                 [50] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan,                      llms for efficient context processing through soft prompt compression,”
+                      H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large                  in Proceedings of the International Conference on Modeling, Natural
+                      language models trained on code,” arXiv preprint arXiv:2107.03374,                      Language Processing and Machine Learning, 2024, pp. 91–97.
+                      2021.                                                                              [74] Y. Fang, T. Sun, Y. Shi, and X. Gu, “Attentionrag: Attention-guided
+                 [51] E. Nijkamp, B. Pang, H. Hayashi, L. Tu, H. Wang, Y. Zhou, S. Savarese,                  context pruning in retrieval-augmented generation,” arXiv preprint
+                      and C. Xiong, “Codegen: An open large language model for code with                      arXiv:2503.10720, 2025.
+                      multi-turn program synthesis,” arXiv preprint arXiv:2203.13474, 2022.              [75] G. Yang, Y. Zhou, W. Cheng, X. Zhang, X. Chen, T. Y. Zhuo, K. Liu,
+                 [52] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,                         X. Zhou, D. Lo, and T. Chen, “Less is More: DocString Compression
+                      M. Marone, C. Akiki, J. Li, J. Chim et al., “Starcoder: may the source                  in Code Generation,” Oct. 2024.
+                      be with you!” arXiv preprint arXiv:2305.06161, 2023.
+                 [53] Y. Wang, H. Le, A. D. Gotmare, N. D. Bui, J. Li, and S. C. Hoi,
+                      “Codet5+: Open code large language models for code understanding
+                      and generation,” arXiv preprint arXiv:2305.07922, 2023.
+                 [54] Z. Luo, C. Xu, P. Zhao, Q. Sun, X. Geng, W. Hu, C. Tao, J. Ma, Q. Lin,
+                      and D. Jiang, “Wizardcoder: Empowering code large language models
+                      with evol-instruct,” arXiv preprint arXiv:2306.08568, 2023.
+                 [55] OpenAI, “ChatGPT,” https://openai.com/blog/chatgpt, 2022, accessed:
+                      2025-05-11.
+                 [56] Y. Shi, H. Zhang, C. Wan, and X. Gu, “Between lines of code: Unravel-
+                      ing the distinct patterns of machine and human programmers,” in 2025
+                      IEEE/ACM 47th International Conference on Software Engineering
+                      (ICSE). IEEE Computer Society, 2024, pp. 51–62.
+                 [57] W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W. Chang, “A
+                      transformer-based approach for source code summarization,” arXiv
+                      preprint arXiv:2005.00653, 2020.
+                 [58] Y. Wang, E. Shi, L. Du, X. Yang, Y. Hu, Y. Wang, D. Guo, S. Han,
+                      H. Zhang, and D. Zhang, “Context-aware code summarization with
+                      multi-relational graph neural network,” Automated Software Engineer-
+                      ing, vol. 32, no. 1, pp. 1–26, 2025.
+                 [59] X. Gu, H. Zhang, and S. Kim, “Deep code search,” in Proceedings of
+                      the 40th international conference on software engineering, 2018, pp.
+                      933–944.
+
+
+
+
+                                                                                                   153
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 12:07:59 UTC from IEEE Xplore. Restriction
+

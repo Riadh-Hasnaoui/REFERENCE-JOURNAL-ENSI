@@ -1,0 +1,276 @@
+                                                                                                                                                                                            2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW)
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW) | 979-8-3315-8503-7/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASEW67777.2025.00073
+
+
+
+
+                                                                                                                                                                                          SpareCodeSearch: Searching for Code Context
+                                                                                                                                                                                                When You Have No Spare GPU
+                                                                                                                                                                                                                                              Minh Nguyen
+                                                                                                                                                                                                                                      School of Computer Science
+                                                                                                                                                                                                                                       University College Dublin
+                                                                                                                                                                                                                                             Dublin, Ireland
+                                                                                                                                                                                                                                      minh.a.nguyen@ucdconnect.ie
+
+
+                                                                                                                                                                                      Abstract—Retrieval-Augmented Generation (RAG) frame-                    examples or patterns that match their pre-existing knowledge
+                                                                                                                                                                                   works aim to enhance Code Language Models (CLMs) by includ-                and familiarity [6]. This tendency gives rise to the development
+                                                                                                                                                                                   ing another module for retrieving relevant context to construct            of IDE features such as “Go to Definition” or “Search Every-
+                                                                                                                                                                                   the input prompt. However, these retrieval modules commonly
+                                                                                                                                                                                   use semantic search, requiring substantial computational re-               where”1 which are heavily reliant on user-provided keywords.
+                                                                                                                                                                                   sources for training and hosting these embedded models, making             Coming back to the Code Context Competition, we extend
+                                                                                                                                                                                   them infeasible to integrate into lightweight applications such as         the original question of “How to find relevant code context
+                                                                                                                                                                                   in-IDE AI-based code completion. In this solution paper, we prove          from a codebase that helps language models generate better
+                                                                                                                                                                                   that using keyword-search is sufficient to retrieve relevant and           code completion” into “How to effectively integrate existing
+                                                                                                                                                                                   useful code context inside large codebases, without the need for
+                                                                                                                                                                                   extensive GPU resources. The usefulness of code contexts found             keyword-based code search engines into automated code com-
+                                                                                                                                                                                   by our solution is demonstrated through their completion results           pletion systems”
+                                                                                                                                                                                   on the Code Context Competition’s benchmark, reaching 0.748
+                                                                                                                                                                                   and 0.725 chRF scores on Kotlin and Python tracks, respectively.                                 II. T ECHNICAL D ETAILS
+                                                                                                                                                                                    Index Terms—Code Context, Code Search, Code Language                      A. System Architecture
+                                                                                                                                                                                   Models, Code Completion, Keyword-based Search
+
+                                                                                                                                                                                                           I. M OTIVATION
+                                                                                                                                                                                      Code Language Models (CLMs) have shown great promise
+                                                                                                                                                                                   in generating code, given the right contexts in their input
+                                                                                                                                                                                   prompts [1], [2]. Our solution - SpareCodeSearch - is de-
+                                                                                                                                                                                   veloped with a philosophy that emphasizes simplicity and
+                                                                                                                                                                                   efficiency, focusing on the question of how to develop a code
+                                                                                                                                                                                   search tool that is most suitable for the task of automated
+                                                                                                                                                                                   code completion. This means that the tool must satisfy the
+                                                                                                                                                                                   requirements of lightweight deployment and fast retrieval
+                                                                                                                                                                                   times, easily integrate into existing CLMs, and, at the same                Fig. 1: System architecture overview of SpareCodeSearch.
+                                                                                                                                                                                   time, be easily extensible to multiple programming languages.
+                                                                                                                                                                                   Semantic code search, while it has been proven effective in                   The code search engine used in our solution is Zoekt2 .
+                                                                                                                                                                                   retrieving code snippets from natural language queries [3],                Zoekt is an open-source fast, scalable code search engine that
+                                                                                                                                                                                   is not suitable for these requirements, due to its reliance                is designed to handle large codebases efficiently. Zoekt has
+                                                                                                                                                                                   on resource-intensive language models to generate vector                   been adpated by Sourcegraph and Gitlab as their backend
+                                                                                                                                                                                   embeddings [4], which cannot be easily deployed in resource-               for indexed code search [7]. Sourcegraph even integrated it
+                                                                                                                                                                                   constrained environments such as IDEs. In those scenarios,                 into their own conversation-based AI Coding Assistant Cody
+                                                                                                                                                                                   indexing a large codebase could take a significant amount of               [8]. Zoekt also shares the similar query language with other
+                                                                                                                                                                                   time and resources, making it impractical to combine with                  propietary code search engine such as Github Code Search [9]
+                                                                                                                                                                                   the computationally demanding LLM-based code completion.                   and Google Code Search [10], making our solution extensible
+                                                                                                                                                                                   The learning-based nature of this method requires retraining               to these engines in the future. Zoekt also has a separate
+                                                                                                                                                                                   and fine-tuning to mitigate knowledge cut-off, causing it to               index server and web server, allowing it to be deployed in
+                                                                                                                                                                                   perform differently across different programming languages                 microservices architectures, making it easy to integrate and
+                                                                                                                                                                                   [3], [5].                                                                  customize with other systems.
+                                                                                                                                                                                      We believe that a keyword-based search approach can
+                                                                                                                                                                                   effectively address these challenges. It has been shown that                 1 https://www.jetbrains.com/help/idea/searching-everywhere.html
+
+                                                                                                                                                                                   most developers when searching code, look for specific code                  2 https://github.com/sourcegraph/zoekt
+
+
+
+
+                                                                                                                                                                                979-8-3315-8503-7/25/$31.00 ©2025 IEEE                                  364
+                                                                                                                                                                                DOI 10.1109/ASEW67777.2025.00073
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 16:03:51 UTC from IEEE Xplore. Restriction
+                  Looking at Figure 1, our system can be divided into two
+                main phases: Offline Indexing and Online Retrieval
+
+                B. Offline Indexing Phase with Zoekt
+                   With the provided public Kotlin and Python sets provided
+                by the competition, we build an index using Zoekt. For
+                each datapoint in the original JSONL file, Zoekt indexer
+                server looks at its corresponding revisions, and creates an
+                index shard. Each shard is a compressed representation of the
+                codebase at that specific revision, optimized for fast keyword-
+                based search [10]. The indexing process requires ctags3 for
+                extracting and saving symbols from the codebase to the index.
+                For Kotlin public dataset, there are a total of 400 shards,
+                belonging to 19 unique repositories. For Python, the total
+                number of shards is 247, indexed from 20 repositories. See
+                Figure 2 for the distribution of the number of revisions per
+                unique repository. We build our index locally, on a Macbook
+                M3 Air with 16GB ram, using Docker containers to ensure
+                a consistent and isolated environment. The indexing process
+                took approximately 10 minutes for each dataset, with the
+                created shards being mounted to a Docker volume. After
+                indexing, Zoekt web server will be turned on to serve the
+                indexed shards, and expose its /search JSON API for retrieval.
+                   Language    Number of Revisions (Completion point)   Number of unique repos
+                   Kotlin                       400                              19
+                   Python                       247                              20
+
+                TABLE I: Number of revisions per unique repositories for
+                Kotlin and Python in public sets.
+                                                                                                       Fig. 2: Number of revisions for each unique repository indexed
+                C. Online Context Retrieving Phase                                                     by Zoekt. (Public set only)
+
+                   The Online Retrieval phase begins after the initial indexing
+                is complete, and the Zoekt web server is running. This phase                              1) Zoekt Query Construction Strategies: For every original
+                involves two main modules: the Zoekt Query Generator and                               completion point, we manufacture a search space using our
+                the Post-processor of search results.                                                  Query Generator module, creating 19 possible Zoekt query
+                              Query Variation                  Kotlin    Python
+                                                                                                       candidates. The ultimate goal is trying to brute-force all the
+                              functions classes naive           371       237                          possible ways of constructing a Zoekt query, in order to
+                              functions classes or              371       237                          maximize the chance of finding relevant code context. The
+                              functions classes top5            214       201                          key-word terms used to compose these queries are collected
+                              functions classes top4            250       209
+                              functions classes top3            275       218                          from the diff string associated with its completion point.
+                              functions classes regex           337       230                          This diff string can easily be constructed by comparing the
+                              navigation naive                  346       219                          concatenated string of prefix and suffix with the original code
+                              navigation unpacked               346       219
+                              navigation unpacked or            346       219                          file before being modified by the revision. An example about
+                              navigation unpacked top5          293       154                          the diff string could be found in Table V of the Appendix4 .
+                              navigation unpacked top4          307       176                          The diff string acts as the source of reference, so that we can
+                              navigation unpacked top3          320       191
+                              navigation regex                  346       219                          use different symbols gathering techniques, utltilizing Tree-
+                              identifiers naive                 396       244                          sitter for extracting meaningful identifiers from the located
+                              identifiers or                    396       244                          completion point. We start from function and class names,
+                              identifiers top5                  386       226
+                              identifiers top4                  387       230                          expanding it to navigation expression, and finally using all
+                              identifiers top3                  388       236                          identifiers existing inside the diff string. The Tree-sitter syntax
+                              identifiers regex                 396       244                          used for this process can be verified in Table VII of the
+                TABLE II: Number of queries generated for each query con-                              Appendix.
+                struction strategy, for Kotlin and Python datasets respectively.                          To construct Zoekt queries from the gathered identifiers,
+
+                  3 https://github.com/universal-ctags/ctags                                             4 Link to online Appendix https://doi.org/10.5281/zenodo.17045695
+
+
+
+
+                                                                                                 365
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 16:03:51 UTC from IEEE Xplore. Restriction
+                we used multiple types of combinations based on the official                   We use HuggingFace tokenizer to determine if the containing
+                Zoekt query language guideline5 . We start with naive exact                    file is too large to be included in the final context window. If it
+                matching, including all found identifiers in the queries, and                  does, we only return the code snippets or their union versions
+                gradually reduce the difficulty level of the query by reducing                 if they overlap with each other. We use Jetbrains Mellum’s
+                the number of terms inside the query, using regex for fuzzy                    tokenizer [11] for both Python and Kotlin tokenization. At
+                search, and using OR logic to increase the search boundary.                    the same time, we implement a dynamic way to adjust the
+                We ranked identifiers by their occurrence in the diff string                   context window based on the size of the returned snippets.
+                and by their close proximity to the completion points, which                   Specifically, we dynamically calculate the token constraint
+                is useful when filtering top-k identifiers. Table II shows the                 T of each completion point by subtracting the maximum
+                name and number of each query variation constructed in the                     number of Mellum tokens from the total number of tokens
+                public Kotlin and Python datasets. Examples of each query                      existing in the diff string’s prefix and suffix. A small token
+                variation can be found in Table VI in the Appendix.                            buffer is reserved to ensure there is enough token space for
+                   However, during online phase, not all query variations                      the CLMs to generate during the evaluation. Then, the post-
+                are sent to the Zoekt web server for searching. The Query                      processor selects up to top-k ranked files/snippets, ensuring
+                Generator iterates on each variation, sending the generated                    each fits within a per-file token budget R and the overall
+                query to the Zoekt web server, until it finds a non-empty                      token constraint T , and concatenates their contexts for output
+                search result. This ensures that we do not need to exhaustively                (Equation 1 in the Appendix).
+                search all query variations while the first few and most difficult
+                variations have already successfully returned the results. We                                           III. F INDINGS
+                apply fallback, time-out and retry mechanisms to ensure                        A. Hit Rate between Single-shard and Cross-shard Setting
+                that no requests are dropped when the server is overloaded.                       We define a “hit” as a response from Zoekt server which
+                Another thing worth mentioning is that Zoekt allows Cross-                     contains at least one successful search result. From Table
+                shard searching, which means that queries can span multiple                    III, the hit rate for Cross-shard setting was found to be
+                code revisions in the same repository. This can be done by                     significantly higher than that of Single-shard setting. This
+                omitting the specific revision ID in the query (Figure 3). This                suggests that there could be more contexts located in other
+                can be another way to increase the search coverage, similar to                 revisions of the same repository, which could be useful for
+                how developers searched through branches and commits. We                       code completion. This is analogous to how developers often
+                experimented with both Single-shard and Cross-shard settings                   search through branches and commits to find previous exam-
+                to see which settings have the highest successful search rate (                ples of implementations. We also investigated special cases
+                or hit rate). Results are reported in Table III.                               where a query failed in the Single-shard Setting but succeeded
+                   Results returned from Zoekt contain metadata of the                         in the Cross-shard Setting, and found that there was a high
+                searched code snippets, including start, end lines and the                     percentage of local contexts (found in the same containing file
+                containing file paths. The Post-processor module then uses                     as the completion point) existing in other revisions. (Figure 4
+                this information to fetch the actual code snippets from the                    in the Appendix)
+                indexed shards.
+                                                                                                                    Single-shard Query   Cross-shard Query
+                                                                                                     Python Hit             213                 239
+                                                                                                     Python Miss             34                   8
+                                                                                                     Kotlin Hit             344                 390
+                                                                                                     Kotlin Miss             56                  10
+                                                                                               TABLE III: Hit and Miss counts for Single-shard and Cross-
+                                                                                               shard settings in Python and Kotlin.
+
+
+                                                                                               B. Results in Public and Private set using Cross-shard setting
+                                                                                                  Since cross-shard queries achieve a much higher hit rate, we
+                                                                                               used submitted contexts found by this setting to the organizer’s
+                Fig. 3: Example of a Cross-shard Zoekt query spanning                          evaluation server for both the Public and Private phases. The
+                multiple code revisions in a repository.                                       results are shown in Table IV. Our solution ranked first in the
+                                                                                               Public Phase for Kotlin, reaching a chRF score of 0.7125. The
+                   2) Post-processing of search results: The Zoekt search API                  Python public submissions also earned 0.6152, which qualified
+                can return numerous results, to the extent of thousands of code                for second position. These optimistic results can be attributed
+                snippets, especially in the case of Cross-shard querying. We                   to the high hit rate in Cross-shard queries (97.5% compared
+                first ranked them using Relevance Scores returned from Zoekt,                  to 96.7% for Python), which leads to more relevant contexts
+                and then find the containing file using the returned filepath.                 being retrieved for code completion. For the Private Phase,
+                                                                                               we cannot confirm this assumption, as we do not have access
+                  5 https://github.com/sourcegraph/zoekt/blob/main/doc/query syntax.md         to the evaluation data or hit rate information for that phase.
+
+
+
+
+                                                                                         366
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 16:03:51 UTC from IEEE Xplore. Restriction
+                However, the results in the Private Phase showed a similar                this broader search space, discovering novel query strategies
+                trend, with our submission outperforming every other in the               beyond our current hand-crafted variations.
+                Kotlin track. At the same time, the Python private submission                IDEs and plugins developers could adapt SpareCodeSearch
+                ranked second, only slightly behind the first solution that uses          into their existing automated code completion features at ease.
+                semantic search.                                                          The Query Generator could make use of currently available
+                   It is also worth noting that searching through all 400                 code and AST parsing tools. Zoekt can be hosted entirely on
+                Kotlin public revisions took 18 minutes, while processing                 a consumer laptop, and cross-shard setting could also benefit
+                all 247 Python revisions required 12 minutes. Each retrieval              from temporal contexts extracted from version control tools.
+                request used a default timeout of 0.2 seconds when catching               We publish SpareCodeSearch on Github6 , and welcome every
+                overloaded server exceptions. All of our results are collected            contributions from the community to improve, extend it or to
+                on a Macbook M3 Air, using only the default container con-                replicate our solution on other datasets and competitions.
+                figuration of 1 CPU and 8GB RAM. This result demonstrates
+                                                                                                                        R EFERENCES
+                that our solution is lightweight but powerful in terms of
+                performance, making it suitable for integration into existing              [1] M. Sapronov and E. Glukhov, “On pretraining for project-level
+                                                                                               code completion,” in ICLR 2025 Third Workshop on Deep Learning
+                in-IDE CLM-based code completion systems.                                      for Code, 2025. [Online]. Available: https://openreview.net/forum?id=
+                                                                                               t9RN9WX4Ic
+                             Language     Public Phase   Private Phase                     [2] L. Pasquale et al., “Challenges to using large language models in code
+                             Kotlin         0.7125           0.748                             generation and repair,” IEEE Security Privacy, vol. 23, no. 2, pp. 81–88,
+                             Python         0.6152           0.725                             2025.
+                                                                                           [3] D. Nguyen et al., “The vault: A comprehensive multilingual dataset
+                TABLE IV: chRF scores for Kotlin and Python in Public and                      for advancing code understanding and generation,” in Findings of
+                Private phases.                                                                the Association for Computational Linguistics: EMNLP 2023, Dec.
+                                                                                               2023, pp. 4763–4788. [Online]. Available: https://aclanthology.org/
+                                                                                               2023.findings-emnlp.316/
+                                                                                           [4] X. Zhou, D. Han, and D. Lo, “Assessing generalizability of codebert,”
+                                         IV. D ISCUSSION                                       in 2021 IEEE International Conference on Software Maintenance and
+                A. Threats to Validity                                                         Evolution (ICSME), 2021, pp. 425–436.
+                                                                                           [5] F. Chen, F. H. Fard, D. Lo, and T. Bryksin, “On the transferability of
+                   The effect of contexts found by Single-shard towards the                    pre-trained language models for low-resource programming languages,”
+                                                                                               in Proceedings of the 30th IEEE/ACM International Conference on
+                quality of code completed is not investigated, leading to                      Program Comprehension, ser. ICPC ’22, 2022, p. 401–412. [Online].
+                selection bias. There was no proven correlation between the                    Available: https://doi.org/10.1145/3524610.3527917
+                hit percentage with the quality of code completion in a same               [6] C. Sadowski, K. T. Stolee, and S. Elbaum, “How developers
+                                                                                               search for code: a case study,” in Proceedings of the 2015
+                programming language setting. Also, in the online retrieval                    10th Joint Meeting on Foundations of Software Engineering, ser.
+                phase, only the contexts are collected. No information about                   ESEC/FSE 2015. New York, NY, USA: Association for Computing
+                the effect of which specific symbols gathering techniques                      Machinery, Aug. 2015, pp. 191–201. [Online]. Available: https:
+                                                                                               //dl.acm.org/doi/10.1145/2786805.2786855
+                or Zoekt query construction variations on the search results               [7] D. Gruzd, “Exact code search: Find code faster across
+                is provided, which could limit the understanding of their                      repositories.” [Online]. Available: https://about.gitlab.com/blog/
+                contributions to the overall performance. Cross-shard setting                  exact-code-search-find-code-faster-across-repositories/
+                                                                                           [8] A. Isken, “How cody understands your codebase | source-
+                can be considered as a threat to validity, as no information                   graph blog.” [Online]. Available: https://sourcegraph.com/blog/
+                about the revision order is taken into account. In other words,                how-cody-understands-your-codebase
+                a code snippet from a later revision might be retrieved to                 [9] T.      Clem,      “The     technology      behind     GitHub’s      new
+                                                                                               code        search,”      Feb.      2023.       [Online].      Available:
+                complete a code snippet from an earlier revision, which could                  https://github.blog/engineering/architecture-optimization/
+                be considered data leakage. Further data preparation steps are                 the-technology-behind-githubs-new-code-search/
+                needed to mitigate this issue, and to prevent SpareCodeSearch             [10] B. Liu and J. Dorfman, “Code Search at Google: The Story
+                                                                                               of Han-Wen and Zoekt | Sourcegraph Blog.” [Online]. Available:
+                from looking for contexts in future repository snapshots.                      https://sourcegraph.com/blog/zoekt-creating-internal-tools-at-google
+                                                                                          [11] N. Pavlichenko et al., “Mellum-4b-base.”
+                B. Future Work                                                            [12] H. Zheng, I. Shumailov, T. Fan, A. Hall, and M. Payer, “Fixing
+                                                                                               7,400 Bugs for 1$: Cheap Crash-Site Program Repair,” May 2025,
+                   Apart from addressing the aforementioned threats to va-                     arXiv:2505.13103 [cs]. [Online]. Available: http://arxiv.org/abs/2505.
+                lidity, our work opens new avenues for research. Trying to                     13103
+                explore this solution in the context of secure code generation            [13] M. Harman and B. F. Jones, “Search-based software engineering,”
+                                                                                               Information and Software Technology, vol. 43, no. 14, pp. 833–839,
+                is a promising avenue. A prior work has used regex as                          Dec. 2001. [Online]. Available: https://www.sciencedirect.com/science/
+                Context Retrieval module [12] to localize Bug context used                     article/pii/S0950584901001896
+                for automated patch generation with CLMs. Second, while our
+                current implementation uses a fixed set of 19 query candidates
+                for tractability, the space of all possible query formulations
+                is significantly larger and potentially indefinite when con-
+                sidering different identifier combinations, regex patterns, and
+                logical operators. Automated query optimization using search-
+                based software engineering techniques [13] could explore                    6 https://github.com/SPARE-UCD/spare-code-search
+
+
+
+
+                                                                                    367
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 16:03:51 UTC from IEEE Xplore. Restriction
+

@@ -1,0 +1,729 @@
+          DevEval: A Manually-Annotated Code Generation Benchmark Aligned
+                         with Real-World Code Repositories
+   Jia Li ♂1,2 , Ge Li1,2∗, Yunfei Zhao1,2 , Yongmin Li1,2 , Huanyu Liu1,2 , Hao Zhu1,2 , Lecheng Wang1,2
+          Kaibo Liu1,2 , Zheng Fang1,2 , Lanshen Wang1,2 , Jiazheng Ding1,2 , Xuanming Zhang1,2
+Yuqi Zhu1,2 , Yihong Dong1,2 , Zhi Jin1,2 , Binhua Li3 , Fei Huang3 , Yongbin Li3∗, Bin Gu4 , Mengfei Yang5
+                               1
+                                 School of Computer Science, Peking University
+ 2
+   Key Laboratory of High Confidence Software Technologies (Peking University), Ministry of Education
+      3
+        Alibaba Group 4 Beijing Institute of Control Engineering 5 China Academy of Space Technology
+     lijia@stu.pku.edu.cn, lige@pku.edu.cn, shuide.lyb@alibaba-inc.com
+                                Abstract                                  def has_close_elements(numbers, threshold):
+                                                                            for idx, elem in enumerate(numbers):
+                                                                              for idx2, elem2 in enumerate(numbers):
+              How to evaluate the coding abilities of Large                     if idx != idx2:
+                                                                                  distance = abs(elem - elem2)
+              Language Models (LLMs) remains an open                              if distance < threshold:
+              question. We find that existing benchmarks                            return True
+              are poorly aligned with real-world code reposi-               return False
+
+              tories and are insufficient to evaluate the coding                (a) A standalone function in HumanEval
+              abilities of LLMs.                                          # imapclient.IMAPClient.namespace
+                                                                          def namespace(self):
+              To address the knowledge gap, we propose a
+                                                                            data = self._command_and_check(“namespace”)
+              new benchmark named DevEval, which has                        parts = []
+              three advances. ❶ DevEval aligns with real-                   for item in parse_response(data):
+              world repositories in multiple dimensions, e.g.,                (more lines . . )
+                                                                                for prefix, separator in item:
+              code and dependency distributions. ❷ DevE-
+                                                                                  if self.folder_encode:
+              val is annotated by 13 developers and contains                        prefix = decode_utf7(prefix)
+              comprehensive annotations (e.g., requirements,                      converted.append((prefix, to_unicode)
+              original repositories, reference code, and ref-                   parts.append(tuple(converted))
+                                                                            return Namespace(*parts)
+              erence dependencies). ❸ DevEval comprises
+              1,825 testing samples from 115 repositories,                (b) A non-standalone function in a real-world project
+              covering 10 popular domains (e.g., Internet,
+              Database). Based on DevEval, we propose                  Figure 1: Examples of standalone and non-standalone
+              repository-level code generation and evalu-              functions. Dependencies are highlighted, i.e., yellow:
+              ate 8 popular LLMs on DevEval (e.g., gpt-4,              intra-class dependencies, green: intra-file dependencies,
+              gpt-3.5, StarCoder 2, DeepSeek Coder, CodeL-             and blue: cross-file dependencies.
+              LaMa). Our experiments reveal these LLMs’
+              coding abilities in real-world code repositories.
+              For example, the highest Pass@1 of gpt-4                    Existing benchmarks are mainly composed
+              only is 53.04% in our experiments. We also               of hand-crafted programming problems and are
+              analyze LLMs’ failed cases and summarize                 poorly aligned with real-world code repositories.
+              their shortcomings. We hope DevEval can fa-              LLMs’ performance on these benchmarks is incon-
+              cilitate the development of LLMs in real code            sistent with developers’ actual experiences in real-
+              repositories. DevEval, prompts, and LLMs’                world software development. Thus, a benchmark
+              predictions have been released1 .
+                                                                       aligned with real-world repositories is necessary.
+                                                                       We analyze over 1 million functions from 500 real-
+      1       Introduction
+                                                                       world repositories (see Section 3) and think a good
+      Code generation with Large Language Models                       benchmark should satisfy the following features.
+      (LLMs) has attracted lots of researchers’ attention
+      (Guo et al., 2024; Rozière et al., 2023; Lozhkov                 • Real-world Repository. The benchmark should
+      et al., 2024), and some commercial products have                   be collected from real-world code repositories
+      been produced, e.g., GitHub Copilot (GitHub,                       (Yu et al., 2023).
+      2023). With more and more LLMs emerging, how                     • Real Code Distribution. Real-world reposito-
+      to evaluate LLMs on code generation remains an                     ries comprise two types of code, i.e., standalone
+      open question.                                                     and non-standalone code. As shown in Figure 1,
+          * Corresponding authors                                        a standalone function solely uses built-in or pub-
+          1
+              https://github.com/seketeam/DevEval                        lic libraries, while a non-standalone one contains
+                                                                   3603
+                           Findings of the Association for Computational Linguistics: ACL 2024, pages 3603–3614
+                                   August 11-16, 2024 ©2024 Association for Computational Linguistics
+                     Table 1: The comparison between existing benchmarks and DevEval.
+
+    Benchmark                       Real Repo.   Real Code Distribution   Comprehensive Annota.   Robust Metric
+    CoNaLA (Yin et al., 2018)          é                   é                       é                   é
+    Concode (Iyer et al., 2018)        Ë                   é                       é                   é
+    HumanEval (Chen et al., 2021)      é                   é                       é                   é
+    MBPP (Austin et al., 2021)         é                   é                       é                   é
+    APPS (Hendrycks et al., 2021)      é                   é                       é                   é
+    PandasEval (Zan et al., 2022)      é                   é                       é                   é
+    NumpyEval (Zan et al., 2022)       é                   é                       é                   é
+    AixBench (Li et al., 2023b)        Ë                   é                       é                   é
+    ClassEval (Du et al., 2023)        é                   é                       é                   é
+    CoderEval (Yu et al., 2023)        Ë                   é                       é                   Ë
+    DevEval (Ours)                     Ë                  Ë                        Ë                   Ë
+
+
+
+  context-aware dependencies (i.e., invocations of         ❹ DevEval leverages test cases to check models’
+  code elements defined in current repositories).          predictions and report Pass@k. It also proposes
+  The benchmark should cover both types of code            Recall@k to evaluate the dependencies in predic-
+  and ensure their ratios are realistic. The number        tions.
+  of dependencies should also be consistent with              Based on DevEval, we propose repository-level
+  real-world repositories.                                 code generation, which simulates the developers’
+                                                           coding process in a working repository. The task
+• Comprehensive Annotations. The benchmark                 asks models to write the code based on require-
+  can offer comprehensive annotations, including           ments and a complete repository.
+  natural language requirements, original reposito-           We evaluate 8 popular LLMs (i.e., gpt-4 (Ope-
+  ries, and ground truths (code and dependencies).         nAI, 2023b), gpt-3.5 (OpenAI, 2023a), DeepSeek
+                                                           Coder (Guo et al., 2024), StarCoder 2 (Lozhkov
+• Robust Evaluation Metrics. The benchmark                 et al., 2024), CodeLLaMa (Rozière et al., 2023)).
+  should provide execution-based metrics (e.g.,            These LLMs exhibit low performance on DevE-
+  Pass@k) evaluate functional correctness of pro-          val, especially compared to their performance on
+  grams and metrics to assess the accuracy of de-          previous benchmarks. For example, gpt-4-turbo-
+  pendencies in programs.                                  1106 achieves a Pass@1 score of 80% on Hu-
+                                                           manEval, while its highest Pass@1 on DevE-
+However, as shown in Table 1, none of the existing
+                                                           val is only 53.04%. Our results reveal the coding
+benchmarks satisfies all aforementioned features.
+                                                           abilities of these LLMs in real-world repositories.
+The problem hinders the evaluation and develop-
+                                                           We further analyze failed cases and summarize the
+ment of LLMs in the real development process.
+                                                           shortcomings of existing LLMs in DevEval.
+   To address the above problem, we propose                   In summary, our contributions are as follows:
+a new code generation benchmark named De-
+vEval, which aligns with real-world code repos-             • We summarize four features (see Table 1) that a
+itories. As shown in Table 1, DevEval satisfies               code generation benchmark for real-world repos-
+the above features. ❶ DevEval comprises 1,825                 itories should satisfy.
+testing samples from 115 real-world repositories,
+which cover 10 popular domains (e.g., Internet,             • We propose a new code generation benchmark
+Database). ❷ DevEval is constructed through a                 - DevEval, satisfying the above features. The
+rigorous pipeline and aligns with real-world repos-           benchmark has been released.
+itories. Specifically, the distributions of code and        • We propose repository-level code generation,
+dependencies in DevEval are consistent with the               which provides a challenging and realistic evalu-
+ones in 500 real-world repositories. Detailed statis-         ation scenario.
+tics are in Section 2.4. ❸ DevEval is annotated by
+13 developers and contains comprehensive annota-            • We evaluate 8 popular LLMs on DevEval, an-
+tions, e.g., detailed requirements, original reposi-          alyzing their strengths and shortcomings in
+tories, reference code, and reference dependencies.           repository-level code generation.
+                                                       3604
+                                                        DevEval Benchmark
+            Stats: A code generation benchmark contains 1,825 samples.
+            Evaluation Task: Repository-level Code Generation: ① ② ③ → ④
+            Evaluation Metrics: Pass@k (functional correctness, label: ⑥), Recall@k (recall of reference dependencies, label: ⑤)
+
+          def namespace(self):                             ① Signature                                           ③ Repository
+                                                                                   import functools
+                                                           ② Requirement           import imaplib
+           “””Return the namespace for the IMAP account as a tuple of three        ...
+         elements: personal, other, and shared. The function should send the       class Namespace(tuple):
+         namespace command to the server and receive the response. Then, it          ...
+                                                                                   class SocketTimeout(…):
+         parses the response and converts it into the desired format.
+                                                                                     ...
+             :param self: IMAPClient, an instance of the IMAPClient class.
+                                                                                   class MailboxQuotaRoots(…):
+             :return: Namespace. The namespace for the account as a tuple of         ...
+         three elements. Each element may be None if no namespace of that type     class Quota(…):
+         exists, or a sequence of (prefix, separator) pairs. ""”                     ...
+                                                                                   def require_capability(…):
+          data = self._command_and_check("namespace")                                ...
+          parts = []
+          for item in parse_response(data):       ④ Reference Code
+                                                                                   Intra-class Dependency:
+            if item is None:                                                       imapclient.py::IMAPClient::_command_and_check
+              parts.append(item)                                                   imapclient.py::IMAPClient::folder_encode
+            else:
+              converted = []                                                       Intra-file Dependency:
+              for prefix, separator in item:                                       imapclient.py::Namespace             ⑤ Reference
+                if self.folder_encode:                                                                                  Dependency
+                  prefix = decode_utf7(prefix)                                     Cross-file Dependency:
+                converted.append((prefix, to_unicode(separator)))                  imap_utf7.py::decode_utf7
+              parts.append(tuple(converted))                                       response_parser.py::parse_response
+          return Namespace(*parts)
+
+         def test_namespace(self):
+                                                                                                                      ⑥ Test cases
+           self.set_return(b'(("&AP8-." "/")) NIL NIL‘)
+           self.assertEqual(self.client.namespace(), ((("\xff.", "/"),), None, None))
+           . . . .
+
+
+
+                    Figure 2: An overview of DevEval. Each sample consists of six components.
+
+
+   We hope DevEval can align with the actual ex-                             2.2     Task Definition
+periences of developers during the practical devel-                          Based on DevEval, we propose repository-level
+opment process. By DevEval, practitioners can                                code generation task. A model is given a function
+pick up superior LLMs and facilitate the applica-                            signature, a requirement, and a complete repository.
+tion of code generation techniques in real-world                             The model is asked to output a function to satisfy
+repositories.                                                                the requirement. We then insert the function into
+                                                                             its repository and check its correctness.
+2   Benchmark - DevEval
+                                                                             2.3     Evaluation Metrics
+2.1 Overview                                                                 Pass@k (Functional Correctness). Following pre-
+                                                                             vious studies (Chen et al., 2021; Austin et al., 2021;
+DevEval contains 1,825 samples derived from 115                              Yu et al., 2023), we assess the functional correct-
+real-world code repositories. As shown in Figure 2,                          ness of programs by executing test cases and com-
+each sample consists of six components. ❶ Func-                              pute the unbiased Pass@k. Specifically, we gen-
+tion Signature: The signature of the target code.                            erate n ≥ k programs per requirement, count the
+❷ Requirement: An English description detailing                              number of correct programs c ≤ n that pass test
+the functionality of the target code. ❸ Repository                           cases, and calculate the Pass@k:
+Contexts: Code contexts (e.g., classes, functions,
+                                                                                                                       
+variables) defined outside the target code in the cur-                                                           n−c
+rent repository. ❹ Reference Code: A developer-                                                                    k       
+                                                                               Pass@k :=         E       1 −              (1)
+written implementation of the target code. This                                             Requirements           n       
+code may invoke dependencies defined in the cur-                                                                                k
+rent repository. ❺ Reference Dependency: The
+dependencies invoked in the reference code include                             Recall@k (Recall of Reference Dependency).
+intra-class, intra-file, and cross-file dependencies.                        Besides the functional correctness, we expect
+❻ Test Cases: Test cases are used to check the                               LLMs to invoke relevant dependencies defined in
+functional correctness of the code.                                          contexts. Hence, we propose Recall@k, which
+                                                                    3605
+Table 2: The comparison between popular code generation benchmarks and DevEval. SA: Standalone. L(Re): the
+average lengths (tokens) of requirements.
+                                                   Code Distribution                                 Dependency               Repository’s Scale
+ Benchmark                                                                                                                                         #L(Re)
+                                       #Repo     #Total SA (%) Non-SA (%)                 #Type   #Total #Per Sample   Path   #File    #Line
+ CoNaLA (Yin et al., 2018)                –       500       100%             0%            0        0         0                0          0         13.1
+ HumanEval (Chen et al., 2021)            –       164       100%             0%            0        0         0                0          0         58.8
+ MBPP (Austin et al., 2021)               –       974       100%             0%            0        0         0                0          0         16.1
+ PandasEval (Zan et al., 2022)            –       101       100%             0%            0        0         0                0          0         29.7
+ NumpyEval (Zan et al., 2022)             –       101       100%             0%            0        0         0                0          0         30.5
+ AixBench (Li et al., 2023b)              –       175       100%             0%            0        0         0                0          0         34.5
+ ClassEval (Du et al., 2023)              –       100       100%             0%            0        0         0                0          0          –
+ Concode (Iyer et al., 2018)               –     2,000      20%             80%            1      2,455     1.23               0          0         16.8
+ CoderEval (Yu et al., 2023)              43      230       36%             64%            3       256      1.73              71       14,572       41.5
+ DevEval                                  115    1,825      27%             73%            3      4,448     3.36              164      36,640      101.6
+ 500 Real-world Repos                     500     1M         27%            73%            3       3M       3.22        –     238      46,313        –
+
+
+
+Table 3: The distribution of dependency types. The                                       ❷ Comprehensive Annotations. As shown in
+values in parentheses are the corresponding percentages                               Figure 2, DevEval provides comprehensive anno-
+in all dependencies.
+                                                                                      tations that are labeled by 13 human developers.
+ Dependency
+    Type
+               HumanEval     Concode      CoderEval     DevEval     500 Projects      Particularly, DevEval has advantages in require-
+ Intra-class       0       2,455 (100%)   117 (46%)   1,714 (39%)   939k (42%)        ments and reference dependencies.
+ Intra-file        0             0         90 (35%)   1,406 (31%)   597k (29%)
+ Cross-file        0             0         49 (19%)   1,328 (30%)   611k (30%)           Requirements. Original code comments in repos-
+                                                                                      itories are often vague and are different from re-
+                                                                                      quirements in practice (GitHub, 2023). We en-
+gauges the recall of reference dependencies in gen-                                   gaged 13 developers to write requirements, costing
+erated programs.                                                                      approximately 674 person-hours manually. As de-
+   Specifically, LLMs generate k programs per re-                                     picted in Figure 2, each requirement encapsulates
+quirement. For the i-th program, we employ a                                          the code’s functionality and input-output param-
+parser2 to extract its dependencies as Pi . Subse-                                    eters. The average length of requirements in De-
+quently, we compare Pi with reference dependen-                                       vEval (101.6 tokens) more than doubles that of
+cies R and compute the Recall@k:                                                      CoderEval (41.5 tokens). Reference Dependencies.
+                                                                                    Previous benchmarks (i.e., CoderEval, ClassEval)
+                                       |R ∩ Pi |
+   Recall@k :=         E        max                (2)                                only provide dependencies’ names (e.g., close).
+                  Requirements i∈[1,k]   |R|
+                                                                                      Because many functions have the same name in
+where | · | means the number of elements of a set.                                    practice, it is hard to identify whether generated
+                                                                                      dependencies are correct by relying on names.
+2.4 Features of DevEval                                                               DevEval annotates dependencies with paths (e.g.,
+Compared to existing benchmarks, DevEval shows                                        A.py::ClassB::close), addressing ambigu-
+three unique advances, which we discuss below.                                        ity and biases. These annotations offer a broad
+   ❶ Alignment with real-world code reposito-                                         arena to explore repository-level code generation
+ries. Table 2 shows the data distributions of exist-                                  and evaluation.
+ing benchmarks and DevEval. We also show the                                             ❸ A realistic task and evaluation metrics. Tra-
+data distributions of 500 real-world repositories                                     ditional benchmarks fall into a simple requirement-
+and consider them as the oracle. We can see that                                      to-code task. In contrast, DevEval proposes a more
+DevEval aligns with 500 real repositories in multi-                                   realistic task - repository-level code generation.
+ple aspects, i.e., code distributions, the number of                                  This task simulates the coding process of devel-
+dependencies, and the scale of repositories. Table 3                                  opers in a working repository. Besides, we design
+further shows the distribution of dependency types,                                   two metrics to comprehensively assess the correct-
+i.e., intra-class, intra-file, and cross-file dependen-                               ness of generated programs in functionality and
+cies. DevEval outperforms previous benchmarks                                         dependencies.
+in all types, showing a distribution that is close to                                    ❹ Wide scope for research communities. The
+the distribution in 500 real repositories.                                            DevEval and repository-level code generation can
+   2
+     We develop the parser based on an open-source static                             serve as an arena to compare approaches ranging
+analysis tool - Pyan (Pyan, 2023).                                                    from retrieval and long-context models to decision-
+                                                                                   3606
+                              PyPI                                              Table 4: Studied LLMs in this paper. Context L.: Con-
+     ① Repository                                                               text Window.
+     Selection
+          500 Repositories, 1 million+ Functions                                    Type            Name                  Version         Context W.
+
+     ② Function Parse                Signature, Reference Code, Repository                          gpt-4             gpt-4-turbo-1106     128,000
+                                                                                    Closed-source
+                                                                                                    gpt-3.5          gpt-3.5-turbo-1106     16,385
+           68 Repositories, 590k Functions
+                                                                                                    StarCoder 2            15B             16,384
+     ③ Tests                                                                                        StarCoder 2             7B             16,384
+                                Test Cases
+     Construction                                                                                   DeepSeek Coder         33B             16,384
+                                                                                    Open-source
+                                                                                                    DeepSeek Coder         6.7B            16,384
+      37 Repositories, 3,764 Functions
+                                                                                                    CodeLLaMa              13B             16,384
+    ④ Requirement                                                                                   CodeLLaMa               7B             16,384
+                                Requirement, Reference Dependency
+    Annotation
+     121 Repositories, 2,846 Functions
+
+    ⑤ Benchmark
+                               DevEval                                             Stage ❹: Human Annotation. We engaged 13
+    Construction
+     115 Repositories, 1,825 Functions
+                                                                                developers to manually annotate requirements and
+                                                                                reference dependencies for each candidate function.
+      Figure 3: The process of collecting DevEval.                              Given their countries of residence, all annotators
+                                                                                obtain adequate payments.
+                                                                                   Through discussions with annotators, we estab-
+making agents. DevEval also allows creative free-
+                                                                                lish two criteria for requirements. Naturalness–
+dom, as models can generate diverse programs to
+                                                                                ensuring the requirement reads like a natural de-
+meet requirements.
+                                                                                scription from the perspective of a real-world devel-
+3    Benchmark Construction                                                     oper. Functionality–demanding clear descriptions
+                                                                                of the code’s purposes and input-output parame-
+As shown in Figure 3, the collection of DevEval                                 ters. Each requirement undergoes a dual-annotation
+consists of five stages.                                                        process, with one annotator assigned to its initial
+   Stage ❶: Repository Selection. PyPI (PyPI) is                                drafting and another responsible for a meticulous
+a rich data source for real code repositories. We                               double-check. Trivial functions (e.g., shortcut func-
+identify the top 10 popular programming topics                                  tions) and functions violating the ethical code (e.g.,
+in PyPI and select the top 50 repositories under                                malware) are excluded. Subsequently, the same 13
+each topic. The selection follows three criteria:                               annotators review the reference code and label its
+open-source licenses, non-fork and non-malicious                                reference dependencies. Finally, we retain 2,846
+repositories, and explicit unit tests. We download                              functions with high-quality requirements and refer-
+the latest released versions in November 2023 and                               ence dependencies.
+finally obtain 500 practical projects (10 topics * 50                              Stage ❺: Benchmark Construction. We select
+projects).                                                                      candidate functions to construct based on two crite-
+   Stage ❷: Function Parse. We extract functions                                ria: consistent with the data distribution of 500 real-
+from 500 repositories and exclude trivial functions                             world repositories and including as many functions
+(i.e., empty or initialization functions). We extract                           as possible. Finally, we select 1,323 (73%) non-
+each function’s signature and function body (i.e.,                              standalone functions and 502 (27%) standalone
+reference code). The other programs with current                                functions to construct DevEval.
+repositories are considered as repository contexts.
+Finally, this stage obtain 590,365 candidate func-                              4      Experiments
+tions.
+   Stage ❸: Tests Construction. We extract                                      4.1        Studied LLMs
+test cases from repositories invoking specific can-                             As shown in Table 4, we evaluate 8 popular LLMs,
+didate functions. We use a public framework -                                   including two closed-source models and six open-
+setuptools to automatically install running en-                                 source models. We use official interfaces or imple-
+vironments and run test cases with a popular testing                            mentations to reproduce these LLMs.
+framework - Pytest. Candidate functions with-
+out executable test cases are excluded. Meanwhile,                              4.2        Experimental Settings
+we ensure our test cases succeed in the reference                               Repository-level code generation takes a require-
+code and fail in the wrong programs. Finally, we                                ment and a repository as inputs. Typically, a repos-
+retain 3,764 candidate functions.                                               itory consists of hundreds of code files and is very
+                                                                             3607
+         Table 5: Pass@k and Recall@k of LLMs on DevEval. The bold values indicate top-1 results.
+
+ LLMs              Size   Pass@1   Pass@3   Pass@5      Pass@10       Recall@1   Recall@3   Recall@5   Recall@10
+                                             Local File (Infilling)
+ gpt-4             N/A    53.81     56.84    58.95       61.47         65.42      69.61      70.56       71.66
+ gpt-3.5           N/A    44.99     51.64    53.82       56.42         61.44      65.39      66.83       68.16
+ DeepSeek Coder    33B    47.23     54.15    57.16       60.48         64.06      66.66      69.10       72.24
+ DeepSeek Coder    6.7B   41.64     48.84    52.16       55.83         61.72      65.03      66.77       69.46
+                                            Local File (Completion)
+ gpt-4             N/A    48.16     53.19    55.28       57.78         65.42      69.61      70.56       71.66
+ gpt-3.5-1106      N/A    40.99     46.00    48.10       50.44         61.44      65.39      66.83       68.16
+ DeepSeek Coder    33B    42.52     49.17    52.10       55.36         64.06      66.66      69.10       72.24
+ DeepSeek Coder    6.7B   36.71     43.71    46.85       50.62         61.72      65.03      66.77       69.46
+ StarCoder 2       15B    38.19     44.94    47.93       51.36         61.20      65.20      67.60       70.24
+ StarCoder 2        7B    33.26     39.82    42.86       46.42         60.29      63.49      66.31       69.29
+ CodeLLaMa         13B    42.63     49.50    52.62       56.38         64.25      68.47      70.89       73.34
+ CodeLLaMa          7B    40.49     47.46    50.65       54.50         61.06      66.01      68.40       71.26
+                                               Without Context
+ gpt-4             N/A    17.00     20.55    21.61       22.92         17.28      18.97      20.03       21.47
+ gpt-3.5-1106      N/A    14.19     16.61    17.76       19.31         15.27      16.98      17.37       18.27
+ DeepSeek Coder    33B    15.23     19.12    21.24       23.90         19.46      22.11      23.58       25.55
+ DeepSeek Coder     7B    12.71     17.41    19.71       22.74         17.46      19.34      20.72       23.07
+ StarCoder 2       15B    11.23     16.32    18.58       21.50         15.87      18.34      20.39       22.93
+ CodeLLaMa         13B    13.53     18.22    20.60       23.74         18.54      22.01      24.00       26.57
+ CodeLLaMa          7B    12.88     17.71    20.14       23.26         16.72      19.49      21.49       24.49
+
+
+
+long. For example, the average length of 500 real-        4.3     Evaluation
+world repositories is 1.1 million tokens, surpassing
+                                                          We use Pass@k and Recall@k (see Section 2.3)
+the context windows of existing LLMs (e.g., gpt-4:
+                                                          to assess generated programs. In this paper, k ∈
+128k tokens). Inspired by related work (Shrivas-
+                                                          [1, 3, 5, 10]. When k = 1, we use the greedy search
+tava et al., 2023), we try to extract parts of code
+                                                          and generate a single program per requirement.
+contexts from the repository as inputs and design
+                                                          When k > 1, we use the nucleus sampling with
+the following experimental settings.
+                                                          a temperature 0.4 and sample 20 programs per re-
+  ❶ Without context. In this setting, we ignore           quirement. We set the top-p to 0.95 and the max
+contexts and directly generate the code based on          generation length to 500.
+requirements and signatures.
+  ❷ Local File (Completion). The local file de-           4.4     Main Results
+notes the code file where the reference code is in.       The Pass@k and Recall@k of different LLMs in
+This setting simulates the scenario where devel-          three experimental settings are shown in Table 5.
+opers continue to write code at the end of a file.        Without Context. gpt-4 and DeepSeek Coder
+Thus, we consider code snippets above the refer-          achieve the highest Pass@1 and Recall@1 among
+ence code in the local file as contexts. Then, LLMs       all LLMs, respectively. However, all LLMs ex-
+generate code in an autoregressive manner based           hibit relatively low Pass@k and Recall@k values
+on requirements, signatures, and contexts.                compared to their performance on previous bench-
+   ❸ Local File (Infilling). Different from the Lo-       marks. For instance, gpt-4 achieves a Pass@1 score
+cal File (Completion) setting, this setting simulates     of 88.4 on HumanEval, whereas it scores 17.00 on
+the scenario where developers infill code in the          Pass@1 in this setting. The decreases validate our
+middle of a file. Thus, we use the code snippets          motivation that existing benchmarks can not com-
+above and below the reference code in the local           prehensively assess the coding abilities of LLMs
+file as contexts. We evaluate LLMs that support           in real-world repositories. Furthermore, the results
+code infilling and construct input sequences using        emphasize the importance of contexts.
+official formats.                                         Local File (Completion) and (Infilling). After
+                                                     3608
+introducing the contexts within local files, the
+Pass@k and Recall@k of all LLMs obviously in-                                     …
+crease. For example, the Pass@1 of gpt-4 is im-
+proved by 217% and 183% in two settings, respec-
+tively.
+   Successful Case Analyses. We further inspect
+successful cases of gpt-4 and attribute the improve-
+ments to the synergy of contexts and requirements.                               …
+On the one hand, the contexts provide lots of do-
+main knowledge. For example, the local file con-
+tains essential local environments (e.g., current
+classes, imported libraries) and a majority of de-                            (a) Prompt
+pendencies (e.g., intra-class and intra-file: 70% in
+DevEval). Recent work (Zhang et al., 2023; Ding
+et al., 2023) in code completion also proved the
+importance of contexts. On the other hand, our                            (b) Generated Code
+manually written requirements elaborate on the          Figure 4: A failed case of gpt-3.5 in the Local File
+code’s purposes and the repositories’ background        (Completion) setting.
+knowledge. Thus, the requirements help LLMs
+understand long contexts and locate relevant depen-
+dencies.
+   Error Case Analyses. Although promising,
+LLMs’ performance in repository-level code gener-
+ation is not satisfying. A manual inspection of
+failed cases reveals LLMs struggle with under-
+standing contexts. Figure 4 illustrates a failed
+case. LLMs invoke a non-existent function -
+create_connection, even though a valid
+function connect is present in the contexts. We
+                                                        Figure 5: Pass@1 of gpt-4 on different program types.
+think two reasons cause this problem.
+   First, the contexts are too long. The complete
+repositories are lengthy, approximately 9 times the        We also obtain some interesting findings from
+context window of the state-of-the-art LLM - gpt-       Table 5.
+4-1106. Even when partial contexts are considered,         ❶ LLMs successfully generate some depen-
+their lengths match or exceed most current LLMs’        dencies without context. Theoretically, LLMs do
+context windows. Recent work (Liu et al., 2023a)        not see the contexts and cannot generate dependen-
+has found that LLMs often ignore relevant infor-        cies defined in the contexts. According to Table 5,
+mation in the middle of long contexts. This finding     we are surprised to find that LLMs are able to gen-
+is consistent with our results. Second, the contexts    erate some dependencies without context. We man-
+are heterogeneous. In other words, the contexts are     ually inspect successful cases and summarize two
+composed of discrete code snippets from different       reasons. First, LLMs can reason about some easy
+files rather than a continuous file. As shown in        dependencies from requirements, e.g., initialization
+Figure 4, the programs within contexts come from        functions of returned objects. Second, LLMs can
+multiple files, e.g., boto.regioninfo.py and            “guess“ dependencies from their functionalities. In
+boto.swf.layer1.py. However, LLMs are                   practice, dependencies’ names come from their
+typically trained to predict the next tokens based on   functional descriptions, e.g., send_request()
+the continuous contexts. The gap between training       - send a request to the server. LLMs are trained
+and inference objectives leads to a poor understand-    with a large code corpus and can learn the naming
+ing of LLMs in contexts. Recent work (Shi et al.,       conventions. Thus, LLMs may successfully guess
+2023) also found similar gaps in reading compre-        some dependencies from their functionalities.
+hension and question answering.                            ❷ More contexts benefit code generation.
+                                                    3609
+Based on Table 5, we compare the performance
+of an LLM (e.g., gpt-4) under different settings.
+Obviously, the more input contexts, the better the
+performance of the LLM. It inspires practitioners
+to extend the context windows of LLMs and input
+more contexts.
+   ❸ In the without context setting, gpt fam-
+ily models have higher Pass@k and lower
+Recall@k, while other models are the opposite.
+We speculate the reason is that gpt family models     Figure 6: Recall@1 of gpt-4 on different dependency
+are instruction-tuned models and focus on perform-    types.
+ing tasks based on given instructions. With limited
+contexts, gpt family models are conservative and
+tend to generate code independently. Other LLMs       There is considerable room for improving LLMs on
+are fundamental language models trained with real     both programs. How to effectively retrieve relevant
+code files containing dependencies. They are ag-      contexts is a key problem.
+gressive and generate dependencies that may exist.    Results on different dependency types. Figure 6
+The comparisons show the importance of instruc-       shows the Recall@1 of gpt-4 on different depen-
+tion tuning in practical applications.                dency types (i.e., intra-class, intra-file, and cross-
+                                                      file). The results yield two insights. ❶ Without
+4.5 Empirical Lessons                                 context, LLMs can reason about some simple de-
+Based on the above experiments, we summarize          pendencies from requirements (e.g., initialization
+the empirical lessons we learned as                   functions of returned objects), but still exhibit low
+   ❶ DevEval poses new challenges, i.e.,              Recall@1 values across three dependency types.
+repository-level code generation. The performance     ❷ With contexts, LLMs exhibit an improvement
+of existing LLMs on DevEval drops dramatically        in generating dependencies. Nevertheless, LLMs
+compared to their performance on previous             have yet to grapple with generating dependencies,
+benchmarks.                                           especially cross-file dependencies. As illustrated in
+   ❷ LLMs benefit from code contexts in current       Figure 4, LLMs often ignore available dependen-
+repositories. With limited context windows, the       cies defined in contexts.
+contexts from local files can improve gpt-4 by        Data leakage. Theoretically, all open-source code
+217% in Pass@1.                                       repositories may be included in the training data for
+                                                      LLMs. Consequently, there is a risk of data leakage
+   ❸ Detailed and accurate requirements help
+                                                      where several repositories used to build DevEval
+LLMs understand programs’ purposes and long
+                                                      appear in the training data. We think this risk has
+contexts.
+                                                      only a slight impact on DevEval due to three rea-
+   ❹ LLMs struggle with understanding long and
+                                                      sons. ❶ DevEval contains new data, i.e., manually
+heterogeneous contexts. It causes LLMs to disre-
+                                                      written requirements. These requirements are never
+gard the knowledge in contexts and even generate
+                                                      included in the training data. ❷ Existing LLMs do
+hallucinations (e.g., non-existent functions).
+                                                      not show overfitting tendencies to DevEval. Based
+5   Discussion                                        on the release dates of 8 LLMs (see Section 4.1),
+                                                      we divide DevEval into two groups: unseen reposi-
+Results on different program types. Figure 5          tories released later than LLMs and potentially seen
+shows Pass@1 of gpt-4 on different program types      repositories released earlier than LLMs. The aver-
+(i.e., standalone and non-standalone). We have        age difference of Pass@1 between the two groups
+two observations from the results. ❶ Contexts are     is around 0.36. Compared to the average varia-
+crucial to generating non-standalone functions. For   tions between LLMs (e.g., 5.15 in Table 5), 0.36
+example, adding local files improves the Pass@1       is slight. ❸ DevEval is geared toward evaluating
+on non-standalone functions from 11.26 to 54.5. ❷     future LLMs. We release the links to our selected
+Contexts also benefit standalone functions. This is   repositories and encourage practitioners to omit
+attributed to the domain knowledge within contexts,   these repositories when collecting the training data
+aiding LLMs in understanding requirements. ❸          for future LLMs.
+                                                  3610
+The bias of Recall@k. As stated in Section 2.3,           Compared to existing benchmarks, DevEval
+we develop a static analysis-based parser to extract   aligns with real-world code repositories (e.g., the
+dependencies in generated programs automatically.      distributions of code and dependency) and contains
+Because Python is a dynamically typed language,        more comprehensive annotations (e.g., reference
+certain dependencies are only determined at run-       dependencies).
+time and may elude our parser. It may lead to lower       We have also noticed that some benchmarks have
+Recall@k than actual values.                           recently been proposed for repository-level tasks.
+   To gauge the above bias, we randomly select         CrossCodeEval (Ding et al., 2023), RepoBench
+50 programs generated by gpt-4 and annotate de-        (Liu et al., 2023b), and RepoEval (Zhang et al.,
+pendencies with them by our parser and two hu-         2023) are code completion benchmarks. They lack
+man developers, respectively. Based on the human-      the necessary annotations (e.g., natural language
+annotated and auto-extracted dependencies, we          requirements) for code generation. SWE-bench
+compute two Recall@1 values. The bias of two           (Jimenez et al., 2023) focuses on repairing repos-
+Recall@1 values is 0.16. Compared to the average       itories’ issues by revising existing programs. In
+variations between LLMs (2.16 in Table 5), 0.16 is     contrast, DevEval is collected for code generation
+slight. Consequently, we believe that Recall@k can     and aims to generate new programs based on re-
+effectively rank different LLMs, notwithstanding       quirements for a repository. DevEval offers com-
+its slight bias.                                       prehensive annotations (e.g., natural language re-
+                                                       quirements, original repositories, reference code,
+6   Related Work                                       and reference dependencies).
+
+Large Language Models for Code Generation.
+                                                       7   Conclusion and Future Work
+The rise of pre-training technology has brought
+new impetus to the field of code generation, both in   This paper proposes a new code generation bench-
+academia and industry (Li et al., 2022; Shen et al.,   mark named DevEval. Collected through a meticu-
+2022; Nijkamp et al., 2023; Fried et al., 2023). In    lous pipeline, DevEval aligns with real-world code
+this context, more and more LLMs have emerged,         repositories in multiple dimensions, e.g., real code
+achieving significant advancements in code gen-        distributions, sufficient dependencies, and real-
+eration, such as Codex (Chen et al., 2021), Chat-      scale repositories. We evaluate 8 popular LLMs
+GPT (OpenAI, 2023a), CodeLlama (Rozière et al.,        in DevEval. The results reveal the strengths and
+2023), DeepSeek Coder (Guo et al., 2024), and          weaknesses of LLMs in real repositories. Com-
+StarCoder2 (Lozhkov et al., 2024).                     pared to previous benchmarks, DevEval offers a
+   To effectively steer LLMs in various code gen-      more challenging and practical evaluation scenario.
+eration scenarios, some works focus on improving       We hope DevEval can facilitate the applications of
+the prompt technologies by introducing specific pat-   LLMs in practical repositories.
+terns, e.g., Structured Chain-of-Thought (Li et al.,      In the future, we will continue to update De-
+2023a), Self-planning (Jiang et al., 2023), Self-      vEval, e.g., multilingual testing samples, more
+debug (Chen et al., 2023), Self-collaboration (Dong    projects, and more test cases. Besides, we will
+et al., 2023), and AceCoder (Li et al., 2023c).        explore how to improve the performance of LLMs
+Code Generation Benchmarks. Early code gen-            in context-based code generation, e.g., retrieval-
+eration benchmarks (Yin et al., 2018; Chen et al.,     augmented and tool-augmented generation.
+2021; Austin et al., 2021; Zan et al., 2022) eval-
+uate code generation on relatively Python func-        8   Acknowledgments
+tions, such as HumanEval (Chen et al., 2021) and
+MBPP (Austin et al., 2021). APPS (Hendrycks            This research is supported by the National Key
+et al., 2021) evaluates code generation on more dif-   R&D Program under Grant No. 2023YFB4503801,
+ficult competition-style problems. ClassEval (Du       the National Natural Science Foundation of
+et al., 2023) evaluates LLMs on class-level code       China under Grant No. 62192731, 62152730,
+generation and contains 100 human-crafted self-        62072007, 62192733, 61832009, 62192730, and
+contained Python classes. Concode (Iyer et al.,        the Major Program (JD) of Hubei Province
+2018) and CoderEval (Yu et al., 2023) further in-      (No.2023BAA024). Ge Li and Yongbin Li are the
+troduce non-standalone programs.                       corresponding authors.
+                                                   3611
+9    Limitations                                            Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan,
+                                                             Henrique Pondé de Oliveira Pinto, Jared Kaplan,
+This paper proposes a new code generation bench-             Harrison Edwards, Yuri Burda, Nicholas Joseph,
+mark - DevEval, which aligns with real-world code            Greg Brockman, Alex Ray, Raul Puri, Gretchen
+                                                             Krueger, Michael Petrov, Heidy Khlaaf, Girish Sas-
+repositories. Based on DevEval, we evaluate 8 pop-           try, Pamela Mishkin, Brooke Chan, Scott Gray,
+ular LLMs and analyze their strengths and short-             Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz
+comings. We think that DevEval has three limita-             Kaiser, Mohammad Bavarian, Clemens Winter,
+tions.                                                       Philippe Tillet, Felipe Petroski Such, Dave Cum-
+                                                             mings, Matthias Plappert, Fotios Chantzis, Eliza-
+   ❶ DevEval is a monolingual benchmark (i.e.,               beth Barnes, Ariel Herbert-Voss, William Hebgen
+requirements in English and code in Python) and              Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie
+ignores other languages. In practice, LLMs re-               Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain,
+quire understanding requirements in different nat-           William Saunders, Christopher Hesse, Andrew N.
+                                                             Carr, Jan Leike, Joshua Achiam, Vedant Misra, Evan
+ural languages (e.g., Chinese, Spanish) and gener-
+                                                             Morikawa, Alec Radford, Matthew Knight, Miles
+ating programs in various programming languages              Brundage, Mira Murati, Katie Mayer, Peter Welinder,
+(e.g., Java, C). Thus, we plan to build a multilingual       Bob McGrew, Dario Amodei, Sam McCandlish, Ilya
+DevEval in future work.                                      Sutskever, and Wojciech Zaremba. 2021. Evaluat-
+                                                             ing large language models trained on code. CoRR,
+   ❷ As stated in Section 5, Recall@k values in
+                                                             abs/2107.03374.
+DevEval may have slight biases, i.e., they may be
+slightly less than actual values. Because Python is a       Xinyun Chen, Maxwell Lin, Nathanael Schärli, and
+dynamically typed language, certain dependencies              Denny Zhou. 2023. Teaching large language models
+                                                              to self-debug. CoRR, abs/2304.05128.
+can only be identified at runtime and may elude
+our parser. To gauge the bias introduced by our             Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Han-
+parser, we manually annotate dependencies within              tian Ding, Ming Tan, Nihal Jain, Murali Krishna Ra-
+                                                              manathan, Ramesh Nallapati, Parminder Bhatia, Dan
+100 programs generated by gpt-4. Simultaneously,              Roth, and Bing Xiang. 2023. Crosscodeeval: A di-
+we employ the parser to extract dependencies in the           verse and multilingual benchmark for cross-file code
+same 50 programs. Based on the human-annotated                completion. CoRR, abs/2310.11248.
+and auto-extracted dependencies, we compute two             Yihong Dong, Xue Jiang, Zhi Jin, and Ge Li. 2023. Self-
+Recall@1 values. The bias of two Recall@1 is 0.16.            collaboration code generation via chatgpt. CoRR,
+Compared to the average variations between LLMs               abs/2304.07590.
+(2.16 in Table 5), 0.16 is slight. Consequently,            Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+the Recall@k can effectively rank different LLMs,             Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng
+notwithstanding its slight bias.                              Sha, Xin Peng, and Yiling Lou. 2023. Classeval: A
+   ❸ In our experiments, we only consider the code            manually-crafted benchmark for evaluating llms on
+                                                              class-level code generation. CoRR, abs/2308.01861.
+contexts from local files. In the future, we will
+explore how to utilize broader contexts (e.g., im-          Daniel Fried, Armen Aghajanyan, Jessy Lin, Sida Wang,
+ported files, sibling files).                                 Eric Wallace, Freda Shi, Ruiqi Zhong, Scott Yih,
+                                                              Luke Zettlemoyer, and Mike Lewis. 2023. Incoder:
+                                                              A generative model for code infilling and synthesis.
+10    Ethics Consideration                                    In The Eleventh International Conference on Learn-
+                                                              ing Representations, ICLR 2023, Kigali, Rwanda,
+DevEval is collected from real-world code repos-              May 1-5, 2023. OpenReview.net.
+itories. We manually check all samples in DevE-
+                                                            GitHub. 2023. Github copilot. https://github.
+val. We ensure all samples do not contain private
+                                                              com/features/copilot.
+information or offensive content. We ensure all
+programs in DevEval are behaving normally and               Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai
+                                                              Dong, Wentao Zhang, Guanting Chen, Xiao Bi,
+exclude any malicious programs.
+                                                              Y. Wu, Y. K. Li, Fuli Luo, Yingfei Xiong, and Wen-
+                                                              feng Liang. 2024. Deepseek-coder: When the large
+                                                              language model meets programming - the rise of code
+References                                                    intelligence. CoRR, abs/2401.14196.
+Jacob Austin, Augustus Odena, Maxwell I. Nye,               Dan Hendrycks, Steven Basart, Saurav Kadavath, Man-
+   Maarten Bosma, Henryk Michalewski, David Dohan,            tas Mazeika, Akul Arora, Ethan Guo, Collin Burns,
+   Ellen Jiang, Carrie J. Cai, Michael Terry, Quoc V. Le,     Samir Puranik, Horace He, Dawn Song, and Jacob
+   and Charles Sutton. 2021. Program synthesis with           Steinhardt. 2021. Measuring coding challenge com-
+   large language models. CoRR, abs/2108.07732.               petence with APPS. In Proceedings of the Neural
+
+                                                        3612
+  Information Processing Systems Track on Datasets       Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan
+  and Benchmarks 1, NeurIPS Datasets and Bench-            Wang, Yingbo Zhou, Silvio Savarese, and Caiming
+  marks 2021, December 2021, virtual.                      Xiong. 2023. Codegen: An open large language
+                                                            model for code with multi-turn program synthesis. In
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and        The Eleventh International Conference on Learning
+   Luke Zettlemoyer. 2018. Mapping language to code         Representations, ICLR 2023, Kigali, Rwanda, May
+   in programmatic context. In Proceedings of the 2018     1-5, 2023. OpenReview.net.
+   Conference on Empirical Methods in Natural Lan-
+   guage Processing, Brussels, Belgium, October 31 -     OpenAI. 2023a.   gpt-3.5-turbo. https:
+   November 4, 2018, pages 1643–1652. Association          //platform.openai.com/docs/models/
+   for Computational Linguistics.                          gpt-3-5.
+
+Xue Jiang, Yihong Dong, Lecheng Wang, Qiwei Shang,       OpenAI. 2023b. GPT-4 technical report.          CoRR,
+  and Ge Li. 2023. Self-planning code generation with      abs/2303.08774.
+  large language model. CoRR, abs/2303.06689.            Pyan. 2023. Pyan. https://github.com/
+                                                           davidfraser/pyan.
+Carlos E. Jimenez, John Yang, Alexander Wettig,
+  Shunyu Yao, Kexin Pei, Ofir Press, and Karthik         PyPI. Pypi. https://pypi.org/.
+  Narasimhan. 2023. Swe-bench: Can language
+  models resolve real-world github issues? CoRR,         Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten
+  abs/2310.06770.                                          Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+                                                           Jingyu Liu, Tal Remez, Jérémy Rapin, Artyom
+Jia Li, Ge Li, Yongmin Li, and Zhi Jin. 2023a. Struc-      Kozhevnikov, Ivan Evtimov, Joanna Bitton, Man-
+   tured chain-of-thought prompting for code genera-       ish Bhatt, Cristian Canton-Ferrer, Aaron Grattafiori,
+   tion. arXiv preprint arXiv:2305.06599.                  Wenhan Xiong, Alexandre Défossez, Jade Copet,
+                                                           Faisal Azhar, Hugo Touvron, Louis Martin, Nico-
+Jia Li, Yongmin Li, Ge Li, Zhi Jin, Yiyang Hao, and        las Usunier, Thomas Scialom, and Gabriel Synnaeve.
+   Xing Hu. 2023b. Skcoder: A sketch-based approach        2023. Code llama: Open foundation models for code.
+   for automatic code generation. In 45th IEEE/ACM         CoRR, abs/2308.12950.
+   International Conference on Software Engineering,
+   ICSE 2023, Melbourne, Australia, May 14-20, 2023,     Sijie Shen, Xiang Zhu, Yihong Dong, Qizhi Guo,
+   pages 2124–2135. IEEE.                                   Yankun Zhen, and Ge Li. 2022. Incorporating do-
+                                                            main knowledge through task augmentation for front-
+Jia Li, Yunfei Zhao, Li Yongmin, Ge Li, and Zhi Jin.        end javascript code generation. In Proceedings of
+   2023c. Acecoder: Utilizing existing code to enhance      the 30th ACM Joint European Software Engineering
+   code generation. arXiv preprint arXiv:2303.17780.        Conference and Symposium on the Foundations of
+                                                            Software Engineering, ESEC/FSE 2022, Singapore,
+Yujia Li, David H. Choi, Junyoung Chung, Nate Kush-         Singapore, November 14-18, 2022, pages 1533–1543.
+  man, Julian Schrittwieser, Rémi Leblond, Tom Ec-          ACM.
+  cles, James Keeling, Felix Gimeno, Agustin Dal
+  Lago, Thomas Hubert, Peter Choy, Cyprien de Mas-       Weijia Shi, Sewon Min, Maria Lomeli, Chunting Zhou,
+  son d’Autume, Igor Babuschkin, Xinyun Chen, Po-          Margaret Li, Xi Victoria Lin, Noah A. Smith, Luke
+  Sen Huang, Johannes Welbl, Sven Gowal, Alexey            Zettlemoyer, Scott Yih, and Mike Lewis. 2023. In-
+  Cherepanov, James Molloy, Daniel J. Mankowitz,           context pretraining: Language modeling beyond doc-
+  Esme Sutherland Robson, Pushmeet Kohli, Nando            ument boundaries. CoRR, abs/2310.10638.
+  de Freitas, Koray Kavukcuoglu, and Oriol Vinyals.      Disha Shrivastava, Hugo Larochelle, and Daniel Tar-
+  2022. Competition-level code generation with alpha-      low. 2023. Repository-level prompt generation for
+  code. CoRR, abs/2203.07814.                              large language models of code. In International Con-
+                                                           ference on Machine Learning, ICML 2023, 23-29
+Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-       July 2023, Honolulu, Hawaii, USA, volume 202 of
+  jape, Michele Bevilacqua, Fabio Petroni, and Percy       Proceedings of Machine Learning Research, pages
+  Liang. 2023a. Lost in the middle: How language           31693–31715. PMLR.
+  models use long contexts. CoRR, abs/2307.03172.
+                                                         Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan
+Tianyang Liu, Canwen Xu, and Julian J. McAuley.            Vasilescu, and Graham Neubig. 2018. Learning to
+  2023b. Repobench: Benchmarking repository-               mine aligned code and natural language pairs from
+  level code auto-completion systems.    CoRR,             stack overflow. In Proceedings of the 15th Interna-
+  abs/2306.03091.                                          tional Conference on Mining Software Repositories,
+                                                           MSR 2018, Gothenburg, Sweden, May 28-29, 2018,
+Anton Lozhkov, Raymond Li, Loubna Ben Allal, Fed-          pages 476–486. ACM.
+  erico Cassano, Joel Lamy-Poirier, Nouamane Tazi,
+  Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,      Hao Yu, Bo Shen, Dezhi Ran, Jiaxin Zhang, Qi Zhang,
+  et al. 2024. Starcoder 2 and the stack v2: The next      Yuchi Ma, Guangtai Liang, Ying Li, Tao Xie, and
+  generation. arXiv preprint arXiv:2402.19173.             Qianxiang Wang. 2023. Codereval: A benchmark
+
+                                                     3613
+  of pragmatic code generation with generative pre-
+  trained models. CoRR, abs/2302.00288.
+Daoguang Zan, Bei Chen, Dejian Yang, Zeqi Lin, Minsu
+  Kim, Bei Guan, Yongji Wang, Weizhu Chen, and
+  Jian-Guang Lou. 2022. CERT: continual pre-training
+  on sketches for library-oriented code generation. In
+  Proceedings of the Thirty-First International Joint
+  Conference on Artificial Intelligence, IJCAI 2022,
+  Vienna, Austria, 23-29 July 2022, pages 2369–2375.
+  ijcai.org.
+Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  Weizhu Chen. 2023. Repocoder: Repository-level
+  code completion through iterative retrieval and gen-
+  eration. In Proceedings of the 2023 Conference on
+  Empirical Methods in Natural Language Process-
+  ing, EMNLP 2023, Singapore, December 6-10, 2023,
+  pages 2471–2484. Association for Computational
+  Linguistics.
+
+
+
+
+                                                     3614
+

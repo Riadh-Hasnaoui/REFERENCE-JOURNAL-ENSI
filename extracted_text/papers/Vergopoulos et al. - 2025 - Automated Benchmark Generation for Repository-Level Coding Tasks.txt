@@ -1,0 +1,1704 @@
+       Automated Benchmark Generation for Repository-Level Coding Tasks
+
+
+                        Konstantinos Vergopoulos 1 * Mark Niklas Müller 1 * Martin Vechev 1 2
+
+
+                         Abstract                                   1. Introduction
+      Code Agent development is an extremely active                 Code Agents are quickly becoming one of the most promis-
+      research area, where a reliable performance met-              ing and actively researched applications of Large Language
+      ric is critical for tracking progress and guiding             Models (LLMs); partly due to their potential to revolution-
+      new developments. This demand is underscored                  ize the 700 billion dollar software industry (Statista). To
+      by the meteoric rise in popularity of SWE-Bench–              measure progress and more importantly steer further de-
+      a benchmark that challenges code agents to gen-               velopments in this field, high-quality datasets and bench-
+      erate patches addressing GitHub issues given the              marks are crucial. In particular, it is essential that they are
+      full repository as context. The correctness of gen-           representative of real-world use cases, sufficiently large to
+      erated patches is then evaluated by executing a               allow meaningful statistical analysis, and diverse and recent
+      human-written test suite extracted from the repos-            enough to avoid unintentional overfitting and contamination.
+      itory after the issue’s resolution.
+      However, constructing benchmarks like SWE-                    Existing Benchmarks However, function-level bench-
+      Bench requires substantial manual effort to set up            marks like HumanEval (Chen et al., 2021), popular for
+      historically accurate execution environments for              evaluating LLM’s coding performance, are unrepresentative
+      testing. Crucially, this severely limits the num-             of real-world use, lack diversity, and are becoming satu-
+      ber of considered repositories, e.g., just 12 for             rated. To address these limitations, SWE-Bench (Jimenez
+      SWE-Bench. Considering so few repositories, se-               et al., 2024) was proposed as the first repository-level cod-
+      lected for their popularity runs the risk of leading          ing benchmark based on real-world tasks, i.e., resolving
+      to a distributional mismatch, i.e., the measured              GitHub issues. Yet, it still suffers from several limitations.
+      performance may not be representative of real-                (i) It is limited to few repositories, potentially leading to
+      world scenarios running the riks of misguiding                overfitting to these specific codebases. (ii) Its sole focus on
+      development efforts.                                          libraries in contrast to applications raises generalizability
+      In this work, we address this challenge and in-               questions. (iii) Its focus on popular repositories not only
+      troduce S ETUPAGENT, a fully automated sys-                   makes it less representative but also increases the chances
+      tem capable of historically accurate dependency               of contamination with general codebase knowledge. (iv)
+      setup, test execution, and result parsing. Using              Its static nature leads to most or even all instances being
+      S ETUPAGENT, we generate two new datasets:                    created before recent models’ knowledge cutoff, allowing
+      (i) SWEE-Bench an extended version of SWE-                    even the exact instances to be present in the training data.
+      Bench encompassing hundreds of repositories,
+      and (ii) SWA-Bench a benchmark focusing on ap-                Creating Repository-Level Benchmarks To address
+      plications rather than libraries. Comparing these             these challenges, we would like to create more diverse
+      datasets to SWE-Bench with respect to their char-             benchmarks and update them frequently with new tasks.
+      acteristics and code agent performance, we find               However, while the GitHub Issues and Pull Requests (PRs),
+      significant distributional differences, including             serving as task descriptions and reference solutions, respec-
+      lower issue description quality and detail level,             tively, for SWE-Bench-like benchmarks can be scraped
+      higher fix complexity, and most importantly up to             automatically, evaluating the correctness of a solution, re-
+      60% lower agent success rates.                                quires the repository’s test suite to be executed. This, in turn,
+                                                                    requires setting up historically accurate execution environ-
+  *
+   Equal contribution 1 LogicStar AI 2 Department of Computer       ments, identifying the correct test commands, and parsing
+Science, ETH Zurich. Correspondence to: Mark Niklas Müller          the results. Prior work addressed this problem either manu-
+<mark@logicstar.ai>.                                                ally (Jimenez et al., 2024) or by aggressively filtering out
+Proceedings of the 42 nd International Conference on Machine        instances where default commands were unsuccessful (Jain
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025         et al., 2024c). However, both approaches yield limited di-
+by the author(s).                                                   versity and don’t lend themselves to frequent updates.
+
+                                                                1
+                                           Automated Benchmark Generation for Repository-Level Coding Tasks
+
+
+                                 Cmd. Extraction                                                                        Outputs
+                                  Context                              Iterative Improvements
+            GitHub Repository                                                                         Validation            Install
+                                    CI/CD Files                          Install          Install                           Cmds
+                                                                         Cmds              Exec           Parse
+                                                       Initial                                                               Test
+                                     Text Files      Commands                                                               Cmds
+                                                                                                         Check
+                                                                          Test             Test
+                                   Online Docs       Links               Cmds              Exec
+                                                                                                         Results    ✓      Result
+                                                                                                              ✗            Parser
+                                                                                                        Rejected
+                                Reference Commands
+
+
+Figure 1. Overview of S ETUPAGENT where a                    -icon represents an LLM driven step and a -icon represents execution feedback.
+
+This Work: S ETUPAGENT To address this challenge,                                  Key Contributions of this work are:
+we propose S ETUPAGENT, the first method to automate
+                                                                                      • We propose S ETUPAGENT, the first method for au-
+this setup process, enabling us to create repository-level
+                                                                                        tonomously creating historically accurate execution
+code benchmarks fully automatically from a list of GitHub
+                                                                                        environments.
+repositories. S ETUPAGENT works in three key phases (il-
+lustrated in Figure 1): (i) Command Extraction (green in                              • We leverage S ETUPAGENT to create two datasets for
+Figure 1), (ii) Iterative Testing and Improvement (blue ),                              repository-level code generation SWA- and SWEE-
+and (iii) Validation (purple ). In the extraction phase, S E -                          Bench, focusing on applications and diverse projects,
+TUPAGENT analyzes relevant context, such as README.md                                   respectively.
+files, CI/CD configurations, and referenced web pages, to                             • We extensively analyze SWA- and SWEE-Bench in
+propose installation and testing commands. During the itera-                            terms of their characteristics and corresponding code
+tive improvement phase, S ETUPAGENT then executes these                                 agent performance.
+commands in a clean environment and leverages an LLM to
+systematically diagnose and resolve issues. Finally, in the
+validation phase, S ETUPAGENT ensures that the generated
+                                                                                   2. Related Work
+commands are reliable by verifying the correctness of the                          Code Agents To fully leverage the potential of LLMs
+setup based on test results, only accepting configurations                         for code generation, they have been equipped with tools
+that meet a predefined success threshold.                                          to interact with their environment without additional user
+                                                                                   input, e.g., by searching, viewing, and editing code, (Wang
+This Work: Generated Benchmarks We demonstrate                                     et al., 2024a). These so-called code agents have shown
+S ETUPAGENT’s capability to generate coding benchmarks                             great promise on complex tasks (Bouzenia et al., 2024a;
+from a list of repositories by creating SWA- and SWEE-                             OpenDevin, 2024; Zhang et al., 2024; Yang et al., 2024b;
+Bench, each addressing specific shortcomings of SWE-                               Xia et al., 2024; Aider, 2024; Ridnik et al., 2024; Wang
+Bench. Both are designed to be representative of real-world                        et al., 2024b). In this work, we evaluate some of the best-
+use cases, consider many repositories leading to diverse                           performing open-source agents.
+benchmarks, and can be frequently updated without manual
+                                                                                   Code Generation Benchmarks With the success of
+effort to avoid contamination and overfitting. SWA-Bench
+                                                                                   LLMs in the domain of code generation, an increasing va-
+focuses on software applications, containing 44 projects
+                                                                                   riety of function-level code generation benchmarks were
+while SWEE-Bench focuses on diversity and less popular
+                                                                                   proposed to assess their capabilities (Chen et al., 2021;
+projects containing 366 Python repositories. Comparing
+                                                                                   Hendrycks et al., 2021; Austin et al., 2021; Jain et al., 2024a;
+SWA- and SWEE-Bench to SWE-Bench, we find signifi-
+                                                                                   Huang et al., 2024). However, not only were these increas-
+cant distributional differences, including lower repository
+                                                                                   ingly saturated by state-of-the-art models but their focus
+age and popularity at issue creation, a larger focus on recent
+                                                                                   on interview-style function-level coding challenges makes
+issues, and significantly more complex reference code fixes
+                                                                                   them also unrepresentative of the complexities of real-world
+(2-4x more modified files and lines). Evaluating popular
+                                                                                   codebases and software engineering tasks.
+code agents on these datasets, we find significant perfor-
+mance differences for some models and statistically signifi-                       To address these limitations, a range of repository-level
+cant signs of contamination, highlighting the importance of                        code-generation benchmarks have been proposed recently
+evaluating on representative benchmarks.                                           (Liu et al., 2023; Jain et al., 2024b; Jimenez et al., 2024).
+
+                                                                              2
+                               Automated Benchmark Generation for Repository-Level Coding Tasks
+
+However, a repository-level context not only makes code                3.1. Notation and Definitions
+generation but also dataset generation more challenging as it
+                                                                       We first introduce notation to describe repository-level cod-
+requires a historically accurate execution environment to be
+                                                                       ing tasks, adapted from Mündler et al. (2024). Given a
+set up, the project’s test suite to be run, and detailed results
+                                                                       codebase R, we obtain R ◦ X by applying the code patch X.
+to be extracted. The required manual effort led to existing
+                                                                       We similarly denote the test suite T with T ◦ S after apply-
+datasets focusing on a relatively small number of popular
+                                                                       ing the test patch S. A single test t ∈ T can either pass (P)
+repositories. As a result, they are prone to overfitting, often
+                                                                       or fail (F) when executed against the codebase R in an ex-
+lack diversity, and can easily contaminate the training data.
+                                                                       ecution environment E. We write: execE (t, R) ∈ {P, F }
+Automatic Dataset Generation These challenges could                    and let the order P > F hold.
+be addressed via automatic dataset generation, which has
+                                                                       A repository-level coding task can be written as the tu-
+been successfully applied to function-level benchmarks by
+                                                                       ple (R, T, I, E, S ∗ , X ∗ ), where R and T are the original
+scraping tasks from coding challenge websites and doing
+                                                                       codebase and test suite, respectively, I is the issue de-
+varying levels of manual post-processing (Hendrycks et al.,
+                                                                       scription, E the execution environment, and S ∗ and X ∗
+2021; Jain et al., 2024a; Huang et al., 2024).
+                                                                       the reference test and code patch, respectively. By ex-
+Jimenez et al. (2024) transfer these ideas to repository-level         ecuting all tests ti ∈ T ◦ S ∗ in the execution environ-
+benchmarks, automatically scraping GitHub repositories, is-            ment E, first against the original (R) and then the patched
+sues, and pull requests resolving these issues to create SWE-          codebase (R ◦ X ∗ ), we obtain the reference test behavior
+Bench consisting of 12 repositories and 2294 instances.                b∗i = (execE (ti , R) → execE (ti , R ◦X ∗ )). We call ti with,
+However, they still created the required execution environ-            e.g., b∗i = F → P a fail-to-pass test as it fails before the
+ments and test commands manually. Further, the resulting               reference fix is applied but passes afterward. We let the
+issues were shown to suffer from underspecified descrip-               partial order F → P > F → F and P → P > P → F hold.
+tions and overly specific tests (Chowdhury et al., 2024).
+                                                                       The task is now to generate a patch X ′ , given
+Jain et al. (2024b) create R2E, a function-level synthe-               only (R, T, I, E), such that the test behavior b′i =
+sis benchmark with repository context by scraping GitHub               execE (ti , R) → execE (ti , R ◦ X ′ ) matches or improves
+repositories and masking out the function to be generated.             on the reference result, i.e., b′i ≥ b∗i for all tests ti ∈ T ◦ S ∗ .
+They automated the setup by applying a default approach for
+projects with a setup.py or pyproject.toml file, au-                   3.2. Setup Agent Requirements
+tomatically generating equivalence tests, and filtering out all
+instances where this approach fails. However, this approach            A generic setup agent targeting individual, up-to-date reposi-
+aggressively filters projects with more complex installation           tories only has to satisfy one main requirement: Correctness
+procedures, not only introducing a selection bias but also             – It must extract and run the installation and testing com-
+yielding only 246 instances.                                           mands before parsing the test results. However, benchmark
+                                                                       generation, i.e., generating the execution environment E
+In this work, we combine the more interesting repository-              given the remaining components of a coding task, imposes
+level tasks with a fully automated benchmark generation                additional requirements: Historical Accuracy – Benchmark
+process, by introducing and leveraging S ETUPAGENT to                  instances are based on specific, often outdated versions of a
+automatically extract the installation and testing procedures          codebase R. The execution environment E must thus use
+for every task instance, allowing us to create larger and more         historically accurate dependency versions to reproduce the
+diverse benchmarks efficiently.                                        original issue faithfully and avoid version incompatibilities.
+Bouzenia & Pradel (2024), concurrently proposed E XECU -               Efficiency – To generate a dataset of many hundreds of in-
+TIONAGENT , a tool to automatically set up and test reposi-            stances, the setup agent must be efficient enough to keep
+tories. However, it is 60 times slower than S ETUPAGENT,               total runtime reasonable (hours or at most few days). Gran-
+does not support historical states, and does not extract results       ularity – Evaluating agent success requires test-level results
+at test-level granularity. Even if the latter two shortcomings         to be parsed from the test suite output.
+were addressed, it would remain infeasibly slow taking, e.g.,
+over 4 months to generate SWEE-Bench1 .                                3.3. S ETUPAGENT
+                                                                       Overview S ETUPAGENT works in three phases illustrated
+3. Autonomous Environment Setup                                        in Figure 1: (1) Extraction ( in Figure 1), (2) Iterative
+In this Section, we first outline the requirements for a setup         testing and imporvement ( ), and (3) Validation ( ). In
+and testing agent to be used for benchmark generation and              the first phase, S ETUPAGENT extracts a first version of the
+then describe the agent we develop for this purpose.                   installation and testing commands from all relevant files, ref-
+                                                                       erenced webpages, and, if available, successful commands
+   1
+       Extrapolated from ∼150 repositories.
+
+                                                                   3
+                             Automated Benchmark Generation for Repository-Level Coding Tasks
+
+from similar versions of this repository. In the second phase,           Input:
+                                                                         You are trying to install and test <project_name>
+S ETUPAGENT iteratively executes first the installation and              using the following commands.
+then testing commands, analyses the results and updates the              ’’’bash
+                                                                         <commands>
+commands. Finally, in the third phase, S ETUPAGENT vali-                 ’’’
+dates the resulting commands by executing them, extracting               Modify the commands to resolve the following error:
+                                                                         ’’’
+the test results, and rejecting the proposed commands, if                ...
+too few tests pass. Validated commands are then returned                 ModuleNotFoundError: No module named ’rustworkx’
+                                                                         ’’’
+to the user and saved in a reference database to facilitate
+                                                                         LLM Response:
+installations of different versions of the same repository.              We have to install rustworks first:
+                                                                         ’’’bash
+ Input:                                                                  pip install rustworkx
+ Please extract all commands required to install                         ’’’
+ <project_name> in a clean environment and run its                       Updated Installation Commands:
+ test suite from the context below.                                      apt-get install -y graphviz
+ ’’’                                                                     uv pip install -r req.txt exclude-newer 2022-04-11
+ ## README.md                                                            uv pip install rustworkx exclude-newer 2022-04-11
+ <file_content>
+ ## CONTRIBUTING.md                                                    Figure 3. Illustration of the iterative improvement phase of S ETU -
+ <file_content>
+ ’’’                                                                   PAGENT , where the error message was obtained by executing the
+
+ LLM Response:
+                                                                       commands from the previous iteration.
+ ’’’bash
+ apt-get install -y graphviz   # installation                          commands fail with an error, S ETUPAGENT selects the rel-
+ pip install -r req.txt        # installation
+ nox -e test                   # testing                               evant sections of the error messages and then prompts an
+ ’’’                                                                   LLM to identify the issue and propose a modification of the
+ Installation Commands:
+ apt-get install -y graphviz                                           installation commands to fix it. We illustrate this in Figure 3,
+ uv pip install -r req.txt -exclude-newer 2022-04-11                   where S ETUPAGENT adds a missing dependency. Now S E -
+ Testing Commands:
+ nox -e test                                                           TUPAGENT tries to resolve issues apparent in the test results,
+                                                                       analyzing the logs to determine whether a failure is due to
+Figure 2. Illustration of the extraction phase of S ETUPAGENT.         incorrect test commands, an incorrect installation, or a bug
+Please see App. B for the full-length prompts.                         in the codebase. Depending on the result, S ETUPAGENT
+Extraction Phase The goal of the Extraction Phase is                   prompts an LLM to modify the installation or testing com-
+to extract an initial version of the installation and test-            mands to fix the issue or passes the repo on to the validation
+ing commands. We illustrate it in Figure 2, using a sig-               phase. This iterative improvement is repeated until all er-
+nificantly simplified prompt and shortened response for                rors are resolved or an iteration limit is reached. Using a
+illustration purposes. In the first step, S ETUPAGENT re-              moderate iteration limit of 4 steps, we achieve significantly
+views all relevant files to identify the correct Python version.       improved Correctness without sacrificing Efficiency.
+If available, it is directly parsed from the setup.py or                 Input:
+pyproject.toml file, otherwise version constraints are                   Please assess whether <project_name> was installed
+                                                                         and its test suite executed correctly given the
+extracted from different sources using an LLM and then                   resulting printout.
+resolved while taking issue creation time into account to en-            Answer YES or NO.
+                                                                         ’’’
+sure Historical Accuracy. Next, S ETUPAGENT uses a heuris-               ...
+tic to identify possibly relevant context like README.md                 ===== 2597 passed, 3 failed in 10.85s =====
+                                                                         ’’’
+and CONTRIBUTING.md files, CI/CD configurations, and
+referenced webpages. It then reviews these sources and                   LLM Response:
+                                                                         YES
+directly rejects those not containing information relevant to
+installation or testing, thus keeping its context size small           Figure 4. Illustration of the first step in the Validation phase.
+and improving Efficiency. Finally, S ETUPAGENT prompts
+an LLM to extract the installation and testing commands                Validation Phase In the validation phase, S ETUPAGENT
+from the chosen sources. To ensure Historical Accuracy,                first queries an LLM to assess whether the installation and
+S ETUPAGENT enforces the use of the uv environment man-                testing were successful, illustrated in Figure 4. If the LLM
+ager for Python dependencies, configuring it to exclude                judges the installation to be successful, S ETUPAGENT up-
+dependency versions released after the issue creation.                 dates the test framework’s configuration to return test-level
+                                                                       results, e.g., by adding -rA to a pytest command, thus
+Iterative Improvement Phase S ETUPAGENT now tries                      ensuring Granularity. It then selects the correct parser from
+to install and test the project in a clean Docker container            a pre-defined set to extract test-level results and checks
+using the extracted commands. If any of the installation               the number of passing and failing tests. We consider the
+steps fail, i.e., exit with a non-zero exit code, or the test          installation to be successful if at least 95% of tests pass.
+
+                                                                   4
+                              Automated Benchmark Generation for Repository-Level Coding Tasks
+
+
+            SWE                                                           SWE                    1.0
+            SWA                                                           SWA
+                                                                          SWEE                                            SWE
+            SWEE                                                                                 0.5
+                                                                                                                          SWA
+                                                                                                                          SWEE
+                                                                                                 0.0
+  2013−01     2019−01     2025−01                  0          4000             8000                    0        40000             80000
+        Issue Creation Date                              Repo Age [Days]                                    # GitHub Stars
+Figure 5. PDFs (left and middle) and CDF (right) of PR creation dates (left), repository age at PR creation time (middle), and number of
+GitHub stars (right) for SWA, SWEE, and SWE-Bench.
+
+4. Code Generation Benchmarks
+                                                                       Table 1. SWEE pipeline from projects to tasks. A PR is valid if it
+In this Section, we describe how we leverage S ETUPAGENT               resolves an issue, modifies a test file, and is merged. An instance
+to create SWA- and SWEE-Bench, two new benchmarks                      valid, if it has additionally at least one F → P test.
+addressing specific limitations of SWE-Bench. We compare                       Step                           # Repos     # PRs
+these datasets with SWE-Bench and provide insights into
+                                                                               Initial Projects               8000
+distributional differences.                                                    + GH Repo Found                7057
+                                                                               + Preprocessing                5097
+Automatically Generated Benchmarks By creating ex-                             + Permissive License           3800
+ecution environments automatically, we address two core                        + Has valid PR                 2377
+limitations of manually generated repository-level bench-                      + S ETUPAGENT succeeds         514
+marks: (i) we can consider many more repositories without                      + Get nper_repo valid PRs                  2115
+requiring infeasible manual labor, thus improving diversity                    + S ETUPAGENT succeeds                     1513
+                                                                               + valid instance                           885
+and reducing the risk of overfitting and (ii) we can easily
+update benchmarks by creating new tasks from recent PRs
+and issues, thus ensuring that models are not contaminated             downloaded PyPi projects at the time (van Kemenade et al.,
+with benchmark instances (see Figures 5 and 6).                        2024) with between 100k and 1.5B monthly downloads and
+                                                                       0 to 25k stars, leading to good diversity while focusing on
+SWA-Bench Many practitioners using Code Agents de-                     relevant projects.
+velop software applications that suffer from different types
+of bugs compared to libraries due to architectural and struc-          Dataset Creation with S ETUPAGENT We combine the
+tural differences. As SWE-Bench only considers libraries,              original PR filtering process from Jimenez et al. (2024) with
+we design SWA-Bench to focus only on applications.                     our S ETUPAGENT as follows: For every project, we first
+                                                                       locate the corresponding repository, deduplicate the results,
+SWEE-Bench We observe that more popular repositories                   and filter out repositories that are not published under a
+tend to have higher-quality codebases and issue descrip-               permissive license. We then scrape issues and pull requests
+tions. This includes, e.g., a more consistent (file) structure         for each repository until we find the most recent PR that
+and naming conventions, better documentation including de-             is merged, resolved an issue, and modified a test file. We
+tailed docstrings for most functions, and issue descriptions           call this a valid PR. We then use S ETUPAGENT to set up an
+following a precise template (see Figures 7 and 8). As SWE-            execution environment E for the corresponding codebase
+Bench focuses on particularly popular Python repositories,             R (see Section 3). For repositories where this succeeds, we
+the resulting tasks can be unrepresentative of real-world              scrape additional PRs until we have nper_repo valid ones
+use. Therefore, we design SWEE-Bench with a focus on                   or, for SWEE, reach a maximum of 500 PRs. We then use
+diverse and less popular (median of 365 vs 16k stars) Python           S ETUPAGENT to create the execution environment E for
+repositories (see Figure 5).                                           each corresponding codebase R in reverse chronological
+                                                                       order per repository, populating S ETUPAGENT’s reference
+                                                                       commands database to speed up the setup process. Finally,
+4.1. Dataset Creation
+                                                                       we split every PR into a reference code patch X ∗ and test
+Source Repositories For SWA-Bench, we combine a list                   patch S ∗ . We execute the full test suite T ◦ S ∗ before
+of 468 popular Python applications (Hashemi, 2024) with                and after the code patch is applied, i.e., on R and R ◦ X ∗ ,
+a list of 50 Python projects from Bouzenia et al. (2024b),             respectively, to obtain the reference test behaviors b∗i . We
+leading to a total of 475 candidate repositories after dedu-           then filter out PRs, where test execution fails in one of
+plication. For SWEE-Bench, we consider the 8000 most                   these settings or which have no F → P test, i.e. ∄ t ∈
+
+                                                                   5
+                             Automated Benchmark Generation for Repository-Level Coding Tasks
+
+T ◦ S ∗ : execE (t, R) → execE (t, R ◦ X ∗ ) = F → P . The
+                                                                                  Table 2. Comparison of mean dataset characteristics.
+remaining PRs form the valid instances of the generated
+                                                                                                                                             SWA          SWEE            SWE
+benchmark. We choose nper_repo = 50 for SWA-Bench
+and nper_repo = 10 for SWEE-Bench to obtain the desired                                                      # Files                           899                77       1491
+                                                                       Codebase
+                                                                                                             # Lines                          112k             14.8k       321k
+number of tasks and show the number of repositories and
+PRs this leads to in Tables 1 and 10, respectively.                                                          # Words                         240.2             125.1      181.3
+                                                                       Issue Descriptions                    # Error Messages                 0.20              0.13       0.19
+                                                                                                             # Code Blocks                    1.53              1.19       1.06
+Ease of Use To make benchmark generation and use
+                                                                                                             # P →P                          564.2             226.6      120.1
+as easy as possible, S ETUPAGENT only requires a list                                                        # F →P                           38.8              38.1       13.5
+of repositories to generate a dataset in a format compat-              Tests
+                                                                                                             # F →F                            3.7               1.4        3.4
+ible with SWE-Bench along with docker images with                                                            # P →F                           0.11              0.03       0.04
+all dependencies installed. We publish SWA-Bench on                                                          # Edited Files                   1.89              2.05        1.52
+HuggingFace and the corresponding docker containers at                                                       # Edited Lines                   74.8              91.5        39.2
+                                                                       Test Patches
+logicstarai/swa-bench. A suitable evaluation harness is avail-                                               # Added Tests                    9.10             23.78        6.37
+able at github.com/logic-star-ai/SWEBench.                                                                   # Removed Tests                 16.77              2.49        0.54
+                                                                                                             # Edited Files                   3.26              3.26        1.66
+                                                                       Fix Patches
+                                                                                                             # Edited Lines                  104.3             169.9        41.0
+      SWEE
+
+
+                                                                      1.0                                      1.0                                 1.0
+       SWA
+                                                                                                SWE                                    SWE                                 SWE
+                                                                      0.5                                      0.5                                 0.9
+                                                                                                SWA                                    SWA                                 SWA
+       SWE
+                                                                                                SWEE                                   SWEE                                SWEE
+                                                                      0.0                                      0.0                                 0.8
+                          Repository Proportion                              0           500          1000             0      3        6                   0         3       6
+                                                                                 # Words in Issue Desc.                    # Codeblocks                        # Error Messages
+Figure 6. Comparison of the repository distribtuion of SWEE-,
+SWA-, and SWE-Bench across instances.                                 1.00                                    1.0                                 1.00
+
+                                                                                               SWE                                   SWE                                  SWE
+                                                                      0.75                                    0.5                                 0.85
+                                                                                               SWA                                   SWA                                  SWA
+
+4.2. Benchmark Characteristics                                        0.50
+                                                                                               SWEE
+                                                                                                              0.0
+                                                                                                                                     SWEE
+                                                                                                                                                  0.70
+                                                                                                                                                                          SWEE
+
+                                                                                 0        3      6                  0           20           40           0        4          8
+                                                                                 # File Name Contained              Longest Overlapping String           # Fix Lines in Issue Desc.
+Diversity We compare the distribution of instances over
+repositories in Figure 6 and observe that while instances in         Figure 7. CDFs over issue description characteristics. Number of
+SWE are heavily concentrated in only a few repositories,             words (top left), number of code blocks (top middle), number of
+with over 50% of instances belonging to only two out of              error messages (top right), number of filenames contained in the
+                                                                     issue description and modified in the reference solution (bottom
+12 total repositories, SWA- and SWEE-Bench show much
+                                                                     left), the overlap between the issue description and the reference
+more diversity with 535 instances from 44 repositories and           solution in terms of longest string match (bottom middle) and
+885 from 366 repositories. See App. C for a full list.               complete lines (bottom right). A CDF further down and to the
+                                                                     right indicates a higher value.
+Codebase Characteristics We compare benchmarks with
+respect to codebase characteristics in Table 2 and Figure 5
+and observe that SWE-Bench, compared to, SWA- and                    observe longer issue descriptions and slightly more overlap
+especially SWEE-Bench contains significantly older and               with the reference solution in SWE-Bench but otherwise
+more popular (# GitHub stars) repositories and larger, more          similar characteristics.
+complex codebases (# files and # lines of code).
+                                                                     Fix Complexity To assess the complexity of required
+Issue Description Quality To assess the issue description            fixes, we measure the number of lines and files modified in
+quality, we measure the number of words, error messages,             the reference solution and the number of tests that flip from
+and code blocks they contain as well as the overlap between          passing to failing (and vice versa). We show CDFs in Fig-
+the files mentioned there and modified in the reference fix          ure 8 and observe that while SWEE- and SWA-Bench have
+and the overlap between the issue description and the ref-           similar distributions across all these metrics, SWE-Bench
+erence solution itself. We show cumulative distribution              fixes are significantly less complex by all metrics.
+functions (CDFs) of the aforementioned characteristics in
+Figure 7. We observe that while SWA-Bench has more
+                                                                     4.3. Manual Review
+detailed issue descriptions (longer, more code blocks, and
+more error messages), they do not seem to be of higher qual-         While S ETUPAGENT ensures that at least 95% of tests pass,
+ity (less overlap with the reference solution and equal file         some quality issues may still remain. To assess their fre-
+mentions). Comparing SWE-Bench and SWEE-Bench, we                    quency and impact, we conduct a manual review focusing
+
+                                                                 6
+                                              Automated Benchmark Generation for Repository-Level Coding Tasks
+
+ 1.0                               1.0                             1.0                                   both 0 and 1 are considered acceptable.
+                      SWE                               SWE
+ 0.5
+                      SWA
+                                   0.5
+                                                        SWA
+                                                                   0.5                   SWE
+                                                                                         SWA
+                                                                                                         We manually review the same 30 instances as above and
+ 0.0
+                      SWEE
+                                   0.0
+                                                        SWEE
+                                                                   0.0
+                                                                                         SWEE            observe the following: All instances run the correct tests
+       0        250          500
+           # Lines in Fix
+                                         0         8
+                                             # Files in Fix
+                                                              16         0          10
+                                                                             # Flipped Tests
+                                                                                                20       with 23 (77%) using exactly the same test commands as
+                                                                                                         provided in the reference. 22 (73%) of these instances
+Figure 8. CDFs over fix-complexity characteristics. Number of
+                                                                                                         additionally have a fully correct installation/setup. These
+edited lines (left), number of edited files (top middle), number
+affected tests, i.e., F → P + P → F (right). A CDF further down                                          results indicate that S ETUPAGENT has no trouble extracting
+and to the right indicates higher characteristic values.                                                 the correct testing steps, with the setup proving slightly
+                                                                                                         more challenging but also forgiving considering that 95%
+                                                                                                         of tests passed despite minor setup errors.
+on two types of issues: (i) dataset quality along the lines of
+SWE-Bench Verified (Chowdhury et al., 2024), i.e., whether                                               5. Experimental Evaluation
+the issue is sufficiently well-specified to be resolved with-
+out further information and whether the tests are suitable                                               In this Section, we first evaluate the effectiveness of S ETU -
+to check its resolution and (ii) setup success, i.e., whether                                            PAGENT for dataset creation and then analyze Code Agent
+S ETUPAGENT was able to set up the environment correctly                                                 performance across datasets.
+and run the tests as expected.
+                                                                                                         5.1. Experimental Setup
+Dataset Quality In line with prior work (Chowdhury et al.,
+                                                                                                         Models We consider a range of models across sizes, cost
+2024), we focus on two main aspects: (i) task specificity, i.e.,
+                                                                                                         points, and model providers. For exact versions, see Table 9
+whether the issue is sufficiently well-specified to resolve it
+                                                                                                         in App. A. Unless otherwise specified, we use GPT-4 O -
+without further information and (ii) test quality, i.e., whether
+                                                                                                         MINI as the underlying model for all agents. For decod-
+the added unit tests check for the described behaviour or are
+                                                                                                         ing, we use the default parameters for all Code Agents and
+overly specific to concrete implementations such as exactly
+                                                                                                         greedy decoding for S ETUPAGENT.
+matching error messages. We assess both of these criteria on
+a scale from 0 to 3, where 0 is the best score and 3 the worst,
+using the same annotation guide as Chowdhury et al. (2024).                                              Code Agents We evaluate three state-of-the-art Code
+That is, we scored issue specificity and clarity on a scale of 0                                         Agents from the top of the SWE-Bench leaderboard2 which
+(well-specified issue with clear success criteria) to 3 (almost                                          most likely have been optimized for SWE-Bench (Open-
+impossible to solve correctly without further instructions)                                              Hands (Wang et al., 2024b), AutoCodeRover-v2.0 (Zhang
+and test quality from 0 (test perfectly covers valid solutions)                                          et al., 2024)), and SWE-Agent v1 (Yang et al., 2024a) and
+to 3 (tests are too narrow or broad or requiring information                                             ZeroShot (Jimenez et al., 2024) with oracle context (files
+not provided in the issue description). On both scales, 0 and                                            modified in the ground truth fix) and BM25 retrieval which
+1 are considered acceptable, while 2 and 3 are insufficient.                                             prompts LLMs directly without any optimization for SWE-
+                                                                                                         Bench. We report the portion of resolved instances as accu-
+We conducted a manual review of 30 randomly chosen SWA
+                                                                                                         racy (Acc.) for all Code Agents.
+instances and observed the following: 21 (70%) instances
+have a meaningful and sufficiently complete issue descrip-
+tion, and 20 (67%) of these additionally have suitable tests                                             Code Execution We run all code execution (both for S E -
+(27 or 90% across all instances) to check whether the issue                                              TUPAGENT and all Code Agents) in separate Docker con-
+was fixed. This is in line with the results of Chowdhury                                                 tainers to improve reproducibility and security. For S ETU -
+et al. (2024) and shows that the majority of issues are solve-                                           PAGENT , we use an Ubuntu 22.04 container as the base
+able, with current performance levels still leaving significant                                          image and pre-install a range of common build dependen-
+room for improvement, making SWA a suitable benchmark                                                    cies but do not provide any Python dependencies.
+for current and future code generation systems.
+                                                                                                         5.2. Effectiveness of S ETUPAGENT
+Setup Success To validate the automated assessment used
+by S ETUPAGENT to determine whether an instance was set-                                                 We evaluate the effectiveness of S ETUPAGENT in creating
+up correctly, we assess both the extracted setup and testing                                             SWA- and SWEE-Bench by analyzing the frequency of
+steps as follows. (i) We score the setup on a binary scale                                               fully successful environment and testing setups in Table 3.
+of 0 (correct setup that is functionally equivalent with the                                             We observe S ETUPAGENT is able to extract historically
+described setup and 1 (incorrect setup). (ii) We score testing                                           correct execution environments for 20-30% of repositories
+on a scale from 0 (functionally equivalent to described test-                                            without reference commands and for 55-75% of instances
+                                                                                                            2
+ing) to 2 (tests only partially or not at all executed), where                                                  swebench.com accessed in November 2024
+
+                                                                                                     7
+                              Automated Benchmark Generation for Repository-Level Coding Tasks
+
+
+Table 3. S ETUPAGENT success rates at extracting installation and       Table 5. Issue resolution rates (accuracy) of various agents on
+test commands as well as parsing the resulting test output.             SWA-, SWEE-, and SWE-Bench, all with GPT-4 O - MINI.
+                                        Success                                                           SWA     SWEE         SWE
+
+                           Repos         28.6%                                     Openhands               3.9%     4.4%       4.6%
+                SWA                                                                AutoCodeRover v2        8.4%     9.0%       8.2%
+                           Instances     58.5%                                     SWE-Agent v1            2.6%     7.5%       7.1%
+                           Repos         21.6%                                     ZeroShot(Oracle)        0.9%     2.2%       2.8%
+                SWEE                                                               ZeroShot(BM25)          1.3%     2.8%       1.5%
+                           Instances     71.5%
+
+                                                                        surprisingly small differences in performance between all
+Table 4. Ablation study on S ETUPAGENT, reporting the number of         three datasets when using GPT-4 O - MINI for most agents,
+successfully extracted execution environments for SWA-Bench.            with SWE-Agent performing significantly worse on SWA.
+                                       # Repositories
+                                                                        To assess the interaction of agent performance and model
+           S ETUPAGENT                      44                          selection, we evaluate AutoCodeRover v2 (Zhang et al.,
+            only CI/CD Files                33                          2024) across a range of LLMs, showing results in Table 6.
+            only Text Files                 15
+            no Iterative Improvement        11
+                                                                        Interestingly, we observe a large variance in the accuracy
+                                                                        difference between SWE and SWA across models. While
+                                                                        GPT-4 O - MINI performs similarly well on all benchmarks,
+for these repositories. Without reference commands, S E -               all other models perform much better on SWEE- and even
+TUPAGENT takes 76 minutes to attempt to install all 154                 better on SWE-Bench. We show later that this may be due
+repositories considered for SWA after deduplication and                 to lower performances for instances created after the models
+license checks and thus takes only about 30s on average per             knowledge cutoff.
+repository. When creating SWEE-Bench, we deactivate the
+web browsing ability of S ETUPAGENT.
+                                                                        Table 6. Performance of AutocodeRover v2 (Zhang et al., 2024)
+                                                                        using different underlying LLMs.
+Ablation We evaluate the impact of S ETUPAGENT’s com-
+                                                                                                     SWA     SWEE     SWE
+ponents in an ablation study on SWA-Bench, reporting
+                                                                                   GPT-4 O - MINI       8.4%    9.0%    8.2%
+results in Table 4. We observe that especially the use of                          GPT-4 O             10.2% 15.1% 16.6%
+CI/CD config files and the iterative improvement are crucial                       H AIKU -3.5         10.8% 12.9% 13.6%
+                                                                                   L LAMA 3.3 70B 8.8%         10.8% 12.5%
+for S ETUPAGENT’s success.                                                         Q WEN 2.5 †           3%      2%      4%
+                                                                                   D EEP S EEK V3 †      8%     13%     26%
+                                                                                   † Evaluated on 100 random instances.
+Failure Analaysis To understand S ETUPAGENT’s failure
+cases, we conduct a small case study, manually inspecting
+five failed instances from SWA-Bench, and observe the fol-              5.4. Benchmark Analaysis
+lowing: In all instances, errors in the build process cause
+the failure. For all but one instance, finding the installation         In Section 4, we observed interesting distributional dif-
+instructions requires following two or more links on web                ferences between the instance characteristics of SWA-,
+pages. In all but two instances, the only described way to test         SWEE-, and SWE-Bench. Now, we explore how these
+the application requires running docker containers, which               characteristics correlate with agent performance, reporting
+S ETUPAGENT does not support. In two instances, installa-               Spearman’s rank correlation coefficients ρ and p-values for
+tion and/or testing requires the use of makefiles, referencing          AutoCodeRover v2 and GPT-4 O in Table 7. We observe
+multiple substeps. Finally, in one instance S ETUPAGENT                 that only characteristics computed with knowledge of the
+chooses the wrong requirement file and then begins to in-               solution have a statistically significant correlation with per-
+stall missing testing dependencies. We believe this points              formance. In particular, the overlap of the issue with the
+to exciting future work improving S ETUPAGENT’s web-                    reference code patch in terms of file names, and number
+browsing capabilities and docker support.                               of lines has a strong positive correlation with performance,
+                                                                        while all fix complexity metrics have a strong negative cor-
+5.3. Agent Performance Across Datasets                                  relation with performance.
+
+We conduct all below experiments on the full SWA and
+                                                                        Data Contamination We analyze the accuracy (Acc) of
+uniformly subsampled versions of SWEE and SWE-Full
+                                                                        AutoCodeRover v2 on SWA- and SWEE-Bench, depend-
+of identical size (535 instances) due to cost constraints.
+                                                                        ing on whether a PR was created before or after a model’s
+We report Code Agent performance in Table 5 and observe                 knowledge cutoff (KC), showing results in Table 8. We re-
+
+                                                                    8
+                                                  Automated Benchmark Generation for Repository-Level Coding Tasks
+
+                                                                                                            We extensively analyzed SWA- and SWEE-Bench, observ-
+Table 7. Spearman’s rank correlation coefficients ρ and p-value be-
+                                                                                                            ing significant distributional differences compared to SWE-
+tween accuracy and instance characteristics, separated by whether
+statistic can be computed without axes to ground truth. Statistically                                       Bench in fix-complexity characteristics that are strongly
+significant (p < 1%) correlations are highlighted in bold. Positive                                         correlated with agent success. We further found statisti-
+ρ indicate that a larger characteristic value is associated with better                                     cally significant performance degradation for SWA-Bench
+performance.                                                                                                instances created after the knowledge cutoff for one model.
+                                           SWA                    SWEE                    SWE               Together, these findings highlight the importance of eval-
+ Characteristic
+                                   ρ            p-value    ρ        p-value        ρ       p-value          uating on diverse, representative, and frequently updated
+ Repo Age                         -0.06     2.0 × 10−1    -0.02    5.8 × 10−1     -0.02   7.0 × 10−1
+ # GitHub Stars                   -0.03     4.8 × 10−1    -0.02    7.2 × 10−1      0.07   1.3 × 10−1        benchmarks and thus the value of our automated bench-
+                                            1.8 × 10−1             9.6 × 10−1             7.7 × 10−1
+ # Words in Issue
+ # Code Blocks in Issue
+                                  -0.06
+                                   0.00     9.7 × 10−1
+                                                           0.00
+                                                           0.04    3.4 × 10−1
+                                                                                   0.01
+                                                                                  -0.06   1.7 × 10−1
+                                                                                                            mark generation approach. We believe S ETUPAGENT can
+ # Error Messages in Issue         0.03     4.6 × 10−1     0.09    3.7 × 10−2     -0.04   3.5 × 10−1        facilitate this by enabling practitioners to quickly turn their
+ # Fix File Names in Issue         0.12    4.5 × 10−3      0.19   1.2 × 10−5       0.18   2.5 × 10−5
+ Longest Fix Substring in Issue   -0.04    3.7 × 10−1     -0.11   1.1 × 10−2       0.04   3.1 × 10−1        specific target domain into a high-quality representative
+ # Fix Lines in Issue              0.09    3.7 × 10−2      0.06   1.7 × 10−1       0.17   1.1 × 10−4
+ # Lines in Fix                   -0.28    5.0 × 10−11    -0.40   1.3 × 10−21     -0.28   6.2 × 10−11
+                                                                                                            benchmark.
+ # Files in Fix                   -0.12    6.2 × 10−3     -0.26   1.6 × 10−9      -0.16   1.4 × 10−4
+ # Affected Tests                 -0.18    3.3 × 10−5     -0.25   4.0 × 10−9      -0.15   7.2 × 10−4
+
+                                                                                                            Impact Statement
+Table 8. Accuracy of AutocodeRover v2 (Zhang et al., 2024) on                                               This paper presents work advancing Code Agent evaluation
+SWA-Bench instances split between those created before and
+                                                                                                            and may thus amplify all positive and negative societal im-
+after the model’s knowledge cutoff (KC) and the p-value of the
+underlying resolution rate being the same or higher after the KC.
+                                                                                                            pacts of improved Code Agents. Our work shows that eval-
+                                                                                                            uating Code Agents on diverse and up-to-date benchmarks
+ Dataset      Model                # after KC         Acc before KC      Acc after KC       p-value
+                                                                                                            is critical to obtain representative results, with SWE-Bench
+              GPT-4 O - MINI              249              9.4%                 7.2%        17.90%
+ SWA          GPT-4 O                     249             12.2%                 7.2%         2.65%          (and even more SWE -V ERIFIED) consisting of unusually
+              H AIKU -3.5                 44              11.0%                 9.1%        34.83%          easy problems. These findings may relativize some recent
+              GPT-4 O - MINI              230              8.2%               10.0%         76.50%          predictions of code agents soon replacing human software
+ SWEE         GPT-4 O                     230             15.4%               15.2%         47.56%
+              H AIKU -3.5                 102             13.6%                9.8%         15.01%          developers and show that the field is still far from achieving
+                                                                                                            this goal. Beyond this, our work on automated execution
+                                                                                                            environment setup has the goal of advancing the field of
+port the (one-sided) p-value of observing these results under                                               Machine Learning for code more generally. There are many
+the null hypothesis that the success rate is not lower after the                                            potential additional societal consequences of our work, none
+KC (computed using a t-test and normal approximation of                                                     of which we feel must be specifically highlighted here.
+the binomial distribution). We observe that on SWA-Bench
+all considered models have a lower success rate after the
+KC with the difference being statistically significant only                                                 Acknowledgements
+for GPT-4 O. Interestingly, we observe no such signs on
+                                                                                                            We would like to thank the anonymous reviewers for their
+SWEE-Bench which contains much less popular projects
+                                                                                                            valuable feedback and suggestions, which helped improve
+and is thus less prone to contamination. While all SWE
+                                                                                                            the quality of this paper.
+instances are too old to conduct a similar analysis, we ob-
+serve that the performance delta between SWE and SWA is
+correlated with the drop in accuracy over the KC on SWA.
+
+6. Conclusion
+We introduced S ETUPAGENT, the first method for auto-
+mated and historically accurate execution environment setup
+for Python codebases. S ETUPAGENT enables us to cre-
+ate repository-level code benchmarks fully automatically
+from a list of GitHub repositories. We demonstrated its
+effectiveness by creating two new benchmarks, SWA- and
+SWEE-Bench, focusing on applications and diversity of
+codebases, respectively, and addressing several limitations
+of existing repository-level code benchmarks. In particular,
+their automated generation allows us to consider many more
+repositories, increasing diversity and reducing the risk of
+overfitting, and update the benchmarks over time, minimiz-
+ing the risk of data contamination.
+
+                                                                                                        9
+                           Automated Benchmark Generation for Repository-Level Coding Tasks
+
+References                                                           Hashemi,  M.       Awesome python applica-
+                                                                       tions.     https://github.com/mahmoud/
+Aider. Aider is SOTA for both SWE Bench and SWE Bench
+                                                                       awesome-python-applications, 2024.
+  Lite, 2024.
+                                                                     Hendrycks, D., Basart, S., Kadavath, S., Mazeika, M., Arora,
+Anthropic.   Model card addendum:  Claude                              A., Guo, E., Burns, C., Puranik, S., He, H., Song, D., and
+  3.5 haiku and upgraded claude 3.5 son-                               Steinhardt, J. Measuring coding challenge competence
+  net.         https://assets.anthropic.                               with APPS. In Proceedings of the NeurIPS Track on
+  com/m/1cd9d098ac3e6467/original/                                     Datasets and Benchmarks, 2021.
+  Claude-3-Model-Card-October-Addendum.
+  pdf, 2024.                                                         Huang, Y., Lin, Z., Liu, X., Gong, Y., Lu, S., Lei, F.,
+                                                                       Liang, Y., Shen, Y., Lin, C., Duan, N., and Chen, W.
+Austin, J., Odena, A., Nye, M. I., Bosma, M., Michalewski,             Competition-level problems are effective LLM evalua-
+  H., Dohan, D., Jiang, E., Cai, C. J., Terry, M., Le, Q. V.,          tors. In Findings of the Association for Computational
+  and Sutton, C. Program synthesis with large language                Linguistics, ACL 2024, Bangkok, Thailand and virtual
+  models. ArXiv preprint, abs/2108.07732, 2021.                        meeting, August 11-16, 2024, 2024. doi: 10.18653/V1/
+                                                                       2024.FINDINGS-ACL.803.
+Bouzenia, I. and Pradel, M. You name it, I run it: An
+  LLM agent to execute tests of arbitrary projects. CoRR,            Jain, N., Han, K., Gu, A., Li, W., Yan, F., Zhang, T.,
+  abs/2412.10133, 2024. doi: 10.48550/ARXIV.2412.                      Wang, S., Solar-Lezama, A., Sen, K., and Stoica, I. Live-
+ 10133.                                                                 codebench: Holistic and contamination free evaluation of
+                                                                        large language models for code. CoRR, abs/2403.07974,
+Bouzenia, I., Devanbu, P. T., and Pradel, M. Repaira-                   2024a. doi: 10.48550/ARXIV.2403.07974.
+  gent: An autonomous, llm-based agent for program repair.
+  CoRR, 2024a.                                                       Jain, N., Shetty, M., Zhang, T., Han, K., Sen, K., and Stoica,
+                                                                        I. R2E: turning any github repository into a programming
+Bouzenia, I., Krishan, B. P., and Pradel, M. Dypybench: A               agent environment. In Forty-first International Confer-
+  benchmark of executable python software. Proc. ACM                    ence on Machine Learning, ICML 2024, Vienna, Austria,
+  Softw. Eng., 1(FSE), 2024b. doi: 10.1145/3643742.                     July 21-27, 2024, 2024b.
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,          Jain, N., Shetty, M., Zhang, T., Han, K., Sen, K., and Stoica,
+  H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,                I. R2e: Turning any github repository into a programming
+  Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,                 agent test environment. In ICLR 2024, 2024c.
+  M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,
+  S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-           Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press,
+  ian, M., Winter, C., Tillet, P., Such, F. P., Cummings, D.,          O., and Narasimhan, K. R. Swe-bench: Can language
+  Plappert, M., Chantzis, F., Barnes, E., Herbert-Voss, A.,            models resolve real-world github issues? In Proc. of
+  Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,                 ICLR, 2024.
+  J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+  Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,              Liu, A., Feng, B., Xue, B., Wang, B., Wu, B., Lu, C., Zhao,
+  V., Morikawa, E., Radford, A., Knight, M., Brundage,                 C., Deng, C., Zhang, C., Ruan, C., et al. Deepseek-v3
+  M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,                 technical report. ArXiv preprint, abs/2412.19437, 2024.
+  Amodei, D., McCandlish, S., Sutskever, I., and Zaremba,
+                                                                     Liu, T., Xu, C., and McAuley, J. J. Repobench: Bench-
+  W. Evaluating large language models trained on code.
+                                                                       marking repository-level code auto-completion systems.
+  ArXiv preprint, abs/2107.03374, 2021.
+                                                                       CoRR, abs/2306.03091, 2023. doi: 10.48550/ARXIV.
+                                                                       2306.03091.
+Chowdhury, N., Aung, J., Shern, C. J., Jaffe, O., Sherburn,
+  D., Starace, G., Mays, E., Dias, R., Aljubeh, M., Glaese,          Mündler, N., Mueller, M. N., He, J., and Vechev, M. Swt-
+  M., Jimenez, C. E., Yang, J., Ho, L., Patwardhan, T.,               bench: Testing and validating real-world bug-fixes with
+  Liu, K., and Madry, A. Introducing SWE-bench verified,              code agents. In The Thirty-eighth Annual Conference on
+  2024.                                                               Neural Information Processing Systems, 2024.
+Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., Kadian,          OpenAI. Openai model docs. https://platform.
+  A., Al-Dahle, A., Letman, A., Mathur, A., Schelten, A.,              openai.com/docs/models/gpt-4o, 2025.
+  Vaughan, A., et al. The llama 3 herd of models. ArXiv
+  preprint, abs/2407.21783, 2024.                                    OpenDevin. Opendevin: Code less, make more, 2024.
+
+                                                                10
+                           Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Qwen Team. Qwen32.5 technical report. ArXiv preprint,
+ abs/2412.15115, 2024.
+Ridnik, T., Kredo, D., and Friedman, I. Code genera-
+  tion with alphacodium: From prompt engineering to
+  flow engineering. CoRR, abs/2401.08500, 2024. doi:
+  10.48550/ARXIV.2401.08500.
+
+Statista.  Statista market insights. https:
+  //www.statista.com/outlook/tmo/
+  software/worldwide.
+van Kemenade, H., Paterson, C., Thoma, M., Si, R., and Dol-
+  lenstein, Z. hugovk/top-pypi-packages: Release 2024.12,
+  2024.
+Wang, L., Ma, C., Feng, X., Zhang, Z., Yang, H., Zhang, J.,
+ Chen, Z., Tang, J., Chen, X., Lin, Y., Zhao, W. X., Wei,
+ Z., and Wen, J. A survey on large language model based
+ autonomous agents. Frontiers Comput. Sci., 2024a.
+
+Wang, X., Li, B., Song, Y., Xu, F. F., Tang, X., Zhuge, M.,
+ Pan, J., Song, Y., Li, B., Singh, J., Tran, H. H., Li, F.,
+ Ma, R., Zheng, M., Qian, B., Shao, Y., Muennighoff, N.,
+ Zhang, Y., Hui, B., Lin, J., Brennan, R., Peng, H., Ji, H.,
+ and Neubig, G. OpenHands: An Open Platform for AI
+ Software Developers as Generalist Agents, 2024b.
+
+Xia, C. S., Deng, Y., Dunn, S., and Zhang, L. Agentless:
+  Demystifying llm-based software engineering agents.
+  CoRR, abs/2407.01489, 2024. doi: 10.48550/ARXIV.
+  2407.01489.
+
+Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao,
+  S., Narasimhan, K., and Press, O. Swe-agent: Agent-
+  computer interfaces enable automated software engineer-
+  ing. CoRR, abs/2405.15793, 2024a. doi: 10.48550/
+  ARXIV.2405.15793.
+Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao, S.,
+  Narasimhan, K., and Press, O. SWE-agent: Agent Com-
+  puter Interfaces Enable Software Engineering Language
+  Models, 2024b.
+Zhang, Y., Ruan, H., Fan, Z., and Roychoudhury, A. Au-
+  tocoderover: Autonomous program improvement. CoRR,
+  abs/2404.05427, 2024. doi: 10.48550/ARXIV.2404.
+  05427.
+
+
+
+
+                                                               11
+                            Automated Benchmark Generation for Repository-Level Coding Tasks
+
+A. Appendix: Experiments
+Below, we provide the exact model versions we used in Table 9.
+
+
+
+
+                                       Table 9. LLM Details inlcuding Knowledge Cutoff (KC)
+                    Model Name       Model ID                            API Provider     KC              Reference
+                    GPT-4 O          gpt-4o-2024-08-06                    OpenAI        Oct 2023      OpenAI (2025)
+                    GPT-4 O - MINI   gpt-4o-mini-2024-07-18               OpenAI        Oct 2023      OpenAI (2025)
+                    H AIKU -3.5      claude-3-5-haiku-20241022           Anthropic      Jul 2024     Anthropic (2024)
+                    D EEP S EEK V3   DeepSeek-V3                         TogetherAI         -         Liu et al. (2024)
+                    L LAMA 3.3 70B   Meta-Llama-3.3-70B-Instruct-Turbo   TogetherAI     Dec 2023   Grattafiori et al. (2024)
+                    Q WEN 2.5        Qwen2.5-72B-Instruct-Turbo          TogetherAI                 Qwen Team (2024)
+
+
+
+
+A.1. Ablations
+Repeatability While benchmarks need only be constructed once                        Table 11. Repeatability of S ETUPAGENT
+and thus the repeatability of S ETUPAGENT has no impact on the                  Run Successes Symmetric Difference to Run 1
+value and repeatability of benchmark’s it creates, repeatability is an          1         27                      -
+important aspect for the usability of such a system. Therefore, we              2         27                      0
+conducted an experiment running S ETUPAGENT three times on 100                  3         26                      1
+random candidate repositories from SWEE in a setup like for Table 5.
+We show results in Table 11, where we report the number of successfully installed repositories and the symmetric difference
+in installed repositories compared to the first run. We find that S ETUPAGENT is highly repeatable, with only one repository
+being installed in the first and second run that was not installed in the third run.
+
+B. Appendix: Prompts
+In this Section, we provide the full-length prompts used by S ETUPAGENT.
+
+                                                               12
+                               Automated Benchmark Generation for Repository-Level Coding Tasks
+
+
+Table 10. SWA pipeline from projects to tasks. A PR is valid if it resolves an issue, modifies a test file, and is merged. An instance valid,
+if it has additionally at least one F → P test.
+                                           Step                              # Repos      # PRs
+                                           Initial Projects                  475
+                                           + GH Repo Found                   440
+                                           + Preprocessing                   427
+                                           + Permissive License              227
+                                           + Has valid PR                    154
+                                           + S ETUPAGENT succeeds            44
+                                           + Get up to 50 valid PRs                       1527
+                                           + S ETUPAGENT succeeds                         893
+                                           + valid instance                               535
+
+
+
+
+           Prompt to suggest relevant files
+          You are a senior developer contributing to the www.github.com/<repo_id>
+          project by solving issues. You have created a Docker environment with
+          Ubuntu, and now you want to install the repository in development mode
+          (meant for active development and testing) and run the tests. The first
+          step is to locate the installation instructions and the test commands.
+          I will provide you a list of filenames or file paths (e.g., README.md,
+          contributing.md), which typically include instructions for installation
+          and testing. The files can be either filenames (e.g., README.md) or file
+          paths (e.g., docs/maintaining/installing/install-from-source.rst). From the
+          provided list of filenames or file paths your task is: 1. Identify those
+          likely related to installation or testing based on their names. 2. Exclude
+          those that are clearly irrelevant. 3. If unsure, include the file/path in
+          your response. 4. Return only the files/paths from the given list, exactly
+          as they appear, without modifying their names or structure 5. If a full
+          path is given, return the full path, not just the filename. 6. Use the
+          following format for your response <ANSWER>: file 1, ...file n, filepath 1,
+          ...filepath k
+          <REASONING>: <YOUR REASONING>
+          Example input:
+          ‘‘‘
+          readme.md, contributing.md, contributors.md,
+          docs/maintaining/installing/install-from-source.rst,
+          docs/source/lib/install_datatypes.rst,
+          docs/html/ux-research-design/contribute.md
+          ‘‘‘
+          A reasonable output is:
+          ‘‘‘
+          <ANSWER>: readme.md, contributing.md,
+          docs/maintaining/installing/install-from-source.rst,
+          <REASONING>: The files readme.md and contributing.md
+          commonly contain installation and testing instructions, while
+          docs/maintaining/installing/install-from-source.rst is likely related to
+          installation as the name suggests
+          ‘‘‘
+          Here are the file names
+          ‘‘‘
+          <file 1>, <file 2>, ..., <file k>
+          ‘‘‘
+          Please read the names carefully, ask yourself the purpose of each file based
+          on the name before including it in your response. Use the given format for
+          your answer and please do not add any extra comment or text.
+
+                                  Figure 9. Prompt for choosing relevant files to installation and testing
+                                                                    13
+                              Automated Benchmark Generation for Repository-Level Coding Tasks
+
+           Prompt to suggest external sources of information
+          You are a senior developer contributing to the GitHub project at
+          www.github.com/<repo_id> by solving issues. Your goal is to install the
+          repository in development mode and run its tests.
+          You have created a Docker environment with Ubuntu, and now you are searching
+          for the installation instructions and test commands.
+          I will provide you with the content of common repository files (e.g.,
+          README.md, CONTRIBUTING.md). Your task is to analyze the provided text
+          and identify all external links that contain relevant information to
+          1. Installation instructions for this project.
+          2. Test commands or instructions for running the tests for this project.
+          3. Contribution guidelines.
+
+          Please provide the links you found following the criteria below.
+          a. Exclude links to generalpurpose documentation for external tools (e.g.,
+          Tox, Pytest, or other frameworks/libraries).
+          b. If you are unsure about the relevance of a link, better include it.
+          c. Order the links from most to least relevant.
+          d. Do not add any comment or text.
+          e. Use the following format:
+          LINK: <LINK 1>
+          LINK: <LINK 2>
+          ...LINK: <LINK n>
+          Here is the text:
+          ’’’
+          <text_content>
+          ’’’
+
+                                   Figure 10. Prompt to suggest potentially relevant external sources
+
+
+
+
+           Prompt to determine importance of a url content
+          You are a senior developer working on the GitHub project at
+          www.github.com/<repo_id>. You have set up a Docker environment with Ubuntu,
+          and now your goal is to install the repository in development mode and run
+          its tests.
+          Your task is to carefully review the content of the following link:
+          <current_link>, and determine if it includes installation instructions or
+          test commands for the <repo_id> project.
+          Please follow these steps:
+          1. Look carefully in the provided content for any potential installation
+          commands or test commands related to the <repo_id> project.
+          2. Ask yourself if the located instructions are reasonable, legitimate
+          and can be practically executed to install or to test the <repo_id> project
+          only.
+          Please provide your answer using the following format:
+          INSTALLATION/TEST COMMANDS: <TRUE|FALSE>
+          REASONING: <REASONING>
+          **Important Notes**
+           Answer with TRUE only if the content explicitly includes valid and usable
+          installation or test commands.
+            If you do not find any relevant commands, or if the instructions are
+          vague, ambiguous, impractical, or unrelated answer FALSE.
+           When in doubt, answer FALSE.
+          Content of the link <current_link>:
+          ’’’
+          <clean_content> ’’’
+
+Figure 11. Prompt for determining if a link is relevant to installation and testing in the extraction phase of the S ETUPAGENT
+                                                                   14
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Extract Install Command Prompt
+You are a senior developer working on the project located at
+www.github.com/<repo_id>. You have created a Docker environment with
+Ubuntu, cloned the repository, and navigated to the directory <repo_dir>.
+Your next step is to install the project in development mode, which is
+intended for active development and testing. I’ll provide you with
+important text files (e.g., README.md) and important continuous integration
+(CI) configuration files, which typically contain instructions for
+developers on installation and testing. The format provided will be the
+file name followed by its content.
+Your task is to identify and return the bash commands necessary for the
+correct installation of the repository. This includes system dependencies,
+project installation in development mode, and any prerequisites or
+configuration commands.
+
+** IMPORTANT NOTES **
+1. Include system dependencies installation commands required for the
+project (e.g., via apt, yum, curl, etc.).
+2. Include installation commands necessary for setting up the project in
+development mode.
+3. Include prerequisites installation and configuration commands, such as
+those for npm or any other required setup.
+3. If comprehensive installation instructions are provided, return them
+without any modifications.
+4. Only exclude commands related to creating or activating virtual
+environments.
+
+The returned commands should meet the following criteria:
+1. Enclosed in quotes.
+2. Focused strictly on commands necessary for both system dependency
+installation and development-mode installation of the project.
+3. Free from any comments or text.
+4. Accurate and executable without errors.
+
+If no installation commands are present, return NONE.
+Here is the text:
+‘‘‘
+<context>
+‘‘‘
+Take your time to carefully analyze the content. Make sure that your
+response includes only the necessary installation bash commands. Ask
+yourself if the provided content is sufficient for installation. And for
+each command, ask yourself what’s the purpose of the command and if it is
+necessary.
+An example of the expected response is:
+‘‘‘bash
+install_command_1
+install_command_2
+‘‘‘
+Please provide the installation commands in the above specified format.
+
+    Figure 12. Prompt used for extraction of installation commands in extraction phase of S ETUPAGENT
+
+
+
+
+                                                   15
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Extract Test Command Prompt
+You are a senior developer working on the www.github.com/<repo_id> project.
+You have created a Docker environment with Ubuntu, cloned the repository,
+and installed it in development mode (meant for active development and
+testing).
+You are now inside the <repo_dir> directory and your next goal is to run
+the unit tests. I will provide you with some important text files (e.g.,
+README.md) and important continuous integration (CI) congiguration files,
+which typically include instructions for running tests. The format provided
+will be the file name followed by its content.
+Your task is to identify and return the exact bash commands required to run
+the tests.
+The returned commands should meet the following criteria:
+1. Enclosed in quotes.
+2. Free from any comments or text.
+3. Accurate and executable without errors.
+If no test commands are present, return NONE.
+Here is the text:
+‘‘‘
+<context>
+‘‘‘
+Take your time to analyze the content carefully. Ensure that only the
+necessary bash commands for running the tests are included. Ask yourself
+the purpose of each command before including it in your response.
+An example of the expected response is:
+‘‘‘bash
+test_command_1
+test_command_2
+‘‘‘
+Please provide the test commands in the above specified format.
+
+      Figure 13. Prompt used for extraction of test commands in the extraction phase of S ETUPAGENT
+
+
+
+
+                                                   16
+                 Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Prompt for determining error causes
+You are a developer working on the project at www.github.com/<repo_id>. You
+created an environment with python version <python_version>. Your goal is
+to install the repository in development mode (meant for active development
+and testing) and run the unit tests.
+The installation commands are:
+‘‘‘bash
+<install_command_1>
+<install_command_2>
+...
+<install_command_k>
+‘‘‘
+The testing commands are:
+‘‘‘bash
+<test_command_1>
+<test_command_2>
+...
+<test_command_k>
+‘‘‘
+You received the following error message after executing the command
+<error_command>:
+’’’
+<error_message>
+’’’
+Your task is to analyze the error message and determine its causes.
+You can return one of the following answers:
+1. <PYTHON>, if the error is caused by incompatibilities between the python
+version and any used package.
+2. <INSTALLATION>, if the error is caused by an installation command or is
+related to any missing package, regardless if it a testing related framework
+or not. All the required packages must be installed in the installation
+phase.
+3. <TESTING>, if the error is caused by any testing command (e.g., an
+invalid flag in the test command)
+4. <UNDECIDABLE>, if you cannot determine what causes the error.
+Please read the error message carefully and try to spot the commands that
+are responsible for the error. Always provide the reasoning for your
+answer.
+Use the following format:
+RESULT: <PYTHON, INSTALLATION, TESTING, UNDECIDABLE>
+REASONING: <YOUR REASONING>
+
+
+  Figure 14. Prompt for determining the error cause in the iterative improvement phase of the S ETUPAGENT
+
+
+
+
+                                                    17
+                             Automated Benchmark Generation for Repository-Level Coding Tasks
+
+          Prompt for fixing python version
+          You are a senior developer working on the project at
+          www.github.com/<repo_id>. Your goal is to install the repository in
+          development mode (meant for active development and testing) and run the
+          unit tests.
+          You created an environment with python version <python_version>, but you are
+          unsure if the python version is correct.
+          You received the following error message while testing the repository:
+          ’’’
+          <error_message>
+          ’’’
+          A senior software developer colleague has provided an explanation of why
+          things are not working as expected with the current commands:
+          <Reasoning from the answer to the prompt for determining the error cause>.
+          Use his reasoning to resolve the current error we are facing.
+          Your task is to determine a compatible Python version for the current state
+          of the repository. Carefully read the error message and identify the most
+          suitable Python version.
+          Please follow this answer format:
+          1. Return <NONE> if the error is unrelated to the Python version or you
+          cannot determine a compatible version.
+          2. If a specific Python version is compatible, return only the version
+          number (e.g., 2̈.7¨
+                            ).
+          3. Do not include any additional comments or text in your response.
+
+
+                Figure 15. Prompt for fixing python version used in the iterative improvement phase of S ETUPAGENT
+
+
+
+
+          Prompt for fixing installation commands 1
+          You are a senior developer working on the project at
+          www.github.com/<repo_id>. You are working in an enviroment with python
+          version <python_version>. You have attempted to install the repository
+          in development mode (meant for active development and testing) using the
+          following bash commands:
+          ‘‘‘bash
+          <install_command_1>
+          <install_command_2>
+          ...
+          <install_command_n>
+          ‘‘‘
+          However, the command <error_command> failed and we received the following
+          error message:
+          ’’’
+          <error_message> ’’’
+          Your task is to fix the above error. Think carefully what causes the error
+          and try to spot the commands that are responsible for it. Please provide
+          the updated installation steps in a bash code block, following these rules:
+          1. You have to use always uv pip instead of regular pip.
+          2. Return <NONE> if you can not fix the command.
+          3. Do not add any comments or text.
+          For example:
+          ‘‘‘bash
+          apt-get install -y <package_name>
+          uv pip install -r requirements.txt
+          ‘‘‘
+
+Figure 16. Prompt for fixing the installation commands used in the iterative improvement phase of S ETUPAGENT when the error occurs in
+the building process of containers
+                                                                 18
+                  Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Prompt for fixing installation commands 2
+You are a senior developer working on the project at
+www.github.com/<repo_id>. You tried to install the repository in
+development mode, which is intended for active development and testing,
+however the installation failed.
+You are working in an enviroment with python version <python> and you tried
+to use the following bash commands for the installation:
+‘‘‘bash
+<install_command_1>
+<install_command_2>
+...
+<install_command_n>
+‘‘‘
+During the execution of these commands, you received the following error
+message: ’’’
+<error_message> ’’’
+A senior software developer colleague has provided an explanation of why
+things are not working as expected with the current commands:
+<Reasoning from the answer to the prompt for determining the error cause>.
+Use his reasoning to resolve the current error we are facing.
+Your task is to carefully read the error message and determine which
+commands are causing the error. Reason about every command if it is causing
+the error. If you conclude that the problem is related to any of the
+commands, update the installation bash script to solve the problem. Note
+that you can also add new commands to fix the problem. If you decide to
+update the installation bash script you have to follow these rules:
+1. Provide the updated installation steps in a bash code block.
+2. Use uv pip instead of regular pip.
+2. Return NONE if the error is not related to the installation steps or you
+are not able to fix it.
+3. Do not add any comments or text.
+For example:
+The initial installation command is:
+‘‘‘bash
+uv pip install ˙
+‘‘‘
+However, the error message states that the <package_name> package is not
+installed. Then you would update the installation command to:
+‘‘‘bash
+uv pip install ˙
+uv pip install <package_name> ‘‘‘
+
+Figure 17. Prompt for fixing the installation commands used in the iterative improvement phase of S ETUPAGENT
+
+
+
+
+                                                     19
+                  Automated Benchmark Generation for Repository-Level Coding Tasks
+
+Prompt for fixing testing commands
+You are a senior developer working on the project at
+www.github.com/<repo_id>. You installed the repository in an enviroment
+with python version <python_version> and now you are trying to run the unit
+tests.
+You run the tests using the following bash commands:
+‘‘‘bash
+<test_command_1>
+<test_command_2>
+...
+<test_command_k>
+‘‘‘
+However, at the moment we receive the following error message:
+’’’ <error_message> ’’’
+A senior software developer colleague has provided an explanation of why
+things are not working as expected with the current commands:
+<Reasoning from the answer to the prompt for determining the error cause>.
+Use his reasoning to resolve the current error we are facing.
+Your task is to read the produced error message carefully, determine what
+the problem is and try to fix it. Ask yourself which test command could
+cause this problem. If you conclude that the problem is related to the test
+commands, update the test commands to solve the problem.
+Please provide the updated test commnds in a bash code block, following
+these rules:
+1. You have to always use uv pip instead of regular pip.
+2. Return NONE if the error is not related to the test command or you
+cannot fix it.
+3. Do not add any comments or text.
+4. Add a command only if you are sure that it is correct.
+For example: The initial testing command was:
+‘‘‘bash
+pytest test_file.py run all ‘‘‘ However, if in this case we would need the
+flag ’-v’ and the maximal number of failing tests to be 1, we would have to
+correct the command to:
+‘‘‘bash
+pytest test_file.py maxfail=1 v ‘‘‘
+
+Figure 18. Prompt for fixing the installation commands used in the iterative improvement phase of S ETUPAGENT
+
+
+
+
+                                                     20
+                          Automated Benchmark Generation for Repository-Level Coding Tasks
+
+C. Appendix – Dataset Details
+Below, we list all repositories along with the number of corresponding tasks in SWA-Bench.
+
+
+
+
+         SWA-Bench– Repositories
+
+          1. iterative/dvc - 42                               23. cookiecutter/cookiecutter - 8
+
+          2. streamlink/streamlink - 35                       24. pypa/pipenv - 7
+
+          3. spack/spack - 35                                 25. graphql-python/graphene - 6
+
+          4. PrefectHQ/prefect - 34                           26. pypa/bandersnatch - 5
+
+          5. xonsh/xonsh - 32                                 27. AtsushiSakai/PythonRobotics - 4
+
+          6. mitmproxy/mitmproxy - 31                         28. hynek/doc2dash - 3
+
+          7. python-pillow/Pillow - 29                        29. PythonCharmers/python-future - 3
+
+          8. mkdocs/mkdocs - 23                               30. aimhubio/aim - 2
+
+          9. hynek/structlog - 22                             31. dbcli/pgcli - 2
+
+         10. pallets/click - 21                               32. geopython/pycsw - 2
+
+         11. locustio/locust - 20                             33. dbader/schedule - 2
+
+         12. jpadilla/pyjwt - 17                              34. kibitzr/kibitzr - 1
+
+         13. elastic/elasticsearch-dsl-py - 17                35. getnikola/nikola - 1
+
+         14. pallets-eco/wtforms - 17                         36. geopy/geopy - 1
+
+         15. ipython/ipython - 16                             37. Maratyszcza/PeachPy - 1
+
+         16. python-poetry/poetry - 15                        38. gawel/pyquery - 1
+
+         17. conan-io/conan - 15                              39. Suor/funcy - 1
+
+         18. sabnzbd/sabnzbd - 14                             40. simonw/datasette - 1
+
+         19. Zulko/moviepy - 14                               41. cowrie/cowrie - 1
+
+         20. nvbn/thefuck - 12                                42. pypa/pip - 1
+
+         21. arrow-py/arrow - 11                              43. StevenBlack/hosts - 1
+
+         22. benoitc/gunicorn - 8                             44. jupyter/nbgrader - 1
+
+
+
+
+             Below, we list all repositories along with the number of corresponding tasks in SWEE-Bench.
+
+                                                         21
+               Automated Benchmark Generation for Repository-Level Coding Tasks
+
+SWEE-Bench– Repositories Part I
+
+ 1. python-attrs/attrs - 9                         40. lovasoa/marshmallow_dataclass - 5
+
+ 2. dgasmith/opt_einsum - 9                        41. aio-libs/yarl - 5
+
+ 3. jazzband/tablib - 8                            42. PyCQA/pyflakes - 5
+
+ 4. MartinThoma/flake8-simplify - 8                43. python/importlib_metadata - 5
+
+ 5. matthewwithanm/python-markdownify - 8          44. konradhalas/dacite - 5
+
+ 6. stephenhillier/starlette_exporter - 8          45. ilevkivskyi/typing_inspect - 5
+
+ 7. sciunto-org/python-bibtexparser - 8            46. jupyter/jupyter_core - 5
+
+ 8. davidhalter/parso - 8                          47. getsentry/responses - 5
+
+ 9. marshmallow-code/flask-smorest - 7             48. beartype/plum - 4
+
+10. adamchainz/blacken-docs - 7                    49. open2c/bioframe - 4
+11. MarketSquare/robotframework-tidy - 7           50. developmentseed/morecantile - 4
+12. lundberg/respx - 7                             51. nats-io/nats.py - 4
+13. seperman/deepdiff - 7                          52. nipy/nipype - 4
+14. Stranger6667/hypothesis-graphql - 7            53. python-quantities/python-quantities - 4
+15. cantools/cantools - 7                          54. stac-utils/pystac-client - 4
+16. didix21/mdutils - 7                            55. luolingchun/flask-openapi3 - 4
+17. marshmallow-code/apispec - 7                   56. sayanarijit/expandvars - 4
+18. softlayer/softlayer-python - 6
+                                                   57. jpadilla/pyjwt - 4
+19. gorakhargosh/watchdog - 6
+                                                   58. NowanIlfideme/pydantic-yaml - 4
+20. pygments/pygments - 6
+                                                   59. john-kurkowski/tldextract - 4
+21. dask-contrib/dask-histogram - 6
+                                                   60. geopandas/geopandas - 4
+22. andialbrecht/sqlparse - 6
+                                                   61. cloudevents/sdk-python - 4
+23. mirumee/ariadne - 6
+                                                   62. jupyter/nbformat - 4
+24. tableau/tabcmd - 6
+                                                   63. matthew-brett/delocate - 4
+25. gerrymanoim/exchange_calendars - 5
+                                                   64. iterative/shtab - 4
+26. snowplow/snowplow-python-tracker - 5
+                                                   65. jsonpickle/jsonpickle - 4
+27. joerick/pyinstrument - 5
+                                                   66. ethereum/eth-utils - 4
+28. scikit-rf/scikit-rf - 5
+                                                   67. mhe/pynrrd - 4
+29. matthewwardrop/formulaic - 5
+                                                   68. adamjstewart/fiscalyear - 4
+30. laspy/laspy - 5
+                                                   69. pytest-dev/pytest-xdist - 4
+31. python-control/python-control - 5
+                                                   70. facelessuser/wcmatch - 4
+32. mwouts/itables - 5
+                                                   71. scikit-hep/awkward - 4
+33. AzureAD/microsoft-authentication-library-for-python
+    - 5                                            72. tomplus/kubernetes_asyncio - 4
+
+34. firebase/firebase-admin-python - 5             73. ipython/traitlets - 4
+
+35. ethereum/eth-account - 5                       74. David-Wobrock/sqlvalidator - 4
+
+36. davidhalter/jedi - 5                           75. omry/omegaconf - 4
+
+37. agronholm/typeguard - 5                        76. python-lsp/python-lsp-server - 4
+
+38. Delgan/loguru - 5                              77. cogeotiff/rio-tiler - 3
+
+39. pytransitions/transitions - 5                  78. wjohnson/pyapacheatlas - 3
+
+
+
+                                              22
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+SWEE-Bench – Repositories Part II
+
+79. adamchainz/django-htmx - 3                       118. scrapy/w3lib - 3
+
+80. mwclient/mwclient - 3                            119. googleapis/google-auth-library-python-oauthlib
+                                                          - 3
+81. executablebooks/sphinx-book-theme - 3
+                                                     120. agronholm/cbor2 - 3
+82. scikit-hep/vector - 3
+                                                     121. weiwei/junitparser - 3
+83. patrick-kidger/equinox - 3
+                                                     122. conan-io/conan - 3
+84. christiansandberg/canopen - 3
+                                                     123. python/importlib_resources - 3
+85. regebro/pyroma - 3
+                                                     124. timvink/mkdocs-git-authors-plugin - 3
+86. nephila/giturlparse - 3
+                                                     125. agronholm/exceptiongroup - 3
+87. cookiecutter/cookiecutter - 3
+                                                     126. magmax/python-inquirer - 3
+88. serge-sans-paille/pythran - 3
+                                                     127. PrefectHQ/prefect - 3
+89. tomasvotava/fastapi-sso - 3
+
+90. jsvine/pdfplumber - 3                            128. Yelp/detect-secrets - 3
+
+91. scrapy/protego - 3                               129. Chilipp/autodocsumm - 3
+
+92. SmileyChris/django-countries - 3                 130. jaraco/keyring - 3
+
+93. cscorley/whatthepatch - 3                        131. Pylons/waitress - 3
+
+94. pythological/kanren - 3                          132. pypa/setuptools - 3
+
+95. pypa/virtualenv - 3                              133. barrust/pyspellchecker - 2
+
+96. fastavro/fastavro - 3                            134. bluesky/ophyd - 2
+
+97. marshmallow-code/marshmallow-sqlalchemy -        135. OpenMath/py-openmath - 2
+    3
+                                                     136. readthedocs/sphinx-notfound-page - 2
+98. gazpachoking/jsonref - 3
+                                                     137. canonical/operator - 2
+99. lepture/mistune - 3
+                                                     138. ekzhu/datasketch - 2
+100. scikit-learn-contrib/category_encoders -
+     3                                               139. dhatim/python-license-check - 2
+
+101. simonw/sqlite-utils - 3                         140. Shoobx/xmldiff - 2
+
+102. executablebooks/mdit-py-plugins - 3             141. ewels/rich-click - 2
+103. tsutsu3/linkify-it-py - 3                       142. jaraco/path - 2
+104. hhatto/autopep8 - 3                             143. yu-iskw/dbt-artifacts-parser - 2
+105. cubewise-code/mdxpy - 3                         144. symerio/pgeocode - 2
+106. joblib/joblib - 3                               145. daggaz/json-stream - 2
+107. python-trio/trio-typing - 3
+                                                     146. jazzband/dj-database-url - 2
+108. nalepae/pandarallel - 3
+                                                     147. nipunsadvilkar/pySBD - 2
+109. tableau/server-client-python - 3
+                                                     148. adamchainz/django-linear-migrations - 2
+110. r1chardj0n3s/parse - 3
+                                                     149. mwouts/jupytext - 2
+111. ipython/ipython - 3
+                                                     150. MrBin99/django-vite - 2
+112. pypa/readme_renderer - 3
+                                                     151. ml31415/numpy-groupies - 2
+113. jaraco/zipp - 3
+                                                     152. regebro/svg.path - 2
+114. docker/docker-py - 3
+                                                     153. gmr/flatdict - 2
+115. joshy/striprtf - 3
+                                                     154. aws-samples/sample-python-helper-aws-appconfig
+116. googleapis/python-pubsub - 3                         - 2
+
+117. TylerYep/torchinfo - 3                          155. behave/behave - 2
+
+
+
+                                                23
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+SWEE-Bench – Repositories Part III
+
+156. thesimj/envyaml - 2                           196. vinitkumar/json2xml - 2
+
+157. codingjoe/django-select2 - 2                  197. frispete/keyrings.cryptfile - 2
+
+158. allisson/python-simple-rest-client - 2        198. swansonk14/typed-argument-parser - 2
+
+159. christianhelle/autofaker - 2                  199. scottwernervt/favicon - 2
+
+160. esphome/aioesphomeapi - 2                     200. slackapi/python-slack-sdk - 2
+
+161. oauthlib/oauthlib - 2                         201. nginxinc/crossplane - 2
+162. rustedpy/result - 2                           202. hetznercloud/hcloud-python - 2
+163. graphql-python/graphene - 2                   203. dbader/schedule - 2
+164. benmoran56/esper - 2                          204. amplify-education/python-hcl2 - 2
+165. eerimoq/bincopy - 2
+                                                   205. jazzband/contextlib2 - 2
+166. keleshev/schema - 2
+                                                   206. theskumar/python-dotenv - 2
+167. PyCQA/flake8 - 2
+                                                   207. raimon49/pip-licenses - 2
+168. kjd/idna - 2
+                                                   208. locustio/locust - 2
+169. jupyter/nbconvert - 2
+                                                   209. astanin/python-tabulate - 2
+170. scikit-hep/hist - 2
+                                                   210. alecthomas/voluptuous - 2
+171. spulec/freezegun - 2
+                                                   211. django-crispy-forms/crispy-bootstrap5 - 2
+172. jupyter/nbclient - 2
+                                                   212. geospace-code/pymap3d - 2
+173. PythonCharmers/python-future - 2
+                                                   213. tedder/requests-aws4auth - 2
+174. tortoise/pypika-tortoise - 2
+                                                   214. pyvisa/pyvisa-py - 1
+175. rthalley/dnspython - 2
+                                                   215. nithinmurali/pygsheets - 1
+176. mkaranasou/pyaml_env - 2
+                                                   216. mlenzen/collections-extended - 1
+177. terraform-compliance/cli - 2
+                                                   217. emcconville/wand - 1
+178. googleapis/python-firestore - 2
+                                                   218. rsalmei/alive-progress - 1
+179. googleapis/python-api-core - 2
+                                                   219. rycus86/prometheus_flask_exporter - 1
+180. scrapy/cssselect - 2
+                                                   220. fastapi-users/fastapi-users - 1
+181. python-humanize/humanize - 2
+                                                   221. google/mobly - 1
+182. jdepoix/youtube-transcript-api - 2
+                                                   222. scrapy/itemadapter - 1
+183. dedupeio/dedupe - 2
+                                                   223. ncclient/ncclient - 1
+184. databricks/databricks-cli - 2
+                                                   224. google/duet - 1
+185. bluesky/event-model - 2
+                                                   225. di/calver - 1
+186. workos/workos-python - 2
+
+187. kynan/nbstripout - 2                          226. beancount/smart_importer - 1
+
+188. assertpy/assertpy - 2                         227. bridgecrewio/python-hcl2 - 1
+
+189. dbt-labs/hologram - 2                         228. construct/construct - 1
+
+190. sendgrid/python-http-client - 2               229. devrimcavusoglu/pybboxes - 1
+
+191. keis/base58 - 2                               230. richardpenman/whois - 1
+
+192. attwad/python-osc - 2                         231. cvxpy/cvxpy - 1
+
+193. wireservice/csvkit - 2                        232. elastic/ecs-logging-python - 1
+
+194. adamchainz/time-machine - 2                   233. pythonarcade/pytiled_parser - 1
+
+195. MagicStack/immutables - 2                     234. astropy/extension-helpers - 1
+
+
+
+                                              24
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+SWEE-Bench – Repositories Part IV
+
+235. SAP/python-pyodata - 1                          274. Pylons/hupper - 1
+
+236. Azure/azure-functions-durable-python - 1        275. cloudscale-ch/cloudscale-python-sdk - 1
+
+237. IdentityPython/djangosaml2 - 1                  276. alessandromaggio/pythonping - 1
+
+238. jwodder/check-wheel-contents - 1                277. imageio/imageio-ffmpeg - 1
+
+239. Zulko/moviepy - 1                               278. podhmo/python-node-semver - 1
+
+240. xhtml2pdf/xhtml2pdf - 1                         279. netbox-community/pynetbox - 1
+241. cknd/stackprinter - 1                           280. kumar303/mohawk - 1
+242. guillp/jwskate - 1                              281. SpamScope/mail-parser - 1
+243. jmcarp/flask-apispec - 1                        282. perrygeo/python-rasterstats - 1
+244. timofurrer/colorful - 1
+                                                     283. pahaz/sshtunnel - 1
+245. miso-belica/sumy - 1
+                                                     284. python-hyper/h11 - 1
+246. kvesteri/intervals - 1
+                                                     285. razorpay/razorpay-python - 1
+247. marcotcr/lime - 1
+                                                     286. zeroSteiner/rule-engine - 1
+248. wkentaro/gdown - 1
+                                                     287. mocobeta/janome - 1
+249. realpython/codetiming - 1
+                                                     288. glut23/webvtt-py - 1
+250. jaraco/tempora - 1
+                                                     289. benoitc/gunicorn - 1
+251. jendrikseipp/vulture - 1
+                                                     290. mcmtroffaes/pybtex-docutils - 1
+252. pycontribs/ruyaml - 1
+                                                     291. alexmojaki/executing - 1
+253. albumentations-team/albumentations - 1
+                                                     292. sigmavirus24/github3.py - 1
+254. nose-devs/nose2 - 1
+                                                     293. ccpem/mrcfile - 1
+255. jongracecox/anybadge - 1
+                                                     294. csinva/imodels - 1
+256. patrys/httmock - 1
+                                                     295. click-contrib/click-help-colors - 1
+257. maxfischer2781/asyncstdlib - 1
+                                                     296. srossross/rpmfile - 1
+258. pgzip/pgzip - 1
+                                                     297. hgrecco/pint - 1
+259. arvkevi/kneed - 1
+                                                     298. django-ses/django-ses - 1
+260. rasterio/affine - 1
+                                                     299. gmr/pamqp - 1
+261. circus-tent/circus - 1
+                                                     300. spotify/annoy - 1
+262. xchwarze/samsung-tv-ws-api - 1
+                                                     301. PyCQA/pycodestyle - 1
+263. jaraco/portend - 1
+                                                     302. regebro/tzlocal - 1
+264. fabiocaccamo/python-benedict - 1
+
+265. numpy/numpy-financial - 1                       303. mapado/haversine - 1
+
+266. praw-dev/prawcore - 1                           304. scientific-python/lazy-loader - 1
+
+267. scipy/oldest-supported-numpy - 1                305. grappa-py/grappa - 1
+
+268. logtail/logtail-python - 1                      306. flexmock/flexmock - 1
+
+269. polkascan/py-scale-codec - 1                    307. jg-rp/liquid - 1
+
+270. Knio/pynmea2 - 1                                308. prompt-toolkit/python-prompt-toolkit - 1
+
+271. jazzband/django-configurations - 1              309. jaraco/jaraco.context - 1
+
+272. allenai/cached_path - 1                         310. aio-libs/multidict - 1
+
+273. click-contrib/click-aliases - 1                 311. rsheftel/pandas_market_calendars - 1
+
+
+
+
+                                                25
+                Automated Benchmark Generation for Repository-Level Coding Tasks
+
+SWEE-Bench – Repositories Part V
+
+312. mkdocs/mkdocs - 1                             340. pyca/service-identity - 1
+
+313. websocket-client/websocket-client - 1         341. diff-match-patch-python/diff-match-patch -
+                                                        1
+314. DataDog/datadog-lambda-python - 1
+                                                   342. xlwings/jsondiff - 1
+315. iterative/dvclive - 1
+                                                   343. mapbox/cligj - 1
+316. cogeotiff/rio-cogeo - 1
+                                                   344. cthoyt/pystow - 1
+317. erikrose/parsimonious - 1
+                                                   345. Rapptz/discord.py - 1
+318. facelessuser/pymdown-extensions - 1
+                                                   346. gahjelle/pyplugs - 1
+319. pypa/build - 1
+                                                   347. Colin-b/pytest_httpx - 1
+320. mkdocs/mkdocs-redirects - 1
+                                                   348. LLNL/certipy - 1
+321. dlint-py/dlint - 1
+                                                   349. spec-first/connexion - 1
+322. klen/peewee_migrate - 1
+                                                   350. Yelp/bravado - 1
+323. afq984/python-cxxfilt - 1
+                                                   351. mkorpela/pabot - 1
+324. kinverarity1/lasio - 1
+                                                   352. scrapy/parsel - 1
+325. Turbo87/utm - 1
+                                                   353. alexmojaki/pure_eval - 1
+326. django/daphne - 1
+                                                   354. graphql-python/graphql-core - 1
+327. executablebooks/sphinx-design - 1
+
+328. interpretml/slicer - 1                        355. joke2k/faker - 1
+
+329. google/yapf - 1                               356. averbis/averbis-python-api - 1
+
+330. sensein/etelemetry-client - 1                 357. jupyter/jupyter_client - 1
+
+331. MKuranowski/aiocsv - 1                        358. jaraco/inflect - 1
+
+332. executablebooks/sphinx-tabs - 1               359. GreyZmeem/python-logging-loki - 1
+
+333. pexpect/pexpect - 1                           360. suminb/base62 - 1
+
+334. pythological/etuples - 1                      361. youknowone/wirerope - 1
+
+335. frankie567/httpx-oauth - 1                    362. xnuinside/simple-ddl-parser - 1
+
+336. sarugaku/resolvelib - 1                       363. executablebooks/sphinx-thebe - 1
+
+337. python273/telegraph - 1                       364. Pylons/webob - 1
+
+338. boolangery/py-lua-parser - 1                  365. SethMMorton/fastnumbers - 1
+
+339. Electrostatics/mmcif_pdbx - 1                 366. python-semver/python-semver - 1
+
+
+
+
+                                              26
+

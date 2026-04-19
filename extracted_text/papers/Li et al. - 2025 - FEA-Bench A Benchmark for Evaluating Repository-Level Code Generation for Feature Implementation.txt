@@ -1,0 +1,1153 @@
+              FEA-Bench: A Benchmark for Evaluating Repository-Level Code
+                         Generation for Feature Implementation
+                      Wei Li♡ * , Xin Zhang♠†‡ , Zhongxin Guo♠ , Shaoguang Mao♠
+               Wen Luo , Guangyue Peng♡ , Yangyu Huang♠ , Houfeng Wang♡ † , Scarlett Li♠
+                           ♡
+                      ♡
+                        State Key Laboratory of Multimedia Information Processing,
+                              School of Computer Science, Peking University
+                                        ♠
+                                          Microsoft Research Asia
+                                       weili22@stu.pku.edu.cn
+                          xinzhang3@microsoft.com, wanghf@pku.edu.cn
+
+                               Abstract
+            Implementing new features in repository-level
+            codebases is a crucial application of code gen-
+            eration models. However, current benchmarks
+            lack a dedicated evaluation framework for this
+            capability. To fill this gap, we introduce FEA-
+            Bench, a benchmark designed to assess the
+            ability of large language models (LLMs) to              Figure 1: The proposed FEA-Bench aims to evaluate
+            perform incremental development within code             incremental repository development, while SWE-bench
+            repositories. We collect pull requests from             (Jimenez et al., 2024) focuses on repairing issues.
+            83 GitHub repositories and use rule-based and
+            intent-based filtering to construct task instances
+            focused on new feature development. Each task           and LiveCodeBench (Chen et al., 2021; Austin
+            instance containing code changes is paired with         et al., 2021; Jain et al., 2024). These benchmarks
+            relevant unit test files to ensure that the solu-
+                                                                    offer little insight into the challenges developers
+            tion can be verified. The feature implementa-
+            tion requires LLMs to simultaneously possess
+                                                                    face in real-world projects, where codebases are
+            code completion capabilities for new compo-             composed of multiple interconnected files. In such
+            nents and code editing abilities for other rel-         projects, modifications in one part of the code of-
+            evant parts in the code repository, providing           ten necessitate corresponding edits elsewhere. This
+            a more comprehensive evaluation method of               type of collaborative, large-scale development is
+            LLMs’ automated software engineering capa-              referred to as repository-level code development.
+            bilities. Experimental results show that LLMs
+            perform significantly worse in the FEA-Bench,              In the realm of repository-level code generation,
+            highlighting considerable challenges in such            much of the current evaluation effort is centered
+            repository-level incremental code development.          around code completion (Li et al., 2024b; Yang
+            Our code will soon be publicly available at             et al., 2024a). Code completion refers to gener-
+            https://github.com/microsoft/FEA-Bench.                 ating correct code snippets at specified locations
+                                                                    within a given code context. However, this task
+    1       Introduction                                            is inherently limited—it typically targets localized
+    The remarkable text generation capabilities of large            generation and does not account for broader impli-
+    language models (LLMs) (Achiam et al., 2023)                    cations beyond the scope of completion.
+    have extended their impact into the domain of code                 Recent advancements in the capabilities of
+    generation (Xu et al., 2022), which has led to the              LLMs have expanded their potential role from
+    emergence of developer assistants such as Copilot,              merely suggesting code snippets to managing the
+    Cursor, Devin, etc. An important research topic is              full lifecycle of repository development. A promi-
+    evaluating the effectiveness of LLMs in generating              nent benchmark in this domain is SWE-bench
+    code across diverse scenarios. Many of the existing             (Jimenez et al., 2024), which evaluates LLMs on
+    benchmarks focus on evaluating standalone pro-                  resolving issues, primarily focusing on bug fixes
+    gramming problems, such as HumanEval, MBPP,                     within repositories. In practice, as shown in Fig-
+        * Work done during internship at MSRA.
+                                                                    ure 1, a more critical aspect of software engineer-
+        †
+            Corresponding author.                                   ing is the launch of new features, which often en-
+        ‡
+            Project leader.                                         tails introducing new functions or even entire files
+                                                                 17160
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 17160–17176
+                             July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+into the repository. The continuous implementa-          ation, debugging, and translation capabilities (Pan
+tion of new features drives software growth and          et al., 2024; Li et al., 2023a; Joshi et al., 2023;
+is a key focus of automated software engineering.        Shi et al., 2024). Large-scale pre-trained LLMs
+We define such tasks as repository-level incremen-       such as GPT-4 (Achiam et al., 2023), CodeLlama
+tal code development. In this work, to bridge the        (Roziere et al., 2023), DeepSeek-Coder (Guo et al.,
+gap in benchmarks for this domain, we construct          2024; Zhu et al., 2024), and Qwen2.5-Coder (Hui
+a dataset derived from pull requests in GitHub           et al., 2024) have demonstrated proficiency in gen-
+repositories that specifically focus on adding new       erating functional code across multiple program-
+components, with the overarching goal of imple-          ming languages. Recent advancements also include
+menting new features. Each task instance in our          instruction-tuned models like Starcoder (Li et al.,
+dataset is paired with its corresponding unit test       2023b), WizardCoder (Luo et al., 2023), Wave-
+files, culminating in the creation of the Feature        Coder (Yu et al., 2024b), Magicoder (Wei et al.,
+Implementation Benchmark (FEA-Bench), which              2024) and EpiCoder (Wang et al., 2025). With
+comprises 1,401 task instances sourced from 83           these advancements, code LLMs are poised to fur-
+diverse GitHub repositories.                             ther revolutionize how developers interact with
+   Statistically, our dataset exhibits characteristics   code, promising increased efficiency in software
+that significantly differ from the bug-fix-oriented      creation. Additionally, the integration of agents
+SWE-bench. Task instances in FEA-Bench require           (Luo et al., 2025) has further enhanced the per-
+the implementation of new functions and classes          formance of LLMs in software engineering tasks
+in Python and involve substantially longer code          (Yang et al., 2024b; Xia et al., 2024; Zhang et al.,
+generation compared to SWE-Bench. Experimen-             2024). In this paper, we further evaluate the per-
+tal results demonstrate that current LLMs perform        formance of current LLMs in the incremental code
+poorly on the proposed benchmark. According to           development scenarios at the repository level. This
+our execution-based metrics, the best-performing         investigation aims to drive the research on code
+LLM, DeepSeek-R1, successfully resolves only             LLMs toward addressing more intricate software
+about 10% of the task instances. The key contribu-       engineering challenges, thereby advancing the ca-
+tions of this paper are as follows:                      pabilities of these models in handling sophisticated
+                                                         development tasks.
+    • We introduce the task of repository-level incre-
+      mental code development, addressing a criti-       2.2   Code Generation Benchmarks
+      cal challenge in real-world software engineer-
+                                                         Recent code generation benchmarks, such as Hu-
+      ing where the continuous implementation of
+                                                         manEval (Chen et al., 2021) and MBPP (Austin
+      new features is essential for sustaining soft-
+                                                         et al., 2021), have primarily focused on synthe-
+      ware growth.
+                                                         sizing standalone functions or scripts from natu-
+    • We construct the first benchmark to evalu-         ral language, while subsequent efforts like APPS
+      ate repository-level incremental code devel-       (Hendrycks et al., 2021), EvalPlus (Liu et al.,
+      opment. By employing parsing and other fil-        2023a), CoderEval (Yu et al., 2024a), ClassEval
+      tering methods, we constructed a dataset com-      (Du et al., 2023), BigCodeBench (Zhuo et al.,
+      posed of feature implementation tasks, offer-      2024), and FullStackBench (Liu et al., 2024b) have
+      ing execution-based evaluation.                    expanded evaluation to more complex scenarios.
+                                                         However, these benchmarks largely overlook the
+    • Using an automated pipeline, we scale the test     repository-level challenges of real-world software
+      data to include 83 diverse code repositories,      development, a gap addressed by recent works
+      ensuring high diversity. We will publicly re-      (Bairi et al., 2024; Zhang et al., 2023). Because
+      lease our data collection and evaluation code-     of the wild applications of auto code completion
+      base, allowing FEA-Bench to be continuously        tools like Github Copilot (Dakhel et al., 2023),
+      updated and expanded.                              most repository-level code generation benchmarks
+2    Related Work                                        aim to evaluate the code completion capabilities of
+                                                         LLMs (Liu et al., 2023b). Repository-level code
+2.1 Code Large Language Models                           completion aims to generate code for incomplete
+Large language models (LLMs) have revolution-            code snippets within a repository (Wang et al.,
+ized software engineering by enabling code gener-        2024). Benchmarks such as DevEval (Li et al.,
+                                                    17161
+2024b), EvoCodeBench (Li et al., 2024a), Codev-
+Bench (Pan et al., 2024), and ExecRepoBench
+(Yang et al., 2024a) evaluate this capability. How-
+ever, code completion data constructed by remov-
+ing a single line or function body can suffer from
+future context leakage issues (Zheng et al., 2024).
+   In practice, autonomous development of a code
+repository should include all edits to the code,
+rather than simply completing the specified code
+under perfect context. SWE-bench (Jimenez et al.,
+2024) focuses on repairing repositories’ issues by
+revising existing programs. This highlights the
+need for models to effectively modify and inte-
+grate changes within the repository. Our work fills
+another gap of incremental repository-level devel-
+opment by introducing a benchmark that evaluates
+LLMs on the implementation of new features, fur-
+ther bridging the divide between code completion
+and real-world software engineering.
+
+3       Benchmark Construction                         Figure 2: An example of the task instances from the
+                                                       FEA-Bench. During the inference of LLMs, the first
+3.1 Overview                                           two items: feature request and new components are
+The task instances in FEA-Bench are constructed        considered as known information. The environment
+based on existing pull request (PR) data from          setup serves as a prerequisite for creating the testbed
+GitHub. As illustrated in Figure 2, each task in-      and environment. Python file patches and unit tests are
+                                                       used as labels and evaluation metrics and should not be
+stance contains the following elements:
+                                                       leaked during the inference of LLMs.
+   ❶ Feature Request Content of the pull request
+and corresponding issues (if any) provide essential
+information regarding the new feature or function-        ❺ Unit Test The correctness of the code changes
+ality to be developed.                                 is verified based on the result of running these tests.
+   ❷ Definition of New Components This in-             We get the ground truth status by actually running
+cludes the signatures and documentation of newly       pytest before and after applying the gold patch.
+added functions and classes. The name of the              Our data collection pipeline is developed based
+new component must be consistent with that in          on SWE-bench. As shown in Figure 3, the pro-
+PR, which is the prerequisite for completing the       posed collection pipeline ensures data diversity and
+task, because unit tests are written based on the      comprehensiveness, enabling a robust evaluation
+specified name.                                        of LLMs’ capabilities in implementing new fea-
+   ❸ Environment Setup This includes the rele-         tures at the repository level. By making our data
+vant information for the repository and specifies      collection and evaluation codes publicly available,
+the base commit of the code repository for each        we aim to facilitate continuous updates and the cre-
+task instance. Besides, the configurations of the      ation of new versions of FEA-Bench. In the rest of
+building execution environment are also included.      this section, we will discuss the construction and
+   ❹ Patch It describes the changes made to the        the characteristics of FEA-Bench.
+code in the repository and can be processed by
+the unidiff standard library1 . Additionally, the      3.2        Repository Collection
+changes can be applied to the repository using the     To determine the scope of GitHub repositories for
+git apply tool. A patch can be divided into a          data collection, we initially focus on the GitHub
+test patch and a gold patch; the former pertains to    repositories corresponding to Python packages
+changes in test codes, while the latter involves the   listed on the Top PyPI website2 . Packages appear-
+other changes affecting the software itself.           ing on this list are generally influential Python soft-
+    1                                                       2
+        https://github.com/matiasb/python-unidiff               https://hugovk.github.io/top-pypi-packages/
+
+                                                    17162
+Figure 3: The data collection pipeline for the FEA-Bench. First, determine the scope of GitHub repositories from
+which task instances will be collected. Next, gather pull requests as task instances and apply filtering criteria to
+select instances that meet the purpose of adding new features. Finally, use the included test files to execute unit tests,
+ensuring that only task instances with reproducible test results are included in FEA-Bench. For a more detailed
+construction process, please refer to Appendix A.2.
+
+
+ware with high data quality, and most repositories             and functions, and extract their signatures and doc-
+use a unified pytest format for testing, which facil-          strings as metadata.
+itates later execution. This leaderboard contains
+8,000 Python packages. We obtain approximately                    Filtering based on new components We re-
+600 repositories that meet the criteria of having a            tain only those task instances that contain at least
+license and more than 1,000 pull requests by apply-            one new component. To ensure that implementing
+ing a filtering process.                                       new features is the primary purpose of the pull re-
+                                                               quest, we further restrict the new components to
+   Fast Validation Except for repositories already
+                                                               occupy more than 25% of all edited lines in gold
+included in SWE-bench, the remaining reposito-
+                                                               patch. This threshold is set relatively low because
+ries do not have customized installation procedures
+                                                               code changes often need to include modifications
+or testing methods. While environment configura-
+                                                               to other related code in addition to the new compo-
+tions vary among different Python packages, pip
+                                                               nents themselves.
+offers a unified installation approach3 . And we
+adopt pytest as the default method for unit testing.              Intent-based filtering The pull requests filtered
+Based on these settings, for each repository, we ex-           using the above rule-based approach still include
+tract the first 20 pull requests that include changes          some that are not primarily aimed at feature imple-
+to test files and observe the unit test status. Reposi-        mentation. Therefore, we use GPT-4o to classify
+tories that have at least one task instance where the          the intent based on the pull request description.
+unit tests passed with the default configuration are           Only pull requests classified as "new feature" are
+retained, as they possess the potential to generate            retained.
+task instances that meet our criteria.
+   After this fast validation process, in addition to             Verification by running unit tests For each in-
+the 18 Python packages included in the SWE-bench               stance, we first set up the environment and testbed.
+dataset, another 101 Python packages are identified            We then apply the test patch and run the unit test
+as sources for extracting repository-level data for            files involved in the test patch. Theoretically, some
+our benchmark.                                                 unit tests should fail at this stage. After applying
+                                                               the gold patch, we rerun the same unit tests. If the
+3.3 Task Collection and Filtering                              configuration is correct, all unit tests should pass.
+                                                               Unlike SWE-bench, we do not impose restrictions
+Based on existing repository data, we crawl all pull           on whether ImportError or AttributeError oc-
+requests and consider those that include changes               curs before applying the gold patch, as these errors
+to test files as possible task instances. Given our            are almost inevitable before new components are
+focus on the incremental feature development task,             implemented. Instead, to ensure data quality, we
+we introduce the following steps to obtain the final           exclude samples where tests remain in the failed
+task instances for FEA-Bench through filtering:                status after applying the gold patch. The status
+   Extraction of new components For each task in-              of each test function before and after applying the
+stance candidate, we perform parsing on all Python             gold patch is recorded.
+scripts involved in the gold patch. We compare the
+state before and after applying the patch to iden-               After task collection and filtering, 83 out of 119
+tify newly added components, including classes                 repositories collected by the method in Section
+                                                               3.2 produce 1,401 task instances for new feature
+   3
+       pip install -e .                                        implementation.
+                                                         17163
+                                FEA-Bench          SWE-bench          lite and SWE-bench verified is even more pro-
+                                Full  Lite        Full Verified
+                                                                      nounced. These statistics indicate that the task
+ |Repositories|                 83        48      12        12
+ |Tasks|                       1401      200     2294      500        instances in FEA-Bench are primarily aimed at
+ # Lines of oracle files       2115.5   1366.8   1961.3   1488.2      implementing new features. In SWE-bench, the
+ # Files edited                  2.62    1.54     1.66      1.24      average number of new functions is 0.73, indicat-
+ # Lines edited                 128.5    68.1     37.71    14.32
+                                                                      ing that its task instances mainly involve editing
+ # Lines of added components    87.1     47.2     10.9      2.1
+ % Added components             67.8     69.3     28.9     14.7       existing code rather than incremental development.
+ # Functions added              4.49     2.02    0.73     0.25           Complex solutions While SWE-bench focuses
+ # Classes added                0.78       0     0.064    0.006
+                                                                      on fixing issues, which generally involve simpler
+Table 1: Statistics for FEA-Bench and its lite subset,                problems, the task instances in FEA-Bench exhibit
+as well as for SWE-bench and its verified subset. The                 greater complexity. From Table 1, whether mea-
+metrics include: 1) the number of task instances and in-              sured by the number of edited lines or edited files,
+volved repositories; 2) the average total number of lines             the solutions of task instances in FEA-Bench are
+in all Python files involved in code changes (i.e., the               notably more complex than those in SWE-bench.
+Oracle setting described in Section 4.2), and the average
+number of edited files and lines; 3) the average number
+of lines of new components, the average percentage of
+                                                                      4        Experimental Design
+new component lines relative to all edited lines, and the             4.1        Models
+average number of added functions and classes.
+                                                                      Due to its repository-level code generation char-
+                                                                      acteristics, FEA-Bench requires models to have a
+3.4 Benchmark Characteristics                                         long context window. We evaluate representative
+                                                                      code LLMs and general-purpose LLMs with strong
+Semi-guided software engineering task Although                        foundational capabilities on the FEA-Bench. The
+the signatures for new components are provided,                       code LLMs used in our evaluation include CodeL-
+the primary objective of the FEA-Bench is to eval-                    lama, Codestral4 , Qwen2.5-Coder, and DeepSeek-
+uate the whole solution of new feature implementa-                    Coder-V2 (Roziere et al., 2023; Hui et al., 2024;
+tion. This is a comprehensive real-world software                     Zhu et al., 2024). For general-purpose LLMs,
+engineering task, distinct from code completion.                      we evaluate the performance of GPT-4, GPT-4o
+As shown in Table 1, each instance in FEA-Bench                       (Achiam et al., 2023; Hurst et al., 2024) and
+involves an average of 128.5 modified lines, with                     DeepSeek-V3 (Liu et al., 2024a), as well as models
+87.1 lines attributed to the new components them-                     with long chain-of-thought (CoT) capabilities such
+selves. This indicates that approximately 41.4 lines                  as o1 and DeepSeek-R1 (Jaech et al., 2024; Guo
+of changes are made elsewhere in the repository.                      et al., 2025).
+Implementing new features not only requires the
+ability to generate code for specified new compo-                     4.2        Context
+nents but also necessitates making complementary
+changes within the existing repository.                               To explore the capabilities and potential limits of
+                                                                      LLMs in implementing new features within code
+    Lite version We have also curated a subset to
+                                                                      repositories, we construct different prompts from
+serve as a lite version of our dataset. This subset is
+                                                                      several perspectives based on our collected data.
+filtered based on criteria including higher quality
+                                                                      Each task instance is evaluated using various con-
+and lower difficulty. This lite version is particu-
+                                                                      text settings to provide a comprehensive under-
+larly useful for evaluating systems that are compu-
+                                                                      standing of model performance.
+tationally intensive and time-consuming. Detailed
+                                                                         New component hints In FEA-Bench, informa-
+information can be found in Section A.3.
+                                                                      tion about new components can be derived from
+    New components driven generation task From                        two sources: 1) signatures and documentation
+Table 1, we can observe that, on average, the num-                    of newly extracted functions and classes, and 2)
+ber of lines for new components in each FEA-                          changes in non-Python files within the patch, which
+Bench task instance is more than 8× that of SWE-                      often contain relevant information about the new
+bench. Furthermore, the new components account                        components. Based on this, we have two settings:
+for approximately 67.8% of all edited lines in FEA-                   Brief. Only provides the signatures of new compo-
+Bench, compared to just 28.9% in SWE-bench.
+The difference in this metric between FEA-Bench                            4
+                                                                               https://mistral.ai/en/news/codestral
+
+                                                                   17164
+                                                     FEA-Bench                          FEA-Bench lite
+ Model                  Size    Window        Oracle        BM25 (27K)              Oracle      BM25 (27K)
+                                          Detailed Brief Detailed Brief         Detailed Brief Detailed Brief
+                        13B     16K          0.14     0.43        ×       ×        0.0      0.0       ×        ×
+ CodeLlama
+                        34B     16K          0.57     0.57        ×       ×        0.0      0.0       ×        ×
+                        14B     32K          3.57     3.57       3.71    2.93      3.5      4.5      3.5      2.5
+ Qwen2.5-Coder
+                        32B     32K          4.43     3.64       3.85    2.78      6.0      5.5      2.0      2.5
+ Codestral-22B          22B     32K          0.86     0.93       1.43    1.36      0.5      1.0      0.0      0.0
+ DeepSeek-Coder-V2      16B     128K         0.21     0.29       0.57    0.36      0.0      0.5      0.0       0.5
+ DeepSeek-R1-Distill    32B     128K         3.78     4.07       4.78    4.21      5.5      7.5      7.0       5.5
+ DeepSeek-V3            671B    64K          8.14     6.92       8.21    7.64     14.5     10.5      13.0     12.0
+ DeepSeek-R1            671B    64K          9.92     8.35       10.49   9.85     14.5     14.5      12.0     13.5
+ GPT-4                          128K         4.71     4.21       3.14    2.86      6.0      6.5      2.0      1.0
+ GPT-4o                         128K         6.14     5.57       5.28    4.50      5.0      5.0      4.0      3.5
+ o1-mini                        128K         1.93     1.86       2.28    2.57      2.0      3.5      1.0      2.0
+ o1                             200K         7.28     6.57       6.78    6.64     10.0     12.5      5.0      7.0
+
+Table 2: The resolved ratios on FEA-Bench (lite) task instances. The evaluation is conducted on single-round
+generation outputs by each model and a task instance is considered resolved only if all unit tests are passed. The
+prompt using BM25 retrieved files is limited to length of 27K tokens. This ensures that, with a maximum generation
+of 4K tokens, the total length will not exceed 32K tokens, which is the context window limits of most tested models.
+"Detailed" and "Brief" refer to the levels of hints regarding new components in prompt, as mentioned in Section 4.2.
+
+
+nents. Detailed. Includes all the aforementioned             5    Evaluation Results
+information.
+                                                             The performance of LLMs The evaluation results
+   Retrieval method Given the extensive amount               of FEA-Bench are presented in Table 2. It is ob-
+of code across multiple files in a repository, selec-        served that in Oracle and Detailed prompt settings,
+tive inclusion of file contents as context is neces-         the best resolved ratio of task instances is 9.92%,
+sary. Firstly, the README file and files containing          indicating the poor performance of LLMs in the in-
+new components are always included in the context.           cremental development task at the repository level.
+For other files, similar to SWE-bench, we divide             Generally, the models with larger parameter sizes
+retrieval methods into: Oracle. Includes all files           demonstrate better results. Among code LLMs,
+involved in the patch in the context. BM25. Re-              Qwen2.5-Coder exhibited performance compara-
+trieves relevant files across the entire repository by       ble to that of GPT-4, highlighting its superiority
+BM25 algorithm (Robertson et al., 2009) based on             in the domain of code generation. Despite this,
+the content of the pull request, and ranks them by           general-purpose LLMs with stronger foundational
+relevance and filling the context until reaching a           capabilities can approach the performance of spe-
+specified length.                                            cialized code LLMs. For example, R1-Distill,
+                                                             which shares the same underlying architecture as
+   Output format Generating an entire file can
+                                                             Qwen2.5-Coder, showed competitive performance.
+lead to interruptions due to generation limits and
+                                                             Among the models evaluated, the latest DeepSeek-
+is costly. Therefore, our experiments offer two
+                                                             V3 and R1 models achieve the best performance,
+edit-based generation settings: Natural. Generates
+                                                             significantly outperforming OpenAI’s GPT-4 and
+code edits in a natural format as pairs of before-
+                                                             o1 series. This underscores the importance of foun-
+and-after snippets, which can be converted into
+                                                             dational capabilities in LLMs for repository-level
+patches applicable to the code repository through
+                                                             development tasks. Additionally, the performance
+post-processing. Patch. Directly generates edits in
+                                                             on the lite version is slightly higher, but the relative
+patch format. Since patches use line numbers for
+                                                             trends remain largely consistent. When computa-
+fragment location, this setting includes line num-
+                                                             tional resources are limited, the metrics from FEA-
+bers in the context’s code content.
+                                                             Bench lite can be used to reflect the performance
+   The details of prompt and experimental settings           on the full benchmark.
+are shown in Appendix B.                                        The performance under different contexts As
+                                                      17165
+                      BM25 (27K)      BM25 (40K)                                         %Apply          %Resolved
+                         Retrieval Metrics (%)                   Model                Natural Patch    Natural Patch
+    Precision Avg.      40.26             31.85                  Qwen2.5-Coder(32B)    44.82   12.92    4.43    1.71
+    Recall Avg.         76.04             77.14                  R1-Distill(32B)       55.75   19.06    3.78    1.71
+    Recall All          51.61             53.03                  GPT-4                 59.10   33.26    4.71    3.07
+                                                                 GPT-4o                66.38   19.49    6.14    1.86
+                            Resolved Ratio (%)                   o1                    57.03     -      7.28      -
+                     Detailed Brief Detailed     Brief           DeepSeek-V3           69.09     -      8.14      -
+                                                                 DeepSeek-R1           73.16     -      9.92      -
+    GPT-4             3.14     2.86     3.14     2.78
+    GPT-4o            5.28     4.50     4.78     4.64
+                                                            Table 4: The impact of output formats Natural and Patch.
+                                                            We show the success rates of applying code edits to the
+Table 3: The retrieval metrics and the instance resolved
+                                                            code repository and the final resolved ratios. The ex-
+ratios under 27K and 40K token length limits of the
+                                                            periments on directly generating patches are conducted
+prompt in BM25 retrieval mode.
+                                                            only on the models shown in the first four columns.
+
+
+shown in Table 2, we evaluate the performance of            where all involved files are recalled.
+LLMs under different settings of new component                 Although the recalls slightly improve at the limit
+hints and retrieval methods. Overall, detailed new          of 40K tokens, model performance decreases. This
+component hints lead to better model performance.           indicates that current LLMs still struggle to extract
+However, in the results from FEA-Bench lite, brief          useful information from long contexts in repository-
+hints that only provide signatures performed bet-           level code development tasks. To improve perfor-
+ter. This discrepancy could be attributed to the lack       mance on FEA-Bench, enhancing the precision of
+of structured presentation of new components and            retrieval may be an effective approach than simply
+their documentation within the prompt, as illus-            increasing the context length.
+trated in Figure 6. Regarding retrieval methods, the
+Oracle setting generally outperforms the BM25 set-          6.2      Output Format of Edits
+ting, although the difference is not substantial. This      Direct repository-level code development outputs
+may be because code files containing new compo-             edits rather than new code itself. How LLMs can
+nents, which are regarded as known conditions in            better generate edits remains an open question.
+the FEA-Bench, ensure a certain baseline perfor-            Therefore, we analyze the impact of output formats
+mance. Considering the simplest instances in the            using the two configurations described in Section
+dataset: those involving modifications to only one          4.2. The two rightmost columns of Table 4 illustrate
+code file. Since instances in FEA-Bench always              a comparison between the Natural and the Patch
+include new components, the unique code file is             generation method, with the former demonstrat-
+known information. In this case, BM25 retrieved             ing significantly higher performance. The possible
+files supplement additional information, which can          reason is that generating patches imposes stricter
+lead to better model performance compared to the            formatting requirements, which current LLMs find
+Oracle setting.                                             challenging to adhere to accurately. Therefore, the
+                                                            main results presented in Table 2 adopt the perfor-
+6     Discussion                                            mance by Natural generation method.
+                                                               Whether using patches converted by converting
+6.1 Retrieved Files in Context
+                                                            before-and-after code snippets in Natural mode or
+We aim to investigate whether providing more code           directly generating patches in Patch mode, during
+context helps LLMs improve new feature develop-             evaluation, these patches must be applied to the
+ment. Therefore, we conducted experiments by                repository. The success rates of the git apply are
+increasing the prompt limit from 27K to 40K to-             shown in the middle two columns of Table 4. It
+kens, which surpasses the original context window           can be observed that the success rate in the Natural
+limit of Qwen2.5-Coder but can contain more re-             prompt mode is significantly higher, contributing
+trieved files. The results are presented in Table 3.        to the superior performance of LLMs in Natural
+The evaluated models include GPT-4 and GPT-4o,              mode. Further observation reveals a significant
+and we also report the average precision and recall         positive correlation between the success rate of ap-
+of Python files in the context relative to those in the     plying patches and the resolved ratio, regardless of
+gold patch, as well as the proportion of instances          whether Natural or Patch mode is used. DeepSeek-
+                                                         17166
+                              Agentless        Agentless-Lite        Oracle           BM25 (27K)
+                           %Reso. %Apply      %Reso. %Apply      %Reso. %Apply      %Reso. %Apply
+             DeepSeek-V3     -         -       11.0       71.0     14.5     70.5      13.0        69.0
+             GPT-4           -         -        3.5       94.5      6.0     54.0      2.0         37.0
+             GPT-4o         9.0       87.5      9.5       96.0     5.0      60.0       4.0        53.5
+             o1-mini        4.5       69.5      4.5       81.5     2.0      32.5       1.0        23.5
+             o1             14.0      90.5     10.0       89.5     10.0     49.5       5.0        33.5
+
+Table 5: The performance of Agentless on FEA-Bench lite, compared to the direct retrieval by Oracle and BM25.
+"%Reso." refers to the resolved ratio of task instances, while "%Apply" indicates the success rate of applying the
+generated code edits to the repository.
+
+
+
+
+                   Figure 4: The resolved ratios grouped by the categories of the repositories.
+
+
+R1, which performs the best on FEA-Bench, has              tories into several categories, as shown in Appendix
+the highest values for both metrics. This indicates        A.1. The performance of DeepSeek-R1, o1, and
+that the format of code edits is a critical factor lim-    GPT-4o across different categories is illustrated in
+iting the performance of LLMs on such tasks.               Figure 4. The resolved ratios of different models
+                                                           vary across categories; task instances in the Test-
+6.3 Evaluation of Agent Frameworks                         ing category (from the repo: joke2k/faker) have
+To further evaluate the performance of current state-      the highest resolved ratio, followed by the Internet
+of-the-art methods on FEA-Bench, we conduct ex-            category. For the remaining categories, the pass
+periments on the lite subset using the cost-efficient      ratio of the three models are at a similar level.
+Agentless and Agentless-lite frameworks (Xia et al.,          Among the three LLMs, GPT-4o shows slightly
+2024). We compare the final performance of us-             weaker performance compared to the other models,
+ing these agents with that of directly construct-          but its trend is largely consistent with o1. Notably,
+ing the context using Oracle and BM25 retrieval            DeepSeek-R1 exhibits weaker performance in the
+methods, as shown in Table 5. Notably, Agent-              Testing category but significantly outperforms both
+less improves the resolved ratio of task instances         GPT-4o and o1 in all other categories. This sug-
+over BM25 for most models, with the largest gains          gests that integrating different models might further
+observed for GPT-4o, o1-mini, and o1. This im-             enhance overall performance on FEA-Bench.
+provement strongly correlates with the increased
+success rate of applying code edits, highlighting the       6.5 Performances under Different Complexity
+challenge of adhering to the required code editing              of New Components
+format, as discussed in Section 6.2. Overall, Agent-       To further investigate whether the implementation
+less and Agentless-lite perform similarly, with no         of new components adds pressure on LLMs in com-
+significant advantage over the results under the           pleting feature implementation tasks, we examine
+Oracle setting. This indicates that current meth-          the relationship between the number of new func-
+ods still have substantial room for improvement in         tions and the number of resolved instances. The
+repository-level new feature implementation.               number of added functions is more indicative of
+                                                           the complexity of new components, as functions
+6.4 Performances across Repositories                       are more atomic compared to classes. Figure 5 il-
+To further analyze LLMs’ performance at a finer            lustrates the distribution of task instances and those
+granularity, we examine resolved ratios across dif-        solved by R1 with respect to the number of added
+ferent categories of repositories. We classify reposi-     functions. Excluding instances where the number
+                                                      17167
+                                                          Limitations
+                                                          Our constructed data and experiments have cer-
+                                                          tain limitations. First, our benchmark includes
+                                                          only Python repositories, as Python projects are
+                                                          easier to execute and generally follow consistent
+                                                          testing frameworks. Second, the quantity of high-
+                                                          quality data suitable for repository-level incremen-
+                                                          tal development is limited. High-quality and us-
+                                                          able pull requests for new feature development are
+                                                          relatively scarce. Many repository-level code de-
+Figure 5: Histogram of the number of added functions      velopments for implementing new functionalities
+both in all task instances and resolved task instances    were committed during the early stages of repos-
+by DeepSeek-R1 (under Natural and Detailed prompt         itories, without going through the rigorous code
+settings).                                                review process typical of the open-source commu-
+                                                          nity, resulting in lower data quality that cannot be
+                                                          utilized. Furthermore, the software’s early-stage
+of added functions is zero (i.e., adding only classes     developments might not even have been conducted
+for storing variables), it is evident that the resolved   using the GitHub platform, posing a challenge for
+ratio decreases as the number of added functions          data collection and utilization. Consequently, FEA-
+increases. The resolved ratio is 18.96% when the          Bench, which is built on publicly available data and
+number of added functions is 1, 8.24% when it is          subjected to stringent filtering, may exhibit certain
+2, and 5.47% when it is greater than or equal to          scenario limitations.
+3. This indicates that implementing new features             Due to the long context involved in repository-
+is a more challenging task than fixing bugs, which        level code development, the cost of conducting
+constitute the majority of instances in SWE-bench.        experiments using LLMs is relatively high. There-
+Moreover, the more complex the new components,            fore, the experimental results are based on a sin-
+the higher the difficulty of successful implementa-       gle round generation, akin to Pass@1, which may
+tion.                                                     introduce a certain level of bias into the results.
+                                                          Additionally, given the scarcity of API resources
+                                                          for models like DeepSeek-V3 and R1, some results
+7   Conclusion                                            in the main experiments presented in Table 2 are
+                                                          missing. We hope that more affordable models
+                                                          similar to DeepSeek can be further developed to
+In this paper, we introduce FEA-Bench, a novel
+                                                          facilitate research and applications in the field of
+benchmark for evaluating the repository-level in-
+                                                          repository-level code development.
+cremental code development capabilities of large
+language models (LLMs). Our benchmark focuses
+                                                          Ethics Statement
+on the critical task of implementing new features
+by adding new components to existing code repos-          We collected the data from publicly available
+itories. Through our comprehensive dataset and            Github repositories only for research purposes. All
+rigorous evaluation, we demonstrate that current          the repositories have licenses that allow free soft-
+LLMs face significant challenges in this domain.          ware use. LLMs are used only for classification
+We also analyzed that the retrieval method of files,      during the construction of the FEA-Bench dataset,
+the output format, the repository itself, and the         so no harmful information can be created in the
+complexity of new components all impact the im-           dataset. The dataset and code for our proposed
+plementation of new features. Our work highlights         method will be made publicly available for aca-
+the need for further advancements in LLMs’ rea-           demic research. However, we should note that
+soning and generation capabilities to better address      the inference results of the task instances from the
+real-world software engineering tasks. We hope            benchmark may contain code that is harmful to
+that FEA-Bench will serve as a valuable resource          computer systems. Evaluation by docker is recom-
+for the research community, driving progress in           mended, just like SWE-bench.
+this important area.                                         Additionally, the ChatGPT platform was used as
+                                                     17168
+an AI assistant for refining the paper writing.             Dan Hendrycks, Steven Basart, Saurav Kadavath, Man-
+                                                              tas Mazeika, Akul Arora, Ethan Guo, Collin Burns,
+Acknowledgments                                               Samir Puranik, Horace He, Dawn Song, et al. 2021.
+                                                              Measuring coding challenge competence with apps.
+This work was supported by National Science and               ArXiv preprint, abs/2105.09938.
+Technology Major Project (No. 2022ZD0116308)
+                                                            Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-
+and National Natural Science Foundation of China              iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,
+(62036001) . The corresponding author is Xin                  Bowen Yu, Keming Lu, et al. 2024. Qwen2. 5-coder
+Zhang and Houfeng Wang.                                       technical report. ArXiv preprint, abs/2409.12186.
+
+                                                            Aaron Hurst, Adam Lerer, Adam P Goucher, Adam
+                                                              Perelman, Aditya Ramesh, Aidan Clark, AJ Os-
+References                                                    trow, Akila Welihinda, Alan Hayes, Alec Radford,
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama             et al. 2024. Gpt-4o system card. ArXiv preprint,
+  Ahmad, Ilge Akkaya, Florencia Leoni Aleman,                 abs/2410.21276.
+  Diogo Almeida, Janko Altenschmidt, Sam Altman,
+  Shyamal Anadkat, et al. 2023. Gpt-4 technical report.     Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richard-
+  ArXiv preprint, abs/2303.08774.                             son, Ahmed El-Kishky, Aiden Low, Alec Helyar,
+                                                              Aleksander Madry, Alex Beutel, Alex Carney, et al.
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten            2024. Openai o1 system card. ArXiv preprint,
+   Bosma, Henryk Michalewski, David Dohan, Ellen              abs/2412.16720.
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, et al.
+   2021. Program synthesis with large language models.      Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia
+  ArXiv preprint, abs/2108.07732.                             Yan, Tianjun Zhang, Sida Wang, Armando Solar-
+                                                              Lezama, Koushik Sen, and Ion Stoica. 2024. Live-
+Ramakrishna Bairi, Atharv Sonwane, Aditya Kanade,             codebench: Holistic and contamination free eval-
+  Arun Iyer, Suresh Parthasarathy, Sriram Rajamani,           uation of large language models for code. ArXiv
+  B Ashok, and Shashank Shet. 2024. Codeplan:                 preprint, abs/2403.07974.
+  Repository-level coding using llms and planning.
+  Proceedings of the ACM on Software Engineering,           Carlos E Jimenez, John Yang, Alexander Wettig,
+  1(FSE):675–698.                                             Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R
+                                                              Narasimhan. 2024. SWE-bench: Can language mod-
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan,             els resolve real-world github issues? In The Twelfth
+ Henrique Ponde De Oliveira Pinto, Jared Kaplan,              International Conference on Learning Representa-
+ Harri Edwards, Yuri Burda, Nicholas Joseph, Greg             tions.
+ Brockman, et al. 2021. Evaluating large lan-
+ guage models trained on code. ArXiv preprint,              Harshit Joshi, José Pablo Cambronero Sánchez, Sumit
+ abs/2107.03374.                                              Gulwani, Vu Le, Gust Verbruggen, and Ivan Radicek.
+                                                              2023. Repair is nearly generation: Multilingual pro-
+Arghavan Moradi Dakhel, Vahid Majdinasab, Amin                gram repair with llms. In Thirty-Seventh AAAI Con-
+  Nikanjam, Foutse Khomh, Michel C Desmarais, and             ference on Artificial Intelligence, AAAI 2023, Thirty-
+  Zhen Ming Jack Jiang. 2023. Github copilot ai pair          Fifth Conference on Innovative Applications of Artifi-
+  programmer: Asset or liability? Journal of Systems          cial Intelligence, IAAI 2023, Thirteenth Symposium
+  and Software, 203:111734.                                   on Educational Advances in Artificial Intelligence,
+                                                              EAAI 2023, Washington, DC, USA, February 7-14,
+Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,            2023, pages 5131–5140. AAAI Press.
+  Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng
+  Sha, Xin Peng, and Yiling Lou. 2023. Classe-              Jia Li, Ge Li, Zhuo Li, Zhi Jin, Xing Hu, Kechi Zhang,
+  val: A manually-crafted benchmark for evaluating             and Zhiyi Fu. 2023a. Codeeditor: Learning to edit
+  llms on class-level code generation. ArXiv preprint,         source code with pre-trained models. ACM Trans-
+  abs/2308.01861.                                              actions on Software Engineering and Methodology,
+                                                               32(6):1–22.
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+  Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,            Jia Li, Ge Li, Xuanming Zhang, Yihong Dong, and
+  Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-           Zhi Jin. 2024a. Evocodebench: An evolving code
+  centivizing reasoning capability in llms via reinforce-      generation benchmark aligned with real-world code
+  ment learning. ArXiv preprint, abs/2501.12948.               repositories. ArXiv preprint, abs/2404.00599.
+
+Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie,               Jia Li, Ge Li, Yunfei Zhao, Yongmin Li, Huanyu
+  Kai Dong, Wentao Zhang, Guanting Chen, Xiao                  Liu, Hao Zhu, Lecheng Wang, Kaibo Liu, Zheng
+  Bi, Yu Wu, YK Li, et al. 2024. Deepseek-coder:               Fang, Lanshen Wang, et al. 2024b. Deveval:
+  When the large language model meets programming–             A manually-annotated code generation benchmark
+  the rise of code intelligence. ArXiv preprint,               aligned with real-world code repositories. ArXiv
+  abs/2401.14196.                                              preprint, abs/2405.19856.
+                                                       17169
+Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas           Yanlin Wang, Yanli Wang, Daya Guo, Jiachi Chen,
+  Muennighoff, Denis Kocetkov, Chenghao Mou, Marc             Ruikai Zhang, Yuchi Ma, and Zibin Zheng. 2024.
+  Marone, Christopher Akiki, Jia Li, Jenny Chim, et al.       Rlcoder: Reinforcement learning for repository-level
+  2023b. Starcoder: may the source be with you!               code completion. ArXiv preprint, abs/2407.19487.
+  ArXiv preprint, abs/2305.06161.
+                                                            Yaoxiang Wang, Haoling Li, Xin Zhang, Jie Wu, Xiao
+Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang,                 Liu, Wenxiang Hu, Zhongxin Guo, Yangyu Huang,
+  Bochao Wu, Chengda Lu, Chenggang Zhao, Chengqi              Ying Xin, Yujiu Yang, et al. 2025. Epicoder: Encom-
+  Deng, Chenyu Zhang, Chong Ruan, et al. 2024a.               passing diversity and complexity in code generation.
+  Deepseek-v3 technical report. ArXiv preprint,               arXiv preprint arXiv:2501.04694.
+  abs/2412.19437.                                           Yuxiang Wei, Zhe Wang, Jiawei Liu, Yifeng Ding, and
+                                                              Lingming Zhang. 2024. Magicoder: Empowering
+Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Ling-         code generation with oss-instruct. In Forty-first Inter-
+   ming Zhang. 2023a. Is your code generated by chat-         national Conference on Machine Learning.
+   gpt really correct? rigorous evaluation of large lan-
+   guage models for code generation. In Advances in         Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and
+   Neural Information Processing Systems 36: Annual           Lingming Zhang. 2024. Agentless: Demystify-
+   Conference on Neural Information Processing Sys-           ing llm-based software engineering agents. ArXiv
+   tems 2023, NeurIPS 2023, New Orleans, LA, USA,             preprint, abs/2407.01489.
+   December 10 - 16, 2023.
+                                                            Frank F. Xu, Uri Alon, Graham Neubig, and Vincent Jo-
+Siyao Liu, He Zhu, Jerry Liu, Shulin Xin, Aoyan Li, Rui        sua Hellendoorn. 2022. A systematic evaluation of
+   Long, Li Chen, Jack Yang, Jinxiang Xia, ZY Peng,            large language models of code. In Proceedings of the
+   et al. 2024b. Fullstack bench: Evaluating llms as full      6th ACM SIGPLAN International Symposium on Ma-
+   stack coder. ArXiv preprint, abs/2412.00535.                chine Programming, MAPS 2022, page 1–10, New
+                                                              York, NY, USA. Association for Computing Machin-
+Tianyang Liu, Canwen Xu, and Julian McAuley.                   ery.
+  2023b. Repobench: Benchmarking repository-level           Jian Yang, Jiajun Zhang, Jiaxi Yang, Ke Jin, Lei Zhang,
+  code auto-completion systems. ArXiv preprint,                Qiyao Peng, Ken Deng, Yibo Miao, Tianyu Liu, Zeyu
+  abs/2306.03091.                                              Cui, et al. 2024a. Execrepobench: Multi-level exe-
+                                                               cutable code completion evaluation. ArXiv preprint,
+Junyu Luo, Weizhi Zhang, Ye Yuan, Yusheng Zhao, Jun-           abs/2412.11990.
+  wei Yang, Yiyang Gu, Bohan Wu, Binqi Chen, Ziyue
+  Qiao, Qingqing Long, et al. 2025. Large language          John Yang, Carlos E Jimenez, Alexander Wettig, Kil-
+  model agent: A survey on methodology, applications          ian Lieret, Shunyu Yao, Karthik Narasimhan, and
+  and challenges. arXiv preprint arXiv:2503.21460.            Ofir Press. 2024b. Swe-agent: Agent-computer inter-
+                                                              faces enable automated software engineering. ArXiv
+Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xi-                preprint, abs/2405.15793.
+  ubo Geng, Wenxiang Hu, Chongyang Tao, Jing Ma,
+  Qingwei Lin, and Daxin Jiang. 2023. Wizardcoder:          Hao Yu, Bo Shen, Dezhi Ran, Jiaxin Zhang, Qi Zhang,
+  Empowering code large language models with evol-            Yuchi Ma, Guangtai Liang, Ying Li, Qianxiang
+  instruct. ArXiv preprint, abs/2306.08568.                   Wang, and Tao Xie. 2024a. Codereval: A bench-
+                                                              mark of pragmatic code generation with generative
+Zhenyu Pan, Rongyu Cao, Yongchang Cao, Yingwei                pre-trained models. In Proceedings of the 46th
+  Ma, Binhua Li, Fei Huang, Han Liu, and Yongbin              IEEE/ACM International Conference on Software
+  Li. 2024. Codev-bench: How do llms understand               Engineering, pages 1–12.
+  developer-centric code completion? ArXiv preprint,        Zhaojian Yu, Xin Zhang, Ning Shang, Yangyu Huang,
+  abs/2410.01353.                                             Can Xu, Yishujie Zhao, Wenxiang Hu, and Qiufeng
+                                                              Yin. 2024b. WaveCoder: Widespread and versatile
+Stephen Robertson, Hugo Zaragoza, et al. 2009. The            enhancement for code large language models by in-
+   probabilistic relevance framework: Bm25 and be-            struction tuning. In Proceedings of the 62nd Annual
+  yond. Foundations and Trends® in Information Re-            Meeting of the Association for Computational Lin-
+   trieval, 3(4):333–389.                                     guistics (Volume 1: Long Papers), pages 5140–5153,
+                                                              Bangkok, Thailand. Association for Computational
+Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten        Linguistics.
+  Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+  Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.         Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Code llama: Open foundation models for code.                Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  ArXiv preprint, abs/2308.12950.                             Weizhu Chen. 2023. RepoCoder: Repository-level
+                                                              code completion through iterative retrieval and gen-
+Yuling Shi, Songsong Wang, Chengcheng Wan, and                eration. In Proceedings of the 2023 Conference on
+  Xiaodong Gu. 2024. From code to correctness: Clos-          Empirical Methods in Natural Language Processing,
+  ing the last mile of code generation with hierarchical      pages 2471–2484, Singapore. Association for Com-
+  debugging. ArXiv preprint, abs/2410.01215.                  putational Linguistics.
+                                                       17170
+Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Ab-              Initially, we filter pull requests (PRs) based on
+  hik Roychoudhury. 2024. Autocoderover: Au-              whether they were merged, resulting in the number
+  tonomous program improvement. In Proceedings
+                                                          of PRs shown in the "# PR" column of Table 7.
+  of the 33rd ACM SIGSOFT International Symposium
+  on Software Testing and Analysis, ISSTA 2024, page      Next, we excluded PRs without any test files, leav-
+  1592–1604, New York, NY, USA. Association for           ing only those PRs with the necessary conditions
+  Computing Machinery.                                    to be considered valid task instances, as indicated
+Dewu Zheng, Yanlin Wang, Ensheng Shi, Ruikai Zhang,       by the "# All tasks" column. Further filtering was
+  Yuchi Ma, Hongyu Zhang, and Zibin Zheng. 2024.          conducted according to the third and fourth stages
+  Towards more realistic evaluation of llm-based code     illustrated in Figure 3, retaining only those PRs that
+  generation: an experimental study and beyond. ArXiv     introduce at least one new component and are clas-
+  preprint, abs/2406.06918.
+                                                          sified as "new feature" types by GPT-4o based on
+Qihao Zhu, Daya Guo, Zhihong Shao, Dejian Yang,           the PR content. Additionally, instances with patch
+  Peiyi Wang, Runxin Xu, Y Wu, Yukun Li, Huazuo           lengths exceeding 8K (8192) tokens are excluded
+  Gao, Shirong Ma, et al. 2024. Deepseek-coder-v2:        to remove long-tail distributions and noise. The
+  Breaking the barrier of closed-source models in code
+  intelligence. ArXiv preprint, abs/2406.11931.           remaining candidate task instances are listed under
+                                                          the "# Candidates" column. This filtering step does
+Terry Yue Zhuo, Minh Chien Vu, Jenny Chim, Han Hu,        not exist in SWE-bench, leading to a smaller num-
+  Wenhao Yu, Ratnadira Widyasari, Imam Nur Bani           ber of candidate task instances in our benchmark
+  Yusuf, Haolan Zhan, Junda He, Indraneil Paul, et al.
+  2024. Bigcodebench: Benchmarking code genera-           dataset.
+  tion with diverse function calls and complex instruc-
+  tions. ArXiv preprint, abs/2406.15877.                     Finally, for each instance, we apply the test
+                                                          patch to the repository in the base commit state
+A        Dataset Details                                  to verify that unit tests could accurately evaluate
+A.1 Repositories                                          the corresponding code edits. Similar to SWE-
+                                                          bench, our pipeline annotates each instance with
+The task instances in FEA-Bench are derived
+                                                          the corresponding repository version and provides
+from 83 Python packages corresponding to GitHub
+                                                          environment and installation configurations based
+repositories. For each package, we obtained its
+                                                          on versions. For repositories included in SWE-
+license information and topic classification from
+                                                          bench, we directly utilize their environment setup
+the PyPI website. For packages missing the topic
+                                                          and test configurations grouped by versions. For
+attribute, we utilized their README files and em-
+                                                          other repositories, minimal installation instructions
+ployed GPT-4o to classify them into topics avail-
+                                                          (pip install -e .) and basic pytest testing
+able on the PyPI website5 . Finally, considering
+                                                          configurations are used. Initially, we run the unit
+the distribution of the topics of task instances in
+                                                          tests directly and observe the pass status. Subse-
+FEA-Bench, we further simplify the topics to sev-
+                                                          quently, we apply the gold patch from the PR and
+eral categories to facilitate data visualization and
+                                                          execute the unit tests again. We allowed errors such
+analysis, as presented in Section 6.4.
+                                                          as AttributeError and ImportError in the first
+   The relevant information regarding the involved
+                                                          test, which are common when new components are
+code repositories is summarized in Table 6.
+                                                          not yet implemented, but these errors are not per-
+A.2 Construction Details                                  mitted in SWE-bench data collection pipeline. For
+                                                          the second test after applying the gold patch, any
+Table 7 shows the number of remaining task in-
+                                                          FAILED status is unacceptable to ensure data qual-
+stances for each stage during the data collection
+                                                          ity. After this execution-based filtering process, the
+process. In Section 3.2, we mentioned that after the
+                                                          final task instances constitute the FEA-Bench task
+fast validation step, including the 18 repositories
+                                                          instances, as shown in the "# in Full" column of
+from SWE-bench, a total of 119 repositories (18 +
+                                                          Table 7.
+101) are available for further data collection. On
+this basis, we crawl the pull requests from GitHub
+                                                             We only present information for repositories that
+to obtain code changes. Files with names contain-
+                                                          have at least one instance in FEA-Bench. Specifi-
+ing words like test are identified as unit test files
+                                                          cally, out of the 119 repositories identified during
+executable by pytest.
+                                                          the repository collection phase, only 83 repositories
+    5
+        https://pypi.org/classifiers/                     contain at least one task instance.
+                                                     17171
+                      You will be provided with a partial code base and an feature request which requires a
+         Premise
+                      new feature to add in the code repository.
+
+                      <request>
+                      Pull Request Title + Pull Request Body
+         Request
+                      Comments before first commit
+         Content
+                      </request>
+
+                      Here is the discussion in the issues of the pull request.
+         Issue        <issues>
+         Content      Issue Title + Issue Body
+         (If any)     Comments before first commit
+                      </issues>
+                      To implement the new features mentioned above, some design in this repository need
+         Doc          to be modified, as the modification in document files:
+         Changes      <description changes>
+         (If any)     Gold patches that are not from .py files
+                      </description changes>
+
+                   There are several new functions or classes that need to be implemented, using the definitions below:
+                   <definitions>
+                   [start of new definitions in file 1]
+                   (definition of namespace of new component 1:)
+                   signature of new component 1 in file 1    + docstring of new component 1 in file 1
+        New        (definition of namespace of new component 2:)
+        Components signature of new component 2 in file 1    + docstring of new component 2 in file 1
+                   ...
+                   [end of new definitions in file 1]
+                   [start of new definitions in file 2]
+                   ...
+                   </definitions>
+
+                      All the involved readme files and code files are listed below
+                      with their contents. If a file's content is indicated as empty, it                       README files
+                      means that the file does not yet exist in the current repository
+                      and needs to be created with new content.
+                      <code>                                                               De-duplication
+        Code Files                                                                                             Files with new
+                      [start of file 1]
+                                                                                                                components
+                      All content in file 1; In "Patch" mode, line number is added
+                      [end of file 1]
+                      [start of file 2]
+                                                                                                              Files Retrieved
+                      ...                                                                                   ("Oracle" or BM25)
+                      </code>
+
+
+        Output
+                                          "Natural" Format Output Instructions / "Patch" Format Instructions
+        Instruction
+
+
+
+
+                             Figure 6: The prompt for the inference of the task instances.
+
+
+A.3 FEA-Bench lite                                                         • The feature request descriptions contain fewer
+                                                                             than 40 words.
+The feature implementation task proposed in this
+study, as one primary type of repository-level in-                         • The instance involves cascading issues or com-
+cremental code development tasks, require LLMs                               mit SHA-256 references.
+with long context capabilities to perform reasoning
+                                                                           • The descriptions contain images.
+over extensive file contents. Such inference is com-
+putationally expensive. Considering the possible                          Additionally, to limit task difficulty, instances
+evaluation of multi-round code generation systems,                     meeting any of the following criteria are also ex-
+it is necessary to select a high-quality subset for                    cluded:
+more efficient evaluation. Therefore, we establish                         • Involve deleting code files.
+stricter criteria to curate a higher-quality, lower-
+difficulty FEA-Bench lite subset.                                          • Involve more than three code files.
+   Instances meeting any of the following low-                             • The gold patch contains More than 10 code
+quality criteria are excluded:                                               change hunks.
+                                                                17172
+    • Natural-formatted code change content ex-               For larger open-source and all closed-source
+      ceeding 4K(4096) tokens.                             models, specifically DeepSeek-V3, R1, and Ope-
+                                                           nAI series models, we invoke their APIs for infer-
+    • Contain new class(es).                               ence. The versions of the OpenAI models used are
+                                                           as follows:
+    • Contain more than ten added functions.
+                                                                • GPT-4: gpt-4-turbo-2024-04-09
+   Beyond the lite subset, we also expect to col-
+laborate with professional software engineers to                • GPT-4o: gpt-4o-2024-05-13
+annotate a verified subset, similar to SWE-bench
+                                                                • o1: o1-2024-12-17
+Verified6 .
+                                                                • o1-mini: o1-mini-2024-09-12
+B     Inference
+                                                              When possible, the temperature and top-p set-
+B.1    Prompt                                              tings are fixed at 0.2 and 0.95, respectively. For
+In Section 4.2, we present different prompt set-           DeepSeek-V3 and R1, the max output tokens are
+tings for the context of inference. A more detailed        8K (8192). For o1 and o1-mini, the max output
+prompt structure is illustrated in Figure 6. The           tokens is 100,000 and 65,536 (64K), respectively.
+prompt is constructed using the first two items               During the inference process, LLMs perform a
+shown in Figure 2 as known input information. The          single generation for each task instance in FEA-
+feature request includes both pull request content         Bench, and the output is converted into a patch
+and issue content. Information about new com-              for evaluation. The evaluation tools are adapted
+ponents and related code files is listed straightfor-      from the SWE-bench evaluation scripts which are
+wardly within the prompt.                                  based on docker, ensuring safety and easy use for
+   In Figure 6, the italicized text indicates place-       the evaluation process.
+holders that need to be filled with specific data
+of each task instance, while the other text repre-
+sents standard prompt content. Red text highlights
+additional information for detailed hints of new
+components, and blue text indicates parts that need
+to be modified when directly generating patches as
+results.
+   In this study, we provide two formats for generat-
+ing code edits: Natural and Patch. The correspond-
+ing output instructions are illustrated in Figure 7.
+To ensure that the models produce outputs in the
+correct format, both modes are accompanied by
+detailed instructions and examples.
+   We include several different prompts mentioned
+above for each task instance in the dataset files.
+
+B.2    Generation Configurations
+For models with fewer than 32 billion parameters,
+we utilized the vLLM framework 7 on an 8-GPU
+NVIDIA A100 workstation, employing tensor par-
+allelism for inference. The maximum number of
+generated tokens is limited to 4096, matching the
+generation length limits of used OpenAI GPT-4
+and GPT-4o in our experiments.
+    6
+      https://openai.com/index/introducing-swe-bench-
+verified/
+    7
+      https://github.com/vllm-project/vllm
+
+                                                        17173
+            "Natural" Format Output Instructions                                                      "Patch" Format Instructions
+Please solve the feature request with adding the functions or classes between     Please solve the feature request with adding the functions or classes between
+the <definitions> and </definitions>. You do not need to output any changes       the <definitions> and </definitions>. You do not need to output any changes
+or edits for description files like .md or .rst files.                            or edits for description files like .md or .rst files.
+I need you to make multiple edits across one or more files in a repository to     I need you to make multiple edits across one or more files in a repository to
+implement a specific feature or improvement mentioned above.                      implement a specific feature or improvement mentioned above.
+For each edit, output the changes in the following format:                        The edits should be output in patch format.
+
+```                                                                               Here is an example of a patch file. It consists of changes to the code base.
+<edit>                                                                            It specifies the file names, the line numbers of each change, and the removed
+[start of the snippet before editing in <file_path>]                              and added lines.
+<code_before_edit>                                                                A single patch file can contain changes to multiple files.
+[end of the snippet before editing in <file_path>]
+                                                                                  <patch>
+[start of the snippet after editing in <file_path>]                               diff --git a/src/code.py b/src/code.py
+<code_after_edit>                                                                 --- a/src/code.py
+[end of the snippet after editing in <file_path>]                                 +++ b/src/code.py
+</edit>                                                                           @@ -1,11 +1,14 @@
+```                                                                                def factorial(a):
+                                                                                  + assert type(a) == int and a >= 0
+Notes:                                                                               res = 1
+- The <file_path> is the relative path of the file being edited.                  - while a >= 0:
+- The <code_before_edit> snippet should include several lines before and          + while a >= 2:
+after the modified region, unless the file was originally empty.                        res *= a
+- If a file was originally empty, leave <code_before_edit> blank but ensure       +      a -= 1
+<code_after_edit> includes the new content.                                          return res
+- Ensure the edits are sequential and address all necessary changes to achieve       #
+the requested feature.                                                               #
+                                                                                     #
+Here is an example of the output format:                                             #
+<edit>                                                                             def exact_dividion(x, y):
+[start of the snippet before editing in src/code.py]                              + assert type(x) == type(y) == int and x > 0 and y > 0
+def factorial(a):                                                                    return x % y == 0
+  res = 1                                                                         diff --git a/src/demo.py b/src/demo.py
+  while a >= 0:                                                                   new file mode 100644
+     res *= a                                                                     --- /dev/null
+  return res                                                                      +++ b/src/demo.py
+[end of the snippet before editing in src/code.py]                                @@ -0,0 +1,2 @@
+                                                                                  +from code import factorial
+[start of the snippet after editing in src/code.py]                               +print(factorial(5))
+def factorial(a):                                                                 </patch>
+  assert type(a) == int and a >= 0
+  res = 1                                                                         I need you to solve the provided feature request by generating a single patch
+  while a >= 2:                                                                   file that I can apply directly to this repository using git apply. Please respond
+     res *= a                                                                     with a single patch file in the format shown above.
+     a -= 1                                                                       Respond below:
+  return res
+[end of the snippet after editing in src/code.py]
+</edit>
+
+<edit>
+[start of the snippet before editing in src/code.py]
+def exact_dividion(x, y):
+  return x % y == 0
+[end of the snippet before editing in src/code.py]
+
+[start of the snippet after editing in src/code.py]
+def exact_dividion(x, y):
+  assert type(x) == type(y) == int and x > 0 and y > 0
+  return x % y == 0
+[end of the snippet after editing in src/code.py]
+</edit>
+
+<edit>
+[start of the snippet before editing in src/demo.py]
+[end of the snippet before editing in src/demo.py]
+
+[start of the snippet after editing in src/demo.py]
+from code import factorial
+print(factorial(5))
+[end of the snippet after editing in src/demo.py]
+</edit>
+I need you to solve the feature request with a series of edits in the format
+shown above. Respond below:
+
+
+
+
+                            Figure 7: The output instructions at the rear of the inference prompt.
+
+
+
+
+                                                                               17174
+                  Repo Name                  License                                 Topic                              Category        Source
+astropy/astropy                           BSD-3-Clause   Scientific/Engineering::Astronomy                            Physics       SWE-Bench
+django/django                             BSD-3-Clause   Internet::WWW/HTTP                                           Internet      SWE-Bench
+matplotlib/matplotlib                     Other          Scientific/Engineering::Visualization                        Other         SWE-Bench
+mwaskom/seaborn                           BSD-3-Clause   Scientific/Engineering::Visualization                        Other         SWE-Bench
+pallets/flask                             BSD-3-Clause   Internet::WWW/HTTP                                           Internet      SWE-Bench
+pvlib/pvlib-python                        BSD-3-Clause   Scientific/Engineering::Physics                              Physics       SWE-Bench
+pydata/xarray                             Apache-2.0     Scientific/Engineering::Information Analysis                 Other         SWE-Bench
+pydicom/pydicom                           Others         Scientific/Engineering::Medical Science Apps.                Medical       SWE-Bench
+pylint-dev/astroid                        LGPL-2.1       Software Development::Libraries                              Libraries     SWE-Bench
+pylint-dev/pylint                         GPL-2.0        Software Development::Quality Assurance                      Other         SWE-Bench
+pyvista/pyvista                           MIT            Scientific/Engineering::Information Analysis                 Other         SWE-Bench
+scikit-learn/scikit-learn                 BSD-3-Clause   Scientific/Engineering::Artificial Intelligence              AI            SWE-Bench
+sphinx-doc/sphinx                         BSD-2-Clause   Text Processing::Markup                                      Other         SWE-Bench
+sqlfluff/sqlfluff                         MIT            Software Development::Quality Assurance                      Other         SWE-Bench
+sympy/sympy                               Others         Scientific/Engineering::Mathematics                          Mathematics   SWE-Bench
+Aider-AI/aider                            Apache-2.0     Software Development::Code Generators                        Other         Fast-Validation
+Cog-Creators/Red-DiscordBot               GPL-3.0        Communications::Chat                                         Other         Fast-Validation
+DLR-RM/stable-baselines3                  MIT            Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+EleutherAI/lm-evaluation-harness          MIT            Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+Project-MONAI/MONAI                       Apache-2.0     Scientific/Engineering::Medical Science Apps.                Medical       Fast-Validation
+PyThaiNLP/pythainlp                       Apache-2.0     Text Processing::Linguistic                                  Other         Fast-Validation
+RDFLib/rdflib                             BSD-3-Clause   Software Development::Libraries                              Libraries     Fast-Validation
+Textualize/rich                           MIT            Software Development::Libraries                              Libraries     Fast-Validation
+Textualize/textual                        MIT            Software Development::User Interfaces                        Other         Fast-Validation
+TileDB-Inc/TileDB-Py                      MIT            Software Development::Libraries                              Libraries     Fast-Validation
+astronomer/astronomer-cosmos              Apache-2.0     Software Development::Build Tools                            Build Tools   Fast-Validation
+atlassian-api/atlassian-python-api        Apache-2.0     Internet::WWW/HTTP                                           Internet      Fast-Validation
+aws-cloudformation/cfn-lint               MIT-0          Software Development::Quality Assurance                      Other         Fast-Validation
+aws-powertools/powertools-lambda-python   MIT-0          Software Development::Libraries                              Libraries     Fast-Validation
+aws/sagemaker-python-sdk                  Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+biopragmatics/bioregistry                 MIT            Scientific/Engineering::Bio-Informatics                      Other         Fast-Validation
+boto/boto3                                Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+boto/botocore                             Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+cocotb/cocotb                             BSD-3-Clause   Scientific/Engineering::Electronic Design Automation (EDA)   Other         Fast-Validation
+conan-io/conan                            MIT            Software Development::Build Tools                            Build Tools   Fast-Validation
+deepset-ai/haystack                       Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+docker/docker-py                          Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+dpkp/kafka-python                         Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+embeddings-benchmark/mteb                 Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+facebookresearch/hydra                    MIT            Software Development::Libraries                              Libraries     Fast-Validation
+fairlearn/fairlearn                       MIT            Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+falconry/falcon                           Apache-2.0     Internet::WWW/HTTP                                           Internet      Fast-Validation
+google-deepmind/optax                     Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+googleapis/python-aiplatform              Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+googleapis/python-bigquery                Apache-2.0     Internet::WWW/HTTP                                           Internet      Fast-Validation
+gradio-app/gradio                         Apache-2.0     Scientific/Engineering::Human Machine Interfaces             Other         Fast-Validation
+graphql-python/graphene                   MIT            Software Development::Libraries                              Libraries     Fast-Validation
+huggingface/accelerate                    Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+huggingface/datasets                      Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+huggingface/huggingface_hub               Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+huggingface/pytorch-image-models          Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+huggingface/trl                           Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+joblib/joblib                             BSD-3-Clause   Software Development::Libraries                              Libraries     Fast-Validation
+joke2k/faker                              MIT            Software Development::Testing                                Testing       Fast-Validation
+lark-parser/lark                          MIT            Text Processing::Linguistic                                  Other         Fast-Validation
+minio/minio-py                            Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+open-mmlab/mmengine                       Apache-2.0     Utilities                                                    Other         Fast-Validation
+openvinotoolkit/datumaro                  MIT            Scientific/Engineering::Image Processing                     Other         Fast-Validation
+pgmpy/pgmpy                               MIT            Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+pre-commit/pre-commit                     MIT            Software Development::Quality Assurance                      Other         Fast-Validation
+prometheus/client_python                  Apache-2.0     System::Monitoring                                           Other         Fast-Validation
+prompt-toolkit/python-prompt-toolkit      BSD-3-Clause   Software Development::User Interfaces                        Other         Fast-Validation
+pygments/pygments                         BSD-2-Clause   Software Development::Documentation                          Other         Fast-Validation
+pyocd/pyOCD                               Apache-2.0     Software Development::Debuggers                              Other         Fast-Validation
+pypa/hatch                                MIT            Software Development::Build Tools                            Build Tools   Fast-Validation
+pyro-ppl/pyro                             Apache-2.0     Scientific/Engineering::Artificial Intelligence              AI            Fast-Validation
+python-hyper/h2                           MIT            Internet::WWW/HTTP                                           Internet      Fast-Validation
+roboflow/supervision                      MIT            Scientific/Engineering::Image Processing                     Other         Fast-Validation
+rytilahti/python-miio                     GPL-3.0        Home Automation                                              Other         Fast-Validation
+saleweaver/python-amazon-sp-api           MIT            Internet::WWW/HTTP                                           Internet      Fast-Validation
+scrapy/scrapy                             BSD-3-Clause   Software Development::Libraries                              Libraries     Fast-Validation
+scverse/scanpy                            BSD-3-Clause   Scientific/Engineering::Bio-Informatics                      Other         Fast-Validation
+slackapi/bolt-python                      MIT            Communications::Chat                                         Other         Fast-Validation
+slackapi/python-slack-sdk                 MIT            Communications::Chat                                         Other         Fast-Validation
+snowflakedb/snowflake-connector-python    Apache-2.0     Software Development::Libraries                              Libraries     Fast-Validation
+softlayer/softlayer-python                MIT            Software Development::Libraries                              Libraries     Fast-Validation
+spec-first/connexion                      Apache-2.0     Internet::WWW/HTTP                                           Internet      Fast-Validation
+statsmodels/statsmodels                   BSD-3-Clause   Scientific/Engineering::Information Analysis                 Other         Fast-Validation
+tfranzel/drf-spectacular                  BSD-3-Clause   Software Development::Documentation                          Other         Fast-Validation
+tobymao/sqlglot                           MIT            Database::Database Engines/Servers                           Database      Fast-Validation
+tornadoweb/tornado                        Apache-2.0     Internet::WWW/HTTP                                           Internet      Fast-Validation
+tortoise/tortoise-orm                     Apache-2.0     Database::Front-Ends                                         Database      Fast-Validation
+wagtail/wagtail                           BSD-3-Clause   Internet::WWW/HTTP                                           Internet      Fast-Validation
+
+
+                      Table 6: The information of the repositories involved in FEABench.
+
+
+                                                                   17175
+                   Repository Name             Class (Short)   Max PR No.   # PR    # All tasks   # Candidates   # in Full   # in Lite
+     sympy/sympy                               Mathematics          27454   12857          6034           819         239          46
+     joke2k/faker                              Testing               2144    1386           518           186         126            8
+     conan-io/conan                            Build Tools          17534    6185          3715           473         124          23
+     tobymao/sqlglot                           Database              4597    2463          1996           185         116          14
+     scikit-learn/scikit-learn                 AI                   30289   17489          4174           186          83            9
+     pvlib/pvlib-python                        Physics               2336    1072           444           102          52          10
+     deepset-ai/haystack                       AI                    8669    4132          1438           317          49            8
+     Project-MONAI/MONAI                       Medical               8275    3468          1809           463          37            1
+     matplotlib/matplotlib                     Other                29140   18163          4057           164          34            7
+     sphinx-doc/sphinx                         Other                13196    5798          1597           126          30            4
+     googleapis/python-aiplatform              AI                    4830    2927           826           241          29            1
+     astropy/astropy                           Physics              17525   11205          4292           405          27            8
+     Textualize/textual                        Other                 5444    2205           819           139          27            1
+     falconry/falcon                           Internet              2425    1279           499            67          27            3
+     softlayer/softlayer-python                Libraries             2207    1277           661           105          26            2
+     Textualize/rich                           Libraries             3548    1142           283            41          24            4
+     rytilahti/python-miio                     Other                 1993     979           249            46          23            1
+     sqlfluff/sqlfluff                         Other                 6534    3448          2079           296          19            2
+     google-deepmind/optax                     AI                    1164     805           174            54          19            3
+     pydata/xarray                             Other                 9879    4310          1838           234          17            2
+     boto/boto3                                Libraries             4371     757           130            38          17            2
+     roboflow/supervision                      Other                 1773    1021            94            30          14            7
+     RDFLib/rdflib                             Libraries             3025    1562           370            21          13            2
+     huggingface/datasets                      AI                    7342    4118           792            99          12            2
+     aws-cloudformation/cfn-lint               Other                 3898    2583           790            92          11            0
+     boto/botocore                             Libraries             3331    2145           777            83          11            0
+     pgmpy/pgmpy                               AI                    1887     902           368            76          11            2
+     huggingface/huggingface_hub               AI                    2683    1559           586           130          10            1
+     prometheus/client_python                  Other                 1080     429           134            14          10            1
+     pypa/hatch                                Build Tools           1860     721           313            34           9            1
+     scrapy/scrapy                             Libraries             6598    3253           846            53           9            2
+     slackapi/python-slack-sdk                 Other                 1627     764           266            29           9            0
+     django/django                             Internet             18807   18482           725            32           7            1
+     pydicom/pydicom                           Medical               2195     979           494            42           7            1
+     pylint-dev/pylint                         Other                10168    4431          1859            79           7            1
+     embeddings-benchmark/mteb                 AI                    1730    1050           137            15           7            1
+     python-hyper/h2                           Internet              1291    1072           144            11           6            0
+     mwaskom/seaborn                           Other                 3798    1093           469            40           5            0
+     pyvista/pyvista                           Other                 7045    3837          1149           292           5            2
+     dpkp/kafka-python                         Libraries             2442     937           212            17           5            0
+     lark-parser/lark                          Other                 1503     467           135            10           5            2
+     astronomer/astronomer-cosmos              Build Tools           1439     754           270            39           4            1
+     fairlearn/fairlearn                       AI                    1472     937           229            29           4            1
+     huggingface/accelerate                    AI                    3293    1607           352            67           4            2
+     docker/docker-py                          Libraries             3297    1554           538            24           3            1
+     huggingface/trl                           AI                    2550    1181           248            29           3            0
+     joblib/joblib                             Libraries             1641     701           250            11           3            0
+     open-mmlab/mmengine                       Other                 1620    1013           350            59           3            1
+     openvinotoolkit/datumaro                  Other                 1689    1388           521            98           3            0
+     pygments/pygments                         Other                 2837     886           346            79           3            1
+     pyocd/pyOCD                               Other                 1734     954           175            11           3            0
+     pyro-ppl/pyro                             AI                    3413    2302          1038           369           3            0
+     tortoise/tortoise-orm                     Database              1840     607           283            46           3            0
+     DLR-RM/stable-baselines3                  AI                    2069     534           199            23           2            0
+     EleutherAI/lm-evaluation-harness          AI                    2609     961            52              9          2            1
+     PyThaiNLP/pythainlp                       Other                 1056     667           269            39           2            1
+     TileDB-Inc/TileDB-Py                      Libraries             2128    1184           488            34           2            0
+     atlassian-api/atlassian-python-api        Internet              1476     849            49            14           2            0
+     aws/sagemaker-python-sdk                  AI                    4987    3219           715           116           2            2
+     googleapis/python-bigquery                Internet              2102    1372           358            65           2            0
+     gradio-app/gradio                         Other                10271    4707          1210            81           2            0
+     graphql-python/graphene                   Libraries             1583      68            19              2          2            1
+     prompt-toolkit/python-prompt-toolkit      Other                 1949     713            49              3          2            0
+     snowflakedb/snowflake-connector-python    Libraries             2127    1311           466            22           2            0
+     spec-first/connexion                      Internet              2011     879           327            31           2            0
+     statsmodels/statsmodels                   Other                 9462    3793          1444           121           2            0
+     tornadoweb/tornado                        Internet              3452    1573           341            16           2            0
+     pallets/flask                             Internet              5640    2604           404            17           1            0
+     pylint-dev/astroid                        Libraries             2669    1810           301              8          1            0
+     Aider-AI/aider                            Other                 2767     346            31              1          1            0
+     Cog-Creators/Red-DiscordBot               Other                 6499    4060           157            18           1            0
+     aws-powertools/powertools-lambda-python   Libraries             5814    4398           517           115           1            1
+     biopragmatics/bioregistry                 Other                 1346     784           156            28           1            0
+     cocotb/cocotb                             Other                 4345    2137           493            34           1            0
+     facebookresearch/hydra                    Libraries             3005    1301           442            35           1            0
+     huggingface/pytorch-image-models          Libraries             2398     551            85            17           1            1
+     minio/minio-py                            Libraries             1472     890           242            14           1            0
+     pre-commit/pre-commit                     Other                 3382    1222           527            23           1            0
+     saleweaver/python-amazon-sp-api           Internet              1638    1027            21              9          1            0
+     scverse/scanpy                            Other                 3427    1535           516            35           1            0
+     slackapi/bolt-python                      Other                 1234     446           159              9          1            0
+     tfranzel/drf-spectacular                  Other                 1362     345           135            12           1            1
+     wagtail/wagtail                           Internet             12732    7070          1531           213           1            0
+
+
+Table 7: Statistics of how many PRs (task instances) are left during the data collection procedures.
+
+
+                                                                17176
+

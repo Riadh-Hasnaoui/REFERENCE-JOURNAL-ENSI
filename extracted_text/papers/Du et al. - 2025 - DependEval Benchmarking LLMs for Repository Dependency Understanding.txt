@@ -1,0 +1,1886 @@
+            DependEval: Benchmarking LLMs for Repository Dependency
+                                Understanding
+                          Junjia Du1 , Yadi Liu2 , Hongcheng Guo3 * , Jiawei Wang4 ,
+                                 Haojian Huang5 , Yunyi Ni1 , Zhoujun Li3 ,
+             1
+                 Nanyang Technological University 2 Tsinghua University, 3 Beihang University
+                         4
+                           ShanghaiTech University 5 The University of Hong Kong
+
+                           Abstract                               show potential in software engineering, their ability
+                                                                  to handle large-scale repositories remains underex-
+        While large language models (LLMs) have
+                                                                  plored.
+        shown considerable promise in code genera-
+        tion, real-world software development demands                Existing benchmarks (Peng et al., 2024; Chai
+        advanced repository-level reasoning. This in-             et al., 2024; Liu et al., 2023a; Cassano et al., 2023)
+        cludes understanding dependencies, project                typically evaluate LLMs at the function or file level,
+        structures, and managing multi-file changes.              often focusing on isolated code snippets. However,
+        However, the ability of LLMs to effectively               large software projects require an evaluation frame-
+        comprehend and handle complex code reposi-                work that captures repository-wide reasoning. Pre-
+        tories has yet to be fully explored. To address
+                                                                  vious benchmarks, such as SWE-bench (Jimenez
+        challenges, we introduce a hierarchical bench-
+        mark designed to evaluate repository depen-               et al., 2023), focus on bug fixing but neglect chal-
+        dency understanding (D EPEND E VAL). Bench-               lenges like dependency resolution, project construc-
+        mark is based on 2683 repositories collected              tion, and structured multi-file edits. Additionally,
+        from real-world websites. It evaluates models             existing methods (Liu et al., 2023b; Zhang et al.,
+        on three core tasks: Dependency Recognition,              2023a; Ding et al., 2023) lack fine-grained insights
+        Repository Construction, and Multi-file Edit-             into model performance across repository reason-
+        ing, across 8 programming languages from ac-
+                                                                  ing aspects.
+        tual code repositories. Our evaluation of over
+        25 LLMs reveals substantial performance gaps                 To address these limitations, we introduce D E -
+        and provides valuable insights into repository-           PEND E VAL, a hierarchical benchmark designed to
+        level code understanding1                                 evaluate LLMs’ ability to reason about structured
+                                                                  code repositories through three progressively chal-
+1       Introduction                                              lenging tasks: (1) Dependency Recognition: As-
+        “It’s not that we use a language to ex-                   sessing the model’s ability to infer and resolve inter-
+                                                                  file dependencies. (2) Repository Construction:
+         press our thoughts, but that we use a
+                                                                  Evaluating models on generating structured, mod-
+         language to understand our thoughts.”
+                                                                  ular project layouts. (3) Multi-File Editing: Test-
+        – Donald Knuth
+                                                                  ing models’ ability to make coordinated changes
+   Large Language Models (LLMs) have made sig-                    across multiple files while maintaining consistency.
+nificant strides in automated code generation and                 Unlike existing benchmarks (Ding et al., 2023;
+comprehension (Feng et al., 2020; Rozière et al.,                 Liu et al., 2023b), D EPEND E VAL provides fine-
+2023; Chaudhary, 2023; Hui et al., 2024a; Nijkamp                 grained metrics for static analysis, architectural
+et al., 2023a), enabling tasks like code comple-                  reasoning, and cross-file consistency.
+tion, bug fixing, and documentation. However,                        We evaluate D EPEND E VAL with 25+ LLMs,
+real-world software development involves com-                     making the following key contributions:
+plex repository-wide reasoning, including depen-
+dency understanding, project structures, and multi-                  • D EPEND E VAL is the first multilingual bench-
+file modifications (Wu et al., 2024a; Zhang et al.,                    mark with over 2,500 cases designed for hier-
+2023b; Shrivastava et al., 2023a). While LLMs                          archical assessment of repository-scale under-
+    * Corresponding author.
+                                                                       standing in LLMs, enabling a comprehensive
+    1
+    We provide code and datasets at https://github.com/ink7-           evaluation of LLMs’ understanding capabili-
+sudo/DependEval.                                                       ties at the code repository level.
+                                                             7150
+                      Findings of the Association for Computational Linguistics: ACL 2025, pages 7150–7179
+                            July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+    • It provides fine-grained metrics, enabling de-   overlooking the internal structure and semantic
+      tailed analysis of repository reasoning capa-    context within projects. To better evaluate multi-
+      bilities.                                        lingual, repository-based code understanding, D E -
+                                                       PEND E VAL extends to 8 programming languages
+    • Larger models tend to perform better, partic-    and includes three designed tasks. The detailed
+      ularly on complex cross-file reasoning tasks,    comparison is in Table 1.
+      but performance gains diminish as task com-
+      plexity increases, suggesting that scaling       Benchmark                           Task                                Scope        Languages   #Repo
+                                                       MBPP (Austin et al., 2021)          Code Generation                     Function         1       N/A
+      alone is not enough for mastering repository-    HumanEval (Liu et al., 2023a)
+                                                       ClassEval (Du et al., 2023)
+                                                                                           Code Generation
+                                                                                           Code Generation
+                                                                                                                               Function
+                                                                                                                               Class
+                                                                                                                                                1
+                                                                                                                                                1
+                                                                                                                                                        N/A
+                                                                                                                                                        N/A
+
+      wide code comprehension.                         RepoEval (Zhang et al., 2023c)
+                                                       RepoBench (Liu et al., 2023b)
+                                                                                           Code Completion
+                                                                                           Retrieval & Completion
+                                                                                                                               Repo-level
+                                                                                                                               Repo-level
+                                                                                                                                                1
+                                                                                                                                                2
+                                                                                                                                                        14
+                                                                                                                                                        1,669
+                                                       CrossCodeEval (Ding et al., 2023)   Code Completion                     Repo-level       4       1,002
+                                                       EvoCodeBench (Li et al., 2024b)     Code Generation                     Repo-level       1       25
+
+    • Experiment analysis shows that LLMs strug-       RepoMasterEval (Wu et al., 2024b)
+                                                       D EPEND E VAL
+                                                                                           Code Completion
+                                                                                           Hierarchical Dependency Reasoning
+                                                                                                                               Repo-level
+                                                                                                                               Repo-level
+                                                                                                                                                2
+                                                                                                                                                8
+                                                                                                                                                        6
+                                                                                                                                                        2,683
+
+      gle with key challenges in large-scale soft-
+      ware development, such as dependency pars-       Table 1: Comparison of features between existing bench-
+      ing, function call inference, and maintaining    marks and D EPEND E VAL
+      consistency across file modifications, high-
+      lighting key challenges in applying LLMs to
+      large-scale software development.
+                                                       3      DependEval
+                                                       3.1        Overview
+2       Related Work
+                                                       DependEval is a multi-language benchmark span-
+Code Large Language Models. The rapid ad-              ning eight programming languages (C, C++, C#,
+vancement of generative language models has            TypeScript, JavaScript, Java, PHP, and Python) to
+spurred extensive research on AI applications in       evaluate the capability of large language models
+software engineering (Black et al., 2022; Brown        (LLMs) in three hierarchical understanding tasks
+et al., 2020; Radford et al., 2019; Touvron et al.,    in Figure 7. We propose three tasks—Dependency
+2023). Models (Achiam et al., 2023; Chen et al.,       Recognition, Repository Construction, and Multi-
+2021; Chowdhery et al., 2023; Nijkamp et al.,          file Editing. Dependency Recognition reflects
+2023b,c; Li et al., 2023; Lozhkov et al., 2024;        whether a model can infer the invocation order
+Roziere et al., 2023; Guo et al., 2024b) have demon-   between files, which is crucial for resolving ref-
+strated significant performance improvements on        erences and ensuring the correct program flow.
+various code-related tasks. These advancements         Repository Construction evaluates the model’s
+have accelerated the development of code assistant     ability to organize code structure from natural lan-
+tools like Copilot 2 , TONGYI Lingma (Hui et al.,      guage requirements, testing architectural reasoning.
+2024a), and Cursor 3 .                                 Multi-file Editing simulates real-world develop-
+Repository-level Code Evaluation.             Recent   ment scenarios where modifications span multiple
+repository-level code benchmarks (Allal et al.,        files, requiring models to maintain semantic and
+2023; Liu et al., 2023c; Shrivastava et al., 2023b;    dependency consistency across components.
+Zhang et al., 2023b; Ding et al., 2023; Liu et al.,
+2024; Allal et al., 2023; Liu et al., 2023b) assess    3.2        Data Collection and Filtering
+code LLMs’ capabilities at various granularities,      Our data comes from real-world GitHub reposito-
+from individual lines and API calls to full func-      ries, ensuring authenticity and practical relevance
+tion implementations. SWE-Bench (Jimenez et al.,       for evaluating code understanding tasks. We collect
+2023) challenges LLMs with real-world scenarios        multilingual repositories in languages such as C,
+using issues and pull requests from popular Python     C++, C#, TypeScript, JavaScript, Java, PHP, and
+repositories on GitHub, while DevBench (Li et al.,     Python, using GitHub’s official API to crawl repos-
+2024a) breaks the development process into stages      itories and their README files. These are selected
+to evaluate AI performance at each step. How-          from open-source repositories created before De-
+ever, these datasets often neglect detailed reposi-    cember 16, 2024, with a focus on those with the
+tory code understanding. Most difficulty catego-       highest star counts (e.g., above 50 stars) and exclud-
+rizations focus on the number of files involved,       ing forks to mitigate data leakage and ensure qual-
+    2
+        https://github.com/features/copilot            ity. We apply filtering rules similar to Deepseek-
+    3
+        https://www.cursor.com/                        Coder (Guo et al., 2024a) to remove lower-quality
+                                                   7151
+                     Repository Construction                                 Dependency Recognition                                        Multi-file Editing
+
+                                                                                  ip_basic/vis_utils.py                                 ip_basic/vis_utils.py
+                 Description:                       Files:                   import cv2
+                                                                                                                                   import cv2
+                                                                             def cv2_show_image(): …
+                                      { "file": "vis_utils.py","function":                                                         def cv2_show_image(): …
+          "Image Processing for Basic “A Python module that provides…”},         ip_basic/depth_completion.py
+              Depth Completion"       { “file”: "depth_completion.py"…. }
+                                                                                                                                       ip_basic/depth_completion.py
+                                                                             from ip_basic import vis_utils
+                                                                             vis_utils.cv2_show_image(…)                           from ip_basic import vis_utils
+                                                                                                                                   vis_utils.cv2_show_image(…)
+
+
+
+
+                      Analyze the project
+                    description. Generate a                                   Analyze their content
+                                                                                                                                 Add an option to save the
+                    project structure that                                      and determine the
+                                                                                                                                 displayed images to disk.
+                    shows the dependencies                                   dependency relationship
+                         between files.                                           between files.
+                                                                                                                                  Code Modify
+                                                                                                                                   ip_basic/vis_utils.py
+                                                                                                                              import cv2
+                          Construction Graph                                     Dependency Detection                         # After
+                                                                                                                              def cv2_show_image(..., save_path=None):
+                     [ip_basic/dataset_sparsity.py],                                                                              if save_path: cv2.imwrite(save_path, image)
+                                                                                     [ip_basic/vis_utils.py,                      ip_basic/depth_completion.py
+                   [ip_basic/depth_completion.py],
+                                                                             ip_basic/depth_completion.py]                    from ip_basic import vis_utils
+              [depth_map.py][depth_completion.py]                                                                            # After
+                                                                                                                              save_path = 'process/' + key + '.png
+                                                                                                                              vis_utils.cv2_show_image(…, save_path=save_path)
+
+
+
+
+Figure 1: Overview of D EPEND E VAL. It contains 3 tasks including Repository Construction, Dependency
+Recognition, and Multi-file Editing. The first task analyzes the project description to generate a structure showing
+the dependencies between files. The second task identifies the content of the files to determine the relationships
+between them. Finally, the third task modifies the code to add functionality for saving displayed images to disk.
+
+
+code. Additionally, we filter READMEs based on                                                         tionships between files within a codebase. Given
+structural integrity, practical utility, and content                                                   a set of code files F, with dependency relations D
+clarity. Detailed filtering criteria can be seen in                                                    extracted as described in Section 3.3, we define the
+Appendix B. After filtering and removing dupli-                                                        set of dependencies as:
+cates, we retain 15,576 high-quality repositories
+                                                                                                                 △
+and README files.                                                                                             D = {(fi , fj ) | fi directly invokes fj }.                        (1)
+
+3.3 Dependency Code Snippets Generation                                                                  The model is required to generate a unique or-
+After downloading repositories from GitHub, we                                                         dered list P = [p1 , p2 , . . . , pn ], where pi ∈ F,
+concatenate interdependent code files into snippets                                                    such that:
+based on their dependency relationships. This in-
+volves parsing each file for import statements to                                                               ∀(fi , fj ) ∈ D, π −1 (fj ) < π −1 (fi ),                        (2)
+identify internal module dependencies. Details on
+                                                                                                       where the output list P must respect all dependen-
+the import expressions considered for each lan-
+                                                                                                       cies in D. Here, π −1 (f ) denotes the position of file
+guage are provided in Appendix A. Call chains and
+                                                                                                       f in the list P .
+code snippets are generated by selecting a starting
+file and appending its dependent files in reference                                                    3.4.2 Repository Construction
+order. Multiple call chains of varying lengths can                                                     Task Settings. The Repository Construction task
+be extracted from each repository, capturing both                                                      evaluates the ability of LLMs to generate a coher-
+short and long inter-file relationships. In addition                                                   ent file structure based on natural language require-
+to the filtering criteria in Section 3.2, we exclude                                                   ments and file names with functional descriptions.
+repositories that fail to cover all dependencies or                                                    Given natural language requirements R and a set
+do not pass integrity checks, ensuring only valid,                                                     of files F = {f1 , f2 , . . . , fn } with functional de-
+self-contained code fragments are included.                                                            scriptions D = {d1 , d2 , . . . , dn }, the input X is:
+3.4 Task Construction                                                                                                     △
+                                                                                                                      X = (R, {(fi , di )}ni=1 ),                                (3)
+3.4.1 Dependency Recognition
+Task Settings. The Dependency Recognition                                                              where R is the requirement, and each (fi , di )
+task is designed to evaluate the model’s ability to                                                    pair represents a file fi and its description di .
+accurately identify and understand the calling rela-                                                   The model generates a set of valid ordered lists
+                                                                                           7152
+                                                                 Input        Data Curation Output Example Ground Truth
+                       Step1: Data Crawling and Filtering                                                                                                       Step4: Evaluation
+                                                                             Step3: Test Sample Generation                                    Task1
+                                                                                                                                                  [b.py, c.py]                         Exact Match
+                                                                                                               Code Snippet
+                                                                     b               concat
+                                                                                                                                                Task2                                  Graph
+                                                                                                                   [b.py, c.py]                 [a.py, b.py]                           Construction
+               …                        Repositories                 c                                                                          [a.py, c.py, d.py]
+                                                                                                     Task1:Dependency Recognition               …                              Graph Match F1 Score
+  Dependency
+     parser                                                                                                                                         Task3
+                                                                                                          Project Requirements                    Called Code Segment:
+                                                                                                                                                                                               Reference
+                                                                                                          File names: Function Description        Invoking Code Segment:
+                                                                                              LLM                                                 Modified Complete Code:
+        b.py                                                                            Human Review
+                                                                                                             [b.py, c.py]                                                                      LLM Judge
+        …
+                                                                                                             [a.py, b.py, d.py]
+        import a                                                               .py                           …                                                              Evaluation on LLMs
+                                             b
+        …                                              concat
+
+                                             c                  Task2:Repository Construction
+ Dependency                         c                                                                                                                                   C
+                                                                                                                                                                       75
+                   b                                                                                                                               Javascript
+                                                                                                                                                                                    C++
+                                             a                                                            Features to be added
+  a                                d                   concat
+                                                                                                         Multi-file Code
+                                             b                           bc                              Snippets
+                                                                                         LLM
+                                                                                                                                             Typescript                                   C#
+        e                f                   c                                        Human Review
+
+
+                                             …                           a
+                                                                             bc                          Modified Code
+  Step2: Dependency Snippets Generation                                                                                                                   PHP                       Python
+                                                                             …                           Task3: Multi-file Editing                                      Java
+
+
+
+
+Figure 2: Pipeline for data curation of D EPEND E VAL. It consists of four steps: data crawling and filtering (Step 1),
+dependency snippet generation (Step 2), test sample generation for dependency recognition (Step 3), and evaluation
+using metrics like Exact Match and Graph Match F1 Score (Step 4).
+
+
+P = {P1 , P2 , . . . , Pm }, where each list Pi =                                                      3.4.3         Multi-file Editing
+[pi1 , pi2 , . . . , pin ] consists of files pij ∈ F, with                                             Task Settings The Multi-file Editing task eval-
+each file pij being invoked or depended upon by                                                        uates the model’s ability to add new functional-
+the subsequent file pi(j+1) .                                                                          ities across multiple files while preserving inter-
+Sample Curation. The construction process be-                                                          file dependencies. Given a set of files C =
+gins by extracting complete dependency relation-                                                       {f1 , f2 , . . . , fm }, where each fi is invoked by fi+1 ,
+ships from the repository to identify invocation                                                       and a functionality requirement R, the task involves
+chains, which serve as the ground truth for evalu-                                                     two scenarios:
+ation. We filter repositories to include only those
+                                                                                                           • In-place Edits: Modify the existing files C
+with fewer than 12 invocation chains, ensuring all
+                                                                                                             to incorporate R, while maintaining inter-
+files are comprehensively covered. Next, GPT-4
+                                                                                                             dependencies, resulting in a new set Cnew =
+processes the README and individual code files
+                                                                                                             {f1′ , f2′ , . . . , fm
+                                                                                                                                   ′ }.
+to generate a natural language requirement, includ-
+ing an overall repository description and functional
+                                                                                                           • Expansion Edits: Modify C and create a new
+descriptions for each file. Detailed prompt is in
+                                                                                                             file fnew to integrate R, resulting in an ex-
+Appendix E.1.
+                                                                                                             panded set Cnew = {f1′ , f2′ , . . . , fm
+                                                                                                                                                     ′ } ∪ {f
+                                                                                                                                                             new },
+Human in the Loop. Finally, human review se-                                                                 ensuring proper invocation relationships.
+lects the final set of samples. We evaluate the
+generated natural language requirements based on                                                       This approach reflects real-world scenarios where
+criteria such as the coherence and completeness                                                        AI-driven code editors like Cursor4 help developers
+of repository descriptions, accuracy of functional                                                     modify multiple files based on natural language
+descriptions, and correctness of reflected depen-                                                      requirements.
+dency relationships. Detailed criteria are provided
+                                                                                                       Sample Curation. We concatenate files from in-
+in Appendix C.1. We also ensure a diverse range
+                                                                                                       vocation chains of lengths 2, 3, and 4, then input
+of topic types in the selected repositories to rep-
+resent real-world scenarios, with further details in                                                       4
+                                                                                                           Cursor is an AI-powered code editor designed to assist
+Appendix D.                                                                                            developers. https://www.cursor.com/
+
+                                                                                              7153
+               Task                                                                # Examples                                                                         Avg. # Input Tokens                        Avg. # Output Tokens
+                                           Subtask       C     C++   C#    Java   PHP Python                   JavaScript                 TypeScript
+                                        Chain Length 2   30    38    49    42     49        60                          58                        42                                 21453                                        4832
+  Multi-file Editing (In-place Edits)   Chain Length 3   53    35    34    33     37        50                          33                        33                                 28634                                        5424
+                                        Chain Length 4   39    38    33    33     60        24                          32                        28                                 32423                                        6367
+                                        Chain Length 2   44    45    23    42     38        45                          49                        42                                 21355                                        7319
+Multi-file Editing (Expansion Edits)
+                                        Chain Length 3   35    21    54    41     33        38                          36                        34                                 25542                                        7844
+                                          Sub-total      201   177   193   191    217       217                         208                      187                                    -                                          -
+     Dependency Recognition                  -           180   180   180   180    180       180                         180                      180                                 12549                                        232
+     Repository Construction                 -            58    49    41    52     57        58                          45                       36                                  3247                                        341
+               Total                                     439   406   414   423    454       455                         433                      403                                 20742                                        4617
+
+
+Table 2: Statistic of D EPEND E VAL. This table shows the number of examples and average token counts for each
+task and subtask across different programming languages.
+
+                                                                                                                                           Sample String Length Distribution in task2_c.json
+                                                                                                                                          +75
+these code snippets into GPT-4o. Using a step-
+                                                                                                                                                                                                                           Mean Frequency
+
+                                                                                                              200
+                                                                                                                                                +42 +41
+by-step prompt, GPT-4o identifies cross-file inter-                                                                                +21
+                                                                                                                                                          +34
+                                                                                                                                                                +18
+                                                                                                                                                                                   +12
+                                                                                                                                                                                         +25 +27 +22
+                                                                                                                                                                                                       +8
+actions, proposes new features, and generates the
+                                                                                                              150
+                                                                                                                                                                      -4      -5                            -9
+                                                                                                                                                                                                                 -19 -20
+
+
+
+
+                                                                                                  Frequency
+                                                                                                                                                                                                                            -29
+corresponding modified code, including feature de-                                                            100
+
+
+scriptions and explanations. Sample outputs for                                                                          -75 -73
+
+                                                                                                              50                                                                                                                  -96
+
+different invocation lengths and scenarios are pro-
+vided in Appendix E.2.                                                                                         0
+                                                                                                                    0              5000             10000                  15000
+                                                                                                                                                                  Sample String Length
+                                                                                                                                                                                            20000           25000             30000
+
+
+
+
+Human in the Loop. We first apply an LLM-                                                    Figure 3: Length Distribution of D EPEND E VAL.
+based filtering process to pre-select samples, ensur-
+ing basic quality and consistency with the task.                                        4         Experiments
+GPT-4o evaluates samples based on predefined
+criteria, such as clarity of the feature description                                    4.1             Models
+and logical implementation. Human annotators                                            We evaluate over 25 models, ranging from 1.5B
+then manually review and correct the pre-selected                                       to 670B+ parameters, including both open-source
+samples, verifying the correctness of descriptions,                                     large language models and closed-source general
+logic, and code consistency. Annotators also ensure                                     LLMs. For general models, we test GPT-4o-
+that errors in GPT-4o-generated code are corrected,                                     mini (OpenAI, 2023), Claude series (Anthropic,
+curating gold labels for evaluation. Details about                                      2023), Phi series (Abdin et al., 2024a,b), PaLM2-
+the process and our crowdsourcing can be found in                                       CodeChat (Anil et al., 2023), Llama3.35 , and
+Appendix C.2 and Appendix G, respectively.                                              Qwen2.5 (Qwen et al., 2025). For code models, we
+                                                                                        evaluate CodeLlama (Rozière et al., 2023), Open-
+3.5 Features of D EPEND E VAL                                                           Coder (Huang et al., 2024), Qwen-Coder (Hui et al.,
+Statistic. We present the statistic of D EPEND E-                                       2024a), DeepSeekCoder (Guo et al., 2024a), Code-
+VAL in Table 2. We use the Qwen2.5-Coder (Hui                                           Stral (MistralAI, 2024), Yi-Coder6 , and Granite-
+et al., 2024b) tokenizer to compute the number of                                       Coder (Mishra et al., 2024).
+tokens. After the filtering and curation process, our                                   4.2             Implementation Details
+test samples cover a total of 2,683 real-world repos-
+itories. Length distribution of D EPEND E VAL is in                                     Our evaluation framework is built on the Trans-
+Figure 3. More results about project topics are in                                      formers library (Wolf et al., 2020). We use a one-
+Appendix D.                                                                             shot prompt for the Dependency Recognition and
+                                                                                        Repository Construction tasks, while the Multi-
+Future Extensions. D EPEND E VAL currently                                              File Editing task is performed in a zero-shot set-
+supports 8 popular languages. In addition to re-                                        ting, without additional training. All experiments
+leasing our test samples on GitHub, we have also                                        are run on 16 NVIDIA A800-SXM4-80GB GPUs
+open-sourced all the scripts used for crawling and                                      with the same hyperparameters for code generation
+curating these samples. Therefore, D EPEND E VAL                                        across all models. Detailed settings and prompts
+can potentially be extended to other languages and                                      are provided in Appendix E.3.
+the community to use our tools to create more sam-                                           5
+                                                                                                 https://ai.meta.com/blog/meta-llama-3/
+ples as needed.                                                                              6
+                                                                                                 https://huggingface.co/01-ai/Yi-Coder-9B
+
+                                                                                  7154
+                                                     C                       C++                       C#                     Python                   Java                    PHP                  Typescript                 Javascript        Avg.
+                Models
+                                             DR      RC      ME      DR      RC      ME      DR        RC     ME      DR       RC      ME      DR       RC     ME      DR      RC      ME      DR      RC      ME      DR         RC      ME      -
+                                                                                                     Open-Source Large Language Models (1.5B+)
+           Yi-Coder-1.5B-Chat                7.41    11.23   0.45    10.64    9.62    0.57    4.84     5.68   0.01    10.34    8.80     4.34   0.00    2.83    0.35    1.45    14.52   2.26    8.47    10.73   0.50    2.17      4.93     0.01    5.09
+        OpenCoder-1.5B-Instruct              3.95    9.03    7.39     1.59   11.93   13.24    4.62     9.58   7.63    4.55    21.48    16.66   0.00    6.98    9.76    2.17    15.96   7.70    2.04    10.98   7.92    3.66      12.73    8.17   8.32
+           Qwen2.5-Coder-3B                  6.47    27.34   3.62    11.85   30.38   4.31    8.04     15.19   3.33    13.73   46.36     6.86   0.00    23.36   1.34    4.50    30.14   2.57    11.76   24.30   5.80    6.45      27.45   8.30    13.48
+       Qwen2.5-Coder-3B-Instruct             4.46     5.23   4.64     9.44    8.26   4.51    5.59      5.72   4.66     8.93   14.20     9.95   10.00   2.15    6.49    7.22    7.37    5.98    5.59    5.52    3.55    9.55      6.51    10.61    6.92
+      Granite-3b-code-instruct-128k          10.27   17.63   4.97     9.70   17.41   8.76     9.15    10.68   8.50    15.07   24.02     4.95   9.09    17.93   5.96    3.70    25.58   2.58    8.46    21.79   5.57    7.02      22.38    6.62   11.57
+    Phi-3.5-mini-128k-instruct(3.82B)        8.22     3.43   1.31    13.38   15.84   2.01    13.48     0.81   1.01    11.19    9.01     3.01   5.11    2.38    1.01    17.24   13.06   0.77    11.51   5.76    1.01    17.05     5.98     1.42    6.88
+                                                                                                     Open-Source Large Language Models (7B+)
+         Codestral-mamba(7B)                  9.22   26.09   24.79   16.22   23.94   25.10    9.16    16.27   30.64   16.00   28.83    26.14   13.10   17.77   18.79   4.00    33.95   18.62   11.68   28.30   12.74   9.49      26.98   20.73   19.52
+        CodeLlama-7b-Instruct-hf              8.00   18.21   13.23   11.81   18.01   13.25    6.25    10.26   12.67    7.63   30.43    18.42   5.74    16.91   12.67   4.00    27.67   11.43   9.52    20.41   11.32   6.96      21.03   10.12   13.58
+           Yi-Coder-9B-Chat                  15.85   36.33    8.62   19.14   48.06   10.55   11.46    15.67    6.02   13.67   28.89    21.04   13.60   25.12   13.39   12.50   35.51    9.78   12.98   35.37    7.95   11.45     32.29    6.25   18.81
+      Granite-8b-code-instruct-128k           2.47   12.88   16.09    4.73   17.97   10.63    5.13     6.52   12.87    6.94   13.13    13.10   5.22    10.48   11.61   6.02    24.36   12.60   8.26    16.29   22.99   10.84     18.98   15.79   11.91
+           Qwen2.5-Coder-7B                  12.41   23.31    7.39   14.18   22.30   13.25   11.86    12.14    7.63   16.50   33.32    16.66   0.00    17.73    9.76   8.87    32.71    7.70   14.91   25.10    7.92   10.61     26.06    8.17   15.02
+       Qwen2.5-Coder-7B-Instruct             16.85   20.30   17.58   26.16   21.90   19.18   20.11     7.69   14.87   28.81   19.37    19.23   18.99   19.80   13.18   22.01   19.71   15.31   30.87   15.97   18.34   24.12     19.02   15.29   19.36
+               Phi-4(14B)                    46.02   33.50   23.60   53.70   39.59   20.63   33.33    14.55   23.62   49.26   33.09    31.99   31.07   26.13   13.93   35.63   21.68   15.41   54.29   21.76   16.00   62.32     23.18   11.27   30.65
+       CodeLlama-13b-Instruct-hf              6.41   20.09   18.23    6.76   21.02   21.25    9.09    11.74   16.67   11.88   29.04    16.42   7.79    18.64   18.67   7.02    28.97    8.42   7.10    21.91   13.32   10.37     25.66   13.21   15.40
+          Qwen2.5-Coder-14B                  11.38    6.89   13.62   13.21   13.27   14.31   13.89    9.55    13.33   17.33   39.33    16.86   3.45    8.89    11.34   3.80    3.35    12.57   13.22   14.15   15.80   12.57     18.68   18.30   13.30
+      Qwen2.5-Coder-14B-Instruct             11.38    6.89   13.62   13.21   13.27   14.31   13.89     9.55   13.33   17.33   39.33    16.86   3.45    8.89    11.34   3.80    3.35    12.57   13.22   14.15   15.80   12.57     18.68   18.30   26.70
+          Codestral-2501(24B)                37.78   47.12   29.45   55.56   44.71   29.40   40.56    22.12   31.00   45.56   61.18    35.62   37.22   28.42   27.43   26.11   34.01   21.62   57.78   32.41   31.00   60.56     33.69   33.50   37.66
+                                                                                                     Open-Source Large Language Models (32B+)
+       CodeLlama-34b-Instruct-hf              8.77   24.59   23.00    5.62   23.89   31.00    1.44    11.39   27.00   10.56   33.01    31.28   2.63    20.58   26.32   2.37    31.53   19.67   3.79    23.83   17.32   3.55      24.02   21.23   17.85
+      Qwen2.5-Coder-32B-Instruct             52.22   49.40   30.29   70.00   58.27   36.67   42.78    24.06   41.00   61.11   46.93    37.12   43.89   33.04   35.92   50.56   37.47   14.71   63.13   41.47   44.80   57.22     35.96   40.36   43.68
+          Qwen2.5-Coder-32B                  15.88   17.26   23.50   25.77   18.20   33.42   18.89    11.37   25.86   21.66   23.20    23.11   20.51   13.03   17.00   14.56   26.63   20.45   26.14   19.37   15.35   24.40     26.30   20.71   20.94
+         Llama-3.3-70b-instruct              17.78   10.00    9.49   34.64   12.00   14.88   16.29    30.02   11.38    9.44   22.10    18.54   2.22    12.30   18.52   17.22   12.00    8.94   13.89   10.09    6.19   39.66     18.12    5.08   15.45
+         Qwen-2.5-72b-instruct               43.89   36.33   15.72   67.22   48.61   21.60   35.56    16.32   37.21   51.11   41.33    22.93   40.56   15.47   33.06   43.33   27.53   32.18   65.56   29.61   19.26   61.67     29.83   17.83   35.57
+DeepSeek-Coder-V2-Lite-Instruct(21/236B)      8.94   21.48   24.87   11.67   25.29   28.69    7.78    12.49   25.86   11.67   20.45    24.61   16.67   12.02   39.97   12.78   19.96   11.67   12.43   25.15   39.59   14.86     19.50   35.59   20.17
+        DeepSeek-V3(37/671B)                 68.54   64.25   36.97   83.05   63.15   47.46   54.75    26.85   41.22   63.48   67.89    37.99   48.31   33.51   44.32   67.05   51.58   40.54   83.33   53.65   43.60   88.83     53.13   40.11   54.31
+                                                                                                     Closed-Source Large Language Models (API)
+      Claude-3.5-sonnet-20241022             52.78   63.12   42.00   55.56   66.00   57.00   30.00    27.93   43.75   25.56   61.95    55.83   9.44    30.81   47.67   48.33   60.92   44.33   53.89   57.62   46.33   62.78     57.38   42.12   47.63
+       GPT-4o-mini-2024-07-18                50.56   41.90   39.55   60.00   49.59   45.17   30.00    13.56   41.06   51.67   41.43    38.37   37.78   31.16   44.93   47.19   25.71   25.73   51.67   28.60   42.87   60.00     26.07   39.78   40.18
+         Palm-2-codechat-bison                8.89   22.49   12.37   11.17   33.29   16.80   10.98    3.03    20.83    9.60   10.61    25.46   9.44    2.69    14.11   9.71    19.62   18.82   9.77    16.25   16.15   9.66      13.82   16.05   14.23
+         Gemini-1.5-flash-latest             52.78   52.17   36.42   58.33   56.19   44.49   36.67    22.10   39.88   58.89   27.49    36.32   37.78   13.10   47.05   35.00   29.42   33.24   58.89   44.14   57.18   57.78     35.90   46.88   42.42
+
+
+
+
+Table 3: Results of different models on the D EPEND E VAL. We utilize green (1st) blue (2nd) yellow (3rd) to
+distinguish the top three results within different sizes.
+
+
+
+
+                                      (a)DR tasks                                                             (b)RC tasks                                                               (c)ME tasks
+
+
+Figure 4: Results of different tasks in D EPEND E VAL. The radar charts show the performance of various models
+across Dependency Recognition(a), Repository Construction(b), and Multi-file Editing(c) tasks. Each line represents
+a different model, with performance measured for different programming languages.
+
+
+4.3 Evaluation Metrics                                                                                                         Here, Pi and Gi denote the predicted and ground-
+                                                                                                                               truth dependency sets, and ⊮(·) is an indicator func-
+Dependency Recognition. For the Dependency
+                                                                                                                               tion, capturing the proportion of fully correct pre-
+Recognition task, we calculate the Exact Match
+                                                                                                                               dictions.
+Rate (EMR), which measures the proportion of
+instances where the predicted dependency chain                                                                                 Repository Construction. For Repository Con-
+exactly matches the ground truth:                                                                                              struction, we evaluate structural similarity by com-
+                                                                                                                               paring the predicted and ground-truth dependency
+                                        △ |{i | EMi = 1}|                                                                      graphs. Given a set of predicted file invoca-
+                          EMR =                                                                                (4)
+                                                                   N                                                           tion chains, we construct a directed graph Gp =
+                                                                                                                               (Vp , Ep ) and similarly for the ground-truth graph
+where                                                                                                                          Gg = (Vg , Eg ). We then compute precision, recall,
+                                  ( P ⊮(p =g )
+                                                       j       j
+                                                                                                                               and F1-score for both nodes and edges:
+                                             j
+                                                                     , if |Pi | > 0
+              EMi =                               |Pi |                                                        (5)                                                     2 × Precision × Recall
+                                        0,                                   otherwise                                                                  F1 =                                                                                     (6)
+                                                                                                                                                                         Precision + Recall
+                                                                                                                      7155
+Finally, we combine node and edge F1-scores (i.e.      Qwen-2.5-72b-instruct, highlighting that
+F1n and F1e ) as follows:                              domain-specific training can be more effective
+                                                       than simply scaling model size. This implies that
+         F1com = w1 × F1n + w2 × F1e ,          (7)    targeted pretraining on high-quality code datasets
+                                                       and instruction tuning for software engineering
+where w1 and w2 are empirically set to 0.15 and        tasks are key to improving performance.
+0.85, respectively.
+                                                       Task-Specific. Larger models show clear ad-
+Multi-file Editing. Inspired by FairEval (Wang         vantages in DR and RC tasks. For instance,
+et al., 2023) to reduce bias in LLMs as judge mod-     DeepSeek-V3(37/671B) excels in DR, demon-
+els, we prompt the large language model (LLM),         strating strong ability to understand complex inter-
+denoted as LLM(·), to evaluate the correctness and     file dependencies. However, Multi-file Editing re-
+completeness of multi-file edits. The LLM com-         mains a more intricate task, even larger models face
+pares the generated code with the corrected ver-       challenges in maintaining consistency and accuracy
+sion provided by human annotators in section 3.4.3.    across multiple files
+We define the following metrics: Correctness (C):
+Measures how accurately the files meet the ex-         Language-Specific. Closed-source models gen-
+pected functionality. Purpose Alignment (P A):         erally show more stable performance across lan-
+Assesses how well the code aligns with its intended    guages in the ME task. Performance also varies
+purpose. Functionality Accuracy (F A): Evalu-          by language, with Python and JavaScript yielding
+ates the accuracy of the functionality across files.   better results, particularly in Dependency Recog-
+Functionality Completeness (F C): Checks if all re-    nition and Repository Construction tasks. In con-
+quired aspects of functionality are addressed. Code    trast, languages like C# and Java are more chal-
+Quality (CQ): Reflects the overall quality of the      lenging. Models perform better in languages with
+code. The detailed prompts are in Appendix E.4.        static, modular structures, while languages with
+The combined score is calculated as:                   complex interdependencies or dynamic features
+                                                       pose more difficulty for multi-file editing and de-
+  Score = λ1 · LLM(C) + λ2 · LLM(PA)
+                                                       pendency recognition.
+           + λ3 · LLM(FA) + λ4 · LLM(FC) (8)
+           + λ5 · LLM(CQ),                             Closed-source vs. Open-source Models. On
+                                                       average, closed-source models outperform most
+where the weighting parameters are empirically set     open-source ones. However, DeepSeek-V3 sur-
+as follows: λ1 = λ2 = 0.25, λ3 = λ4 = 0.20, and        passes Claude-3.5-sonnet-20241022, showing
+λ5 = 0.10.                                             that top-tier open-source models remain compet-
+                                                       itive. While models like Qwen2.5-Coder-32B
+4.4 Main Results                                       and DeepSeek-V3 excel in simpler tasks like
+In the following discussions, we will refer to spe-    DR, they struggle with more complex ones like
+cific tasks using the following abbreviations: ME      ME. In contrast, closed-source models, especially
+(Multi-file Editing), DR (Dependency Recogni-          Claude-3.5-sonnet-20241022, perform better in
+tion), and RC (Repository Construction).               RC and ME, indicating stronger reasoning and gen-
+                                                       eralization abilities for multi-file editing and repos-
+4.4.1 Overall Evaluation                               itory understanding.
+Model Size & Type and Performance. Larger
+models generally outperform smaller ones,              4.4.2   Takeaways from Task-specific
+as seen in open-source architectures like                      Evaluation
+Codellama-34B-Instruct and Qwen-Coder-32B,             Dependency Relationships are Crucial for ME.
+which consistently show better performance             Models strong in Dependency Recognition excel
+than their smaller counterparts. This suggests         in Multi-file Editing. This correlation shows that
+that increasing model capacity enhances the            capturing and modifying dependencies is key to ac-
+ability to manage complex dependency rela-             curate, consistent changes across large codebases.
+tionships in code repositories. Interestingly,         LLMs Struggle with Directory Structure. LLMs
+Qwen-Coder-32B surpasses larger general                may lack the prior knowledge needed to effectively
+models like Llama-3.3-70b-instruct and                 organize hierarchical project structures, which is
+                                                   7156
+reflected in the generally lower RC scores com-
+pared to DR. To improve performance, incorpo-
+rating more structured code repositories into the
+training data could help LLMs learn better patterns
+for organizing directory structures.
+Cross-File Modifications Remain Challenging.
+Even closed-source models struggle with cross-file
+modifications in ME, requiring better consistency
+and a global view across files. Improving training
+with real-world ME examples could help.
+
+5   Analysis
+5.1 Multilingual Analysis
+Figure 4 shows the performance of various models
+across multiple programming languages for three
+tasks. We selected the top two models for each
+parameter range. Key insights include as follows.      Figure 5: Instruction-following performance covering 8
+                                                       different languages.
+LLMs struggle with statically typed languages.
+In Dependency Recognition and Repository Con-                                        1
+                                                                                                 Multi-file Editing   Dependency Recognition   Repository Construction
+
+
+
+
+struction, languages like Python, JavaScript, and
+                                                       Instruction Following Rate
+
+
+
+
+                                                                                    0.8
+
+
+
+TypeScript perform better due to their clear mod-                                   0.6
+
+
+
+
+ular structures and explicit imports. In contrast,
+                                                                                    0.4
+
+
+                                                                                    0.2
+
+
+PHP and C# present challenges with flexible file                                     0
+
+
+
+inclusion and complex project files, respectively.
+Intricate interdependencies challenge multi-file
+editing (ME). Models perform worse in C and            Figure 6: Instruction-following performance covering 3
+C++, where complex cross-file modifications are        different tasks.
+needed, like pointer tracking and header updates.
+                                                       pendencies. On the other hand, the Multi-file
+Languages such as Python and Java, with struc-
+                                                       Editing task is more challenging, requiring mod-
+tured class designs, perform better in ME.
+                                                       els to simultaneously understand modifications
+5.2 Instruction Following                              across multiple files and their collaboration, which
+                                                       leads to poorer performance for some models.
+Language-wise Analysis.             In Figure 5.
+deepseek-chat is the strongest model over-             6                                  Conclusion
+all, demonstrating its strong adaptability across
+various programming languages. More complex            We introduce D EPEND E VAL, a benchmark de-
+languages, such as C++ and PHP, pose challenges        signed to evaluate the repository-level dependency
+for all models. Most models show weaker                understanding of LLMs. Built on a diverse set
+instruction-following abilities in these languages,    of 15,576 real-world repositories, the benchmark
+indicating poor understanding and execution            covers three key tasks: Dependency Recognition,
+capabilities. In contrast, languages like JavaScript   Repository Construction, and Multi-file Editing,
+and Python are relatively easier to process,           across eight programming languages. Our evalu-
+resulting in higher instruction-following rates for    ation of over 25 LLMs reveals significant perfor-
+these languages.                                       mance gaps, highlighting the difficulties models
+Task-wise Analysis. In Figure 6. At the task           face when managing complex code repositories.
+level, deepseek-chat significantly outperforms         These insights point to the need for LLMs to im-
+other models, showcasing its efficient handling        prove their handling of dependencies, project struc-
+of multiple tasks. Most models perform well on         tures, and multi-file modifications. Our work sets
+the Repository Construction and Dependency             the stage for future advancements in enhancing the
+Recognition tasks, which are relatively easier as      repository-level reasoning capabilities of LLMs.
+they mainly focus on file relationships and de-
+                                                   7157
+7   Limitations                                            Weishung Liu, Xiaodong Liu, Chong Luo, Piyush
+                                                           Madan, Ali Mahmoudzadeh, David Majercak, Matt
+Not Enough Languages. While D EPEND E VAL                  Mazzola, Caio César Teodoro Mendes, Arindam Mi-
+evaluates models across 8 programming languages,           tra, Hardik Modi, Anh Nguyen, Brandon Norick,
+this scope is limited and may not fully capture the        Barun Patra, Daniel Perez-Becker, Thomas Portet,
+                                                           Reid Pryzant, Heyang Qin, Marko Radmilac, Liliang
+performance of models in other popular or emerg-           Ren, Gustavo de Rosa, Corby Rosset, Sambudha Roy,
+ing languages. Expanding the range of supported            Olatunji Ruwase, Olli Saarikivi, Amin Saied, Adil
+languages will provide a more comprehensive eval-          Salim, Michael Santacroce, Shital Shah, Ning Shang,
+uation of LLMs’ capabilities across diverse coding         Hiteshi Sharma, Yelong Shen, Swadheen Shukla, Xia
+                                                           Song, Masahiro Tanaka, Andrea Tupini, Praneetha
+environments.                                              Vaddamanu, Chunyu Wang, Guanhua Wang, Lijuan
+                                                           Wang, Shuohang Wang, Xin Wang, Yu Wang, Rachel
+Not Enough Tasks. Currently, the benchmark fo-             Ward, Wen Wen, Philipp Witte, Haiping Wu, Xiaoxia
+cuses on three core tasks: Dependency Recognition,         Wu, Michael Wyatt, Bin Xiao, Can Xu, Jiahang Xu,
+Repository Construction, and Multi-file Editing.           Weijian Xu, Jilong Xue, Sonali Yadav, Fan Yang,
+While these tasks are crucial, they do not encom-          Jianwei Yang, Yifan Yang, Ziyi Yang, Donghan Yu,
+pass all the challenges faced in real-world software       Lu Yuan, Chenruidong Zhang, Cyril Zhang, Jianwen
+                                                           Zhang, Li Lyna Zhang, Yi Zhang, Yue Zhang, Yu-
+development. Including additional tasks such as            nan Zhang, and Xiren Zhou. 2024a. Phi-3 technical
+debugging, code refactoring, or performance opti-          report: A highly capable language model locally on
+mization would offer a more complete assessment            your phone. Preprint, arXiv:2404.14219.
+of LLMs in software engineering contexts.               Marah Abdin, Jyoti Aneja, Harkirat Behl, Sébastien
+                                                         Bubeck, Ronen Eldan, Suriya Gunasekar, Michael
+Not Enough Models. Although we evaluate over             Harrison, Russell J. Hewett, Mojan Javaheripi, Piero
+25 models, this number is not sufficient to represent    Kauffmann, James R. Lee, Yin Tat Lee, Yuanzhi
+the full range of LLMs available, particularly as        Li, Weishung Liu, Caio C. T. Mendes, Anh Nguyen,
+new models continue to emerge. Expanding the             Eric Price, Gustavo de Rosa, Olli Saarikivi, Adil
+                                                         Salim, Shital Shah, Xin Wang, Rachel Ward, Yue
+model pool would provide deeper insights into the        Wu, Dingli Yu, Cyril Zhang, and Yi Zhang. 2024b.
+performance of various model architectures and           Phi-4 technical report. Preprint, arXiv:2412.08905.
+sizes, ensuring a more robust evaluation.
+                                                        Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+Future Updates. As the field of large language            Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+models evolves, D EPEND E VAL will be updated to          Diogo Almeida, Janko Altenschmidt, Sam Altman,
+                                                          Shyamal Anadkat, et al. 2023. Gpt-4 technical report.
+include more languages, tasks, and models. This
+will help ensure the benchmark remains relevant         Loubna Ben Allal, Raymond Li, Denis Kocetkov,
+and continues to provide valuable insights into the       Chenghao Mou, Christopher Akiki, Carlos Munoz
+                                                          Ferrandis, Niklas Muennighoff, Mayank Mishra,
+growing capabilities of LLMs in handling complex          Alex Gu, Manan Dey, et al. 2023.          Santa-
+software engineering tasks.                               coder: don’t reach for the stars! arXiv preprint
+                                                          arXiv:2301.03988.
+
+References                                              Rohan Anil, Andrew M. Dai, Orhan Firat, Melvin John-
+                                                          son, Dmitry Lepikhin, Alexandre Passos, Siamak
+Marah Abdin, Jyoti Aneja, Hany Awadalla, Ahmed            Shakeri, Emanuel Taropa, Paige Bailey, Zhifeng
+ Awadallah, Ammar Ahmad Awan, Nguyen Bach,                Chen, Eric Chu, Jonathan H. Clark, Laurent El
+ Amit Bahree, Arash Bakhtiari, Jianmin Bao, Harkirat      Shafey, Yanping Huang, Kathy Meier-Hellstern, Gau-
+ Behl, Alon Benhaim, Misha Bilenko, Johan Bjorck,         rav Mishra, Erica Moreira, Mark Omernick, Kevin
+ Sébastien Bubeck, Martin Cai, Qin Cai, Vishrav           Robinson, Sebastian Ruder, Yi Tay, Kefan Xiao,
+ Chaudhary, Dong Chen, Dongdong Chen, Weizhu              Yuanzhong Xu, Yujing Zhang, Gustavo Hernandez
+ Chen, Yen-Chun Chen, Yi-Ling Chen, Hao Cheng,            Abrego, Junwhan Ahn, Jacob Austin, Paul Barham,
+ Parul Chopra, Xiyang Dai, Matthew Dixon, Ro-             Jan Botha, James Bradbury, Siddhartha Brahma,
+ nen Eldan, Victor Fragoso, Jianfeng Gao, Mei Gao,        Kevin Brooks, Michele Catasta, Yong Cheng, Colin
+ Min Gao, Amit Garg, Allie Del Giorno, Abhishek           Cherry, Christopher A. Choquette-Choo, Aakanksha
+ Goswami, Suriya Gunasekar, Emman Haider, Jun-            Chowdhery, Clément Crepy, Shachi Dave, Mostafa
+ heng Hao, Russell J. Hewett, Wenxiang Hu, Jamie          Dehghani, Sunipa Dev, Jacob Devlin, Mark Díaz,
+ Huynh, Dan Iter, Sam Ade Jacobs, Mojan Javaheripi,       Nan Du, Ethan Dyer, Vlad Feinberg, Fangxiaoyu
+ Xin Jin, Nikos Karampatziakis, Piero Kauffmann,          Feng, Vlad Fienber, Markus Freitag, Xavier Gar-
+ Mahoud Khademi, Dongwoo Kim, Young Jin Kim,              cia, Sebastian Gehrmann, Lucas Gonzalez, Guy Gur-
+ Lev Kurilenko, James R. Lee, Yin Tat Lee, Yuanzhi        Ari, Steven Hand, Hadi Hashemi, Le Hou, Joshua
+ Li, Yunsheng Li, Chen Liang, Lars Liden, Xihui           Howland, Andrea Hu, Jeffrey Hui, Jeremy Hur-
+ Lin, Zeqi Lin, Ce Liu, Liyuan Liu, Mengchen Liu,         witz, Michael Isard, Abe Ittycheriah, Matthew Jagiel-
+                                                    7158
+  ski, Wenhao Jia, Kathleen Kenealy, Maxim Krikun,           Linzheng Chai, Shukai Liu, Jian Yang, Yuwei Yin,
+  Sneha Kudugunta, Chang Lan, Katherine Lee, Ben-              Ke Jin, Jiaheng Liu, Tao Sun, Ge Zhang, Changyu
+  jamin Lee, Eric Li, Music Li, Wei Li, YaGuang Li,            Ren, Hongcheng Guo, et al. 2024. Mceval: Mas-
+  Jian Li, Hyeontaek Lim, Hanzhao Lin, Zhongtao Liu,           sively multilingual code evaluation. arXiv preprint
+  Frederick Liu, Marcello Maggioni, Aroma Mahendru,            arXiv:2406.07436.
+  Joshua Maynez, Vedant Misra, Maysam Moussalem,
+  Zachary Nado, John Nham, Eric Ni, Andrew Nys-              Sahil Chaudhary. 2023. Code Alpaca: An instruction-
+  trom, Alicia Parrish, Marie Pellat, Martin Polacek,          following LLaMA model for code generation.
+  Alex Polozov, Reiner Pope, Siyuan Qiao, Emily Reif,
+  Bryan Richter, Parker Riley, Alex Castro Ros, Au-          Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+  rko Roy, Brennan Saeta, Rajkumar Samuel, Renee              Yuan, Henrique Ponde De Oliveira Pinto, Jared Ka-
+  Shelby, Ambrose Slone, Daniel Smilkov, David R.             plan, Harri Edwards, Yuri Burda, Nicholas Joseph,
+  So, Daniel Sohn, Simon Tokumine, Dasha Valter,              Greg Brockman, et al. 2021. Evaluating large
+  Vijay Vasudevan, Kiran Vodrahalli, Xuezhi Wang,             language models trained on code. arXiv preprint
+  Pidong Wang, Zirui Wang, Tao Wang, John Wiet-               arXiv:2107.03374.
+  ing, Yuhuai Wu, Kelvin Xu, Yunhan Xu, Linting
+  Xue, Pengcheng Yin, Jiahui Yu, Qiao Zhang, Steven          Aakanksha Chowdhery, Sharan Narang, Jacob Devlin,
+  Zheng, Ce Zheng, Weikang Zhou, Denny Zhou, Slav              Maarten Bosma, Gaurav Mishra, Adam Roberts, Paul
+  Petrov, and Yonghui Wu. 2023. Palm 2 technical               Barham, Hyung Won Chung, Charles Sutton, Se-
+  report. Preprint, arXiv:2305.10403.                          bastian Gehrmann, et al. 2023. Palm: Scaling lan-
+                                                               guage modeling with pathways. Journal of Machine
+Anthropic. 2023. Introducing Claude.                           Learning Research, 24(240):1–113.
+
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten           Yangruibo Ding, Zijian Wang, Wasi Uddin Ah-
+   Bosma, Henryk Michalewski, David Dohan, Ellen               mad, Hantian Ding, Ming Tan, Nihal Jain, Mu-
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. 2021.     rali Krishna Ramanathan, Ramesh Nallapati, Par-
+   Program synthesis with large language models. arXiv         minder Bhatia, Dan Roth, and Bing Xiang.
+   preprint arXiv:2108.07732.                                  2023. Crosscodeeval: A diverse and multilin-
+                                                               gual benchmark for cross-file code completion. In
+Sidney Black, Stella Biderman, Eric Hallahan, Quentin          Advances in Neural Information Processing Systems
+  Anthony, Leo Gao, Laurence Golding, Horace                   36: Annual Conference on Neural Information
+   He, Connor Leahy, Kyle McDonell, Jason Phang,               Processing Systems 2023, NeurIPS 2023, New
+   Michael Pieler, Usvsn Sai Prashanth, Shivanshu              Orleans, LA, USA, December 10 - 16, 2023.
+   Purohit, Laria Reynolds, Jonathan Tow, Ben Wang,
+   and Samuel Weinbach. 2022. GPT-NeoX-20B: An               Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+   open-source autoregressive language model. In               Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng
+   Proceedings of BigScience Episode #5 – Workshop             Sha, Xin Peng, and Yiling Lou. 2023. Classe-
+   on Challenges & Perspectives in Creating Large              val: A manually-crafted benchmark for evaluating
+   Language Models, pages 95–136, virtual+Dublin.              llms on class-level code generation. arXiv preprint
+  Association for Computational Linguistics.                   arXiv:2308.01861.
+
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie             Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xi-
+  Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind             aocheng Feng, Ming Gong, Linjun Shou, Bing Qin,
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda             Ting Liu, Daxin Jiang, and Ming Zhou. 2020. Code-
+  Askell, Sandhini Agarwal, Ariel Herbert-Voss,                bert: A pre-trained model for programming and nat-
+  Gretchen Krueger, Tom Henighan, Rewon Child,                 ural languages. In Findings of the Association for
+  Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,                Computational Linguistics: EMNLP 2020, Online
+  Clemens Winter, Christopher Hesse, Mark Chen, Eric           Event, 16-20 November 2020, volume EMNLP 2020
+  Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess,          of Findings of ACL, pages 1536–1547. Association
+  Jack Clark, Christopher Berner, Sam McCandlish,              for Computational Linguistics.
+  Alec Radford, Ilya Sutskever, and Dario Amodei.
+  2020. Language models are few-shot learners. In            Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie,
+  Advances in Neural Information Processing Systems            Kai Dong, Wentao Zhang, Guanting Chen, Xiao
+  33: Annual Conference on Neural Information                  Bi, Y Wu, YK Li, et al. 2024a. Deepseek-
+  Processing Systems 2020, NeurIPS 2020, December              coder: When the large language model meets
+  6-12, 2020, virtual.                                         programming–the rise of code intelligence. arXiv
+                                                               preprint arXiv:2401.14196.
+Federico Cassano, John Gouwar, Daniel Nguyen, Syd-
+  ney Nguyen, Luna Phipps-Costin, Donald Pinckney,           Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie,
+  Ming-Ho Yee, Yangtian Zi, Carolyn Jane Anderson,             Kai Dong, Wentao Zhang, Guanting Chen, Xiao
+  Molly Q Feldman, et al. 2023. Multipl-e: a scal-             Bi, Yu Wu, YK Li, et al. 2024b. Deepseek-
+  able and polyglot approach to benchmarking neu-              coder: When the large language model meets
+  ral code generation. IEEE Transactions on Software           programming–the rise of code intelligence. arXiv
+  Engineering.                                                 preprint arXiv:2401.14196.
+                                                         7159
+Siming Huang, Tianhao Cheng, Jason Klein Liu, Jiaran       Anton Lozhkov, Raymond Li, Loubna Ben Allal, Fed-
+  Hao, Liuyihan Song, Yang Xu, J Yang, JH Liu,               erico Cassano, Joel Lamy-Poirier, Nouamane Tazi,
+  Chenchen Zhang, Linzheng Chai, et al. 2024. Open-          Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,
+  coder: The open cookbook for top-tier code large           et al. 2024. Starcoder 2 and the stack v2: The next
+  language models. arXiv preprint arXiv:2411.04905.          generation.
+
+Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-         Mayank Mishra, Matt Stallone, Gaoyuan Zhang, Yikang
+  iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,            Shen, Aditya Prasad, Adriana Meza Soria, Michele
+  Bowen Yu, Kai Dang, et al. 2024a. Qwen2. 5-coder           Merler, Parameswaran Selvam, Saptha Surendran,
+  technical report. arXiv preprint arXiv:2409.12186.         Shivdeep Singh, et al. 2024. Granite code models:
+                                                            A family of open foundation models for code intelli-
+Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-           gence. arXiv preprint arXiv:2405.04324.
+  iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,
+  Bowen Yu, Keming Lu, Kai Dang, Yang Fan,                 MistralAI. 2024. Codestral. https://mistral.ai/
+  Yichang Zhang, An Yang, Rui Men, Fei Huang,                news/codestral. 2024.05.29.
+  Bo Zheng, Yibo Miao, Shanghaoran Quan, Yun-
+  long Feng, Xingzhang Ren, Xuancheng Ren, Jingren         Erik Nijkamp, Hiroaki Hayashi, Caiming Xiong, Sil-
+  Zhou, and Junyang Lin. 2024b. Qwen2.5-coder tech-          vio Savarese, and Yingbo Zhou. 2023a. Codegen2:
+  nical report. Preprint, arXiv:2409.12186.                  Lessons for training llms on programming and natu-
+                                                             ral languages. CoRR, abs/2305.02309.
+Carlos E Jimenez, John Yang, Alexander Wettig,
+  Shunyu Yao, Kexin Pei, Ofir Press, and Karthik           Erik Nijkamp, Hiroaki Hayashi, Caiming Xiong, Sil-
+  Narasimhan. 2023. Swe-bench: Can language mod-             vio Savarese, and Yingbo Zhou. 2023b. Codegen2:
+  els resolve real-world github issues? arXiv preprint       Lessons for training llms on programming and natu-
+  arXiv:2310.06770.                                          ral languages. arXiv preprint arXiv:2305.02309.
+Bowen Li, Wenhan Wu, Ziwei Tang, Lin Shi, John Yang,       Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu,
+  Jinyang Li, Shunyu Yao, Chen Qian, Binyuan Hui,            Huan Wang, Yingbo Zhou, Silvio Savarese, and
+  Qicheng Zhang, Zhiyin Yu, He Du, Ping Yang, Dahua          Caiming Xiong. 2023c. Codegen: An open large
+  Lin, Chao Peng, and Kai Chen. 2024a. Devbench: A           language model for code with multi-turn program
+  comprehensive benchmark for software development.          synthesis. In International Conference on Learning
+  CoRR, abs/2403.08604.                                      Representations.
+Jia Li, Ge Li, Xuanming Zhang, Yihong Dong, and
+                                                           OpenAI. 2023. Gpt-4 technical report. arXiv preprint
+   Zhi Jin. 2024b. Evocodebench: An evolving code
+                                                             arXiv:2303.08774.
+   generation benchmark aligned with real-world code
+   repositories. Preprint, arXiv:2404.00599.
+                                                           Qiwei Peng, Yekun Chai, and Xuhong Li. 2024.
+Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas            Humaneval-xl: A multilingual code generation
+  Muennighoff, Denis Kocetkov, Chenghao Mou, Marc            benchmark for cross-lingual natural language gen-
+  Marone, Christopher Akiki, Jia Li, Jenny Chim, et al.      eralization. arXiv preprint arXiv:2402.16694.
+  2023. Starcoder: may the source be with you! arXiv
+  preprint arXiv:2305.06161.                               Qwen, :, An Yang, Baosong Yang, Beichen Zhang,
+                                                            Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li,
+Jiaheng Liu, Ken Deng, Congnan Liu, Jian Yang, Shukai       Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin,
+   Liu, He Zhu, Peng Zhao, Linzheng Chai, Yanan             Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang,
+   Wu, Ke Jin, Ge Zhang, Zekun Moore Wang, Guoan            Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang,
+   Zhang, Bangyu Xiang, Wenbo Su, and Bo Zheng.             Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li,
+   2024. M2rc-eval: Massively multilingual repository-      Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men, Runji
+   level code completion evaluation.                        Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang
+                                                            Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang
+Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Ling-       Zhang, Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru
+   ming Zhang. 2023a. Is your code generated by chat-       Zhang, and Zihan Qiu. 2025. Qwen2.5 technical
+   gpt really correct? rigorous evaluation of large lan-    report. Preprint, arXiv:2412.15115.
+   guage models for code generation. arXiv preprint
+   arXiv:2305.01210, abs/2305.01210.                       Alec Radford, Jeff Wu, Rewon Child, David Luan,
+                                                             Dario Amodei, and Ilya Sutskever. 2019. Language
+Tianyang Liu, Canwen Xu, and Julian McAuley.                 models are unsupervised multitask learners. OpenAI
+  2023b. Repobench: Benchmarking repository-                 preprint.
+  level code auto-completion systems. arXiv preprint
+  arXiv:2306.03091.                                        Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten
+                                                             Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+Tianyang Liu, Canwen Xu, and Julian J. McAuley.              Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.
+  2023c. Repobench: Benchmarking repository-level            Code Llama: Open foundation models for code.
+  code auto-completion systems. abs/2306.03091.              arXiv preprint arXiv:2308.12950.
+                                                       7160
+Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten     Fengji Zhang, Bei Chen, Yue Zhang, Jin Liu, Daoguang
+  Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,           Zan, Yi Mao, Jian-Guang Lou, and Weizhu Chen.
+  Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.          2023c. RepoCoder: Repository-level code comple-
+  Code llama: Open foundation models for code.               tion through iterative retrieval and generation. arXiv
+                                                             preprint arXiv:2303.12570, abs/2303.12570.
+Disha Shrivastava, Denis Kocetkov, Harm de Vries,
+  Dzmitry Bahdanau, and Torsten Scholak. 2023a. Re-
+  pofusion: Training code models to understand your
+  repository. arXiv preprint arXiv:2306.10998.
+Disha Shrivastava, Hugo Larochelle, and Daniel Tar-
+  low. 2023b. Repository-level prompt generation for
+  large language models of code. In Proceedings of the
+  40th International Conference on Machine Learning,
+  volume 202 of Proceedings of Machine Learning
+  Research, pages 31693–31715. PMLR.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+  Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+  Baptiste Rozière, Naman Goyal, Eric Hambro,
+  Faisal Azhar, et al. 2023. Llama: Open and effi-
+  cient foundation language models. arXiv preprint
+  arXiv:2302.13971.
+Peiyi Wang, Lei Li, Liang Chen, Zefan Cai, Dawei Zhu,
+  Binghuai Lin, Yunbo Cao, Qi Liu, Tianyu Liu, and
+  Zhifang Sui. 2023. Large language models are not
+  fair evaluators. arXiv preprint arXiv:2305.17926.
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+  Chaumond, Clement Delangue, Anthony Moi, Pier-
+  ric Cistac, Tim Rault, Rémi Louf, Morgan Funtow-
+  icz, Joe Davison, Sam Shleifer, Patrick von Platen,
+  Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu,
+  Teven Le Scao, Sylvain Gugger, Mariama Drame,
+  Quentin Lhoest, and Alexander M. Rush. 2020. Hug-
+  gingface’s transformers: State-of-the-art natural lan-
+  guage processing. Preprint, arXiv:1910.03771.
+Di Wu, Wasi Uddin Ahmad, Dejiao Zhang, Murali Kr-
+  ishna Ramanathan, and Xiaofei Ma. 2024a. Repo-
+  former: Selective retrieval for repository-level code
+  completion. In Forty-first International Conference
+  on Machine Learning, ICML 2024, Vienna, Austria,
+  July 21-27, 2024. OpenReview.net.
+Qinyun Wu, Chao Peng, Pengfei Gao, Ruida Hu, Haoyu
+  Gan, Bo Jiang, Jinhe Tang, Zhiwen Deng, Zhanming
+  Guan, Cuiyun Gao, Xia Liu, and Ping Yang. 2024b.
+  Repomastereval: Evaluating code completion via
+  real-world repositories. Preprint, arXiv:2408.03519.
+Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  Weizhu Chen. 2023a. Repocoder: Repository-level
+  code completion through iterative retrieval and gen-
+  eration. In Proceedings of the 2023 Conference on
+  Empirical Methods in Natural Language Processing,
+  EMNLP 2023, Singapore, December 6-10, 2023,
+  pages 2471–2484. Association for Computational
+  Linguistics.
+Fengji Zhang, Bei Chen, Yue Zhang, Jin Liu, Daoguang
+  Zan, Yi Mao, Jian-Guang Lou, and Weizhu Chen.
+  2023b. Repocoder: Repository-level code comple-
+  tion through iterative retrieval and generation. arXiv
+  preprint arXiv:2303.12570.
+                                                       7161
+A   Import Statements
+
+Python Basic import(and rename): Use the "import" keyword followed by the module name or "as" keyword to give it an
+alias, like "import xx","import xx as xxx".
+Import specific content from a module(and rename): Use the "from" keyword followed by the module name and "import"
+keyword (and "as" keyword), such as "from a import b as c".
+Import multiple functions: use a comma-separated list within the import statement for importing multiple functions from a
+module or package,like "from mymodule import function1, function2".
+Absolute references: An absolute reference specifies the complete path to a resource from the root directory. For instance,
+"from mypackage.mymodule","import myfunction".
+Relative references: A relative reference specifies a path starting from the current location in the directory structure. For
+example, "from . import sibling_module".
+
+
+C Basic include: Use the #include directive followed by the header file name. Standard library headers are enclosed in angle
+brackets < >, while user-defined headers are enclosed in double quotes " ". For example, #include <xx.h> or #include "xx.h".
+Include specific content from a header file(and rename): C can use typedef or # define to rename data types or functions.
+For example, typedef old_type new_type; or #define new_func old_func.
+Absolute references: An absolute reference specifies the complete path to a resource from the root directory. In C, this is
+typically used for specifying the full path to a header file or source file. For example, #include "/usr/include/myheader.h".
+Relative references: A relative reference specifies a path starting from the current location in the directory structure. For
+example, #include "./myheader.h" includes a header file from the current directory, or #include "../myheader.h" includes a
+header file from the parent directory.
+
+
+C++ Basic include: Use the #include directive followed by the header file name. Standard library headers are enclosed in
+angle brackets < >, while user-defined headers are enclosed in double quotes " ". For example, #include <xx.h> or #include
+"xx.h".
+Include specific content from a header file(and rename): C++ allows you to include specific parts of a header file by using
+namespace to refer to certain namespaces or classes. You can also rename or alias types or functions using using directives,
+like "using namespace std" or "using std::vector".
+Absolute references: An absolute reference specifies the complete path to a resource from the root directory. In C++, this is
+typically used for specifying the full path to a header file or source file. For example, #include "/usr/include/myheader.h".
+Relative references: A relative reference specifies a path starting from the current location in the directory structure. For
+example, #include "./myheader.h" includes a header file from the current directory, or #include "../myheader.h" includes a
+header file from the parent directory.
+
+
+C# Basic using): In C#, you use the "using" keyword to import namespaces, which allow access to classes, structs, and other
+members within those namespaces. For example, "using System"; allows access to the classes in the "System" namespace.
+Import specific content from a namespace: C# can import specific types (such as classes or methods) from a namespace by
+"using" followed by the type name. For instance, "using System.Console".
+Absolute references: In C#, absolute references are typically used for referencing fully qualified type names (including the
+namespace). For example, "System.Console.xx".
+
+
+PHP Basic include: Use the "include" or "require" keyword followed by the path to the file you wish to include. You
+can also use include_once or require_once to ensure the file is included only once. For example, "include ’myfile.php’" or
+"require ’myfile.php’".
+Include specific content from a file: PHP can include an entire file or use functions and classes defined in the included file.
+To rename or alias functions, classes, or variables, you would use PHP’s "use" keyword in the context of namespaces. For
+example, "use MyNamespace".
+Absolute references: An absolute reference specifies the full path from the root directory. In PHP, this would be used to
+include files from a specific path on the server, such as: "include ’/xx/xx/xx.php’".
+Relative references: A relative reference specifies a path relative to the current directory. For example, "include ’./xx.php’"
+or "include ’../xx.php’".
+
+
+JAVA Basic import: In Java, the "import" keyword is used to include classes or entire packages from other files. By default,
+Java does not support aliasing in imports like some other languages. To import a class, use "import package.ClassName".
+Import all classes from a package: Java allows importing all the classes from a package by using the * wildcard. For
+example, "import java.util.*".
+Absolute references: An absolute reference in Java specifies the full path to a class, starting from the root of the classpath.
+For example, "import xx.xx.MyClass".
+Static imports: Java allows importing static members of a class, such as methods or constants, using the import static
+keyword. For example, import static java.lang.Math.*; allows access to static methods like Math.sqrt() without needing to
+prefix them with Math.
+
+
+                                                            7162
+ JavaScript Basic import(and rename): Use the import keyword to bring in modules or specific parts of modules. The
+ general syntax is import <module> from ’<module-name>’, where <module> is the exported entity. To rename an import,
+ the as keyword can be used, like import originalName as alias from ’<module-name>’.
+ Import specific content from a module(and rename): JavaScript allows importing specific functions, objects, or values
+ from a module. This can be done by using the syntax. Additionally, renaming is possible with the as keyword. For example,
+ import func1 as f1, func2 from ’<module-name>’ imports func1 as f1 and func2 as-is.
+ Import multiple items from a module: Multiple exports from the same module can be imported in a single statement.
+ These are separated by commas inside curly braces. For example, import func1, func2, constant from ’<module-name>’.
+ Absolute references: An absolute reference in JavaScript specifies the complete URL or file path to the module or resource.
+ This often starts from the root directory or the full URL. For example, import func from ’/modules/myModule.js’ or import
+ func from ’https://example.com/myModule.js’.
+ Relative references: A relative reference in JavaScript refers to the file path starting from the current location in the directory
+ structure. This can be done using ./ for the current directory or ../ for the parent directory. For example, import func from
+ ’./myModule.js’ imports from the current directory, while import func from ’../myModule.js’ imports from the parent
+ directory.
+
+
+ TypeScript Basic import(and rename): Use the import keyword to bring in modules or specific components from modules.
+ The syntax is import <module> from ’<module-name>’, where <module> refers to the default export of the module. To
+ rename an import, the as keyword is used, such as import originalName as alias from ’<module-name>’.
+ Import specific content from a module(and rename): TypeScript supports importing specific parts of a module using curly
+ braces. The as keyword can also be used to rename the imported elements. For example, import func1 as f1, func2 from
+ ’<module-name>’ imports func1 as f1 and func2 with its original name.
+ Import multiple items from a module: Multiple items from the same module can be imported by listing them inside
+ curly braces, separated by commas. For instance, import func1, func2, variable from ’<module-name>’ imports multiple
+ functions and variables from the module.
+ Absolute references: An absolute reference in TypeScript specifies the full path to a module, either from the root di-
+ rectory or via a full URL. For example, "import myFunction from ’/xx/myModule’" or "import myFunction from
+ ’https://xx/myModule’".
+ Relative references: A relative reference specifies the file path starting from the current directory. For example, "import
+ myFunction from ’./myModule’" or "import myFunction from ’../myModule’".
+
+
+B     Repository Collection
+B.1    Repo Filter Criteria
+We collect public GitHub repositories created before December 16, 2024, and focus on eight specific
+programming languages. To streamline data processing, we apply several filtering criteria.
+   First, we exclude files where the average line length exceeds 100 characters or the maximum line length
+surpasses 1000 characters. Additionally, files with fewer than 25% alphabetic characters are removed.
+   At the repository level, we enforce the following main conditions. (1) Repositories must fall within
+the specified creation timeframe and must not be forks to ensure originality. (2) They must be primarily
+written in one of the eight target programming languages listed in Table 2. (3) They must meet size
+and popularity constraints: repositories should be smaller than 1MB for manageability, and they must
+have at least three stars to reflect a minimum level of community interest. (4) Repositories must have
+at least one commit in the last six months before the collection date to ensure they are not abandoned.
+(5) Repositories must have at least one open or closed issue or pull request to indicate some level of
+engagement from developers. (6) For repositories using dependency managers (e.g., package.json for
+JavaScript, requirements.txt for Python), we check that these files are present and not empty to ensure the
+repository is functional. (7) Repositories must contain a README file with at least 100 words to ensure
+they provide sufficient context for analysis. (8) To maintain consistency, we exclude repositories that mix
+multiple programming languages beyond a small threshold (e.g., more than 10% of files in a secondary
+language).
+
+B.2    README Filter Criteria
+To ensure that the README file effectively serves its purpose by providing structured and comprehensive
+information, we apply the following filtering criteria: (1) Structured Formatting: The README must
+include appropriate titles and headings to organize content, making it easier for readers to navigate. (2)
+Content Sufficiency: The document should meet a minimum character threshold to ensure it provides a
+meaningful overview of the project rather than being overly brief. (3) Setup Instructions: The README
+must contain setup-related keywords such as install, build, setup, download, compile, train, or run, ensuring
+                                                               7163
+that it provides essential instructions for setting up and using the project. (4) Project Structure References:
+It should explicitly reference specific files or directories within the repository to help users understand
+the project’s organization and locate key resources quickly. (5) License Information: The presence of
+a license section or a direct reference to a LICENSE file is required to clarify usage permissions and
+distribution rights.
+
+B.3   Detailed Task Sample Filter Process
+We applied different filtering strategies for the three tasks, with all prioritizing task difficulty and diversity
+of repository topics.
+Dependency Recognition Task. We categorized code snippets by token length (≤8K, 8K–16K, >16K),
+but found an imbalance across languages. For example, in the >16K category, C had 1,329 samples, while
+PHP had only 141. We initially selected 100 samples from each token length range for every language.
+After removing duplicate snippets from the same repository, we developed scripts to analyze invocation
+chain length, character length, and repository topic distribution. If imbalances were detected, we manually
+adjusted the sample selection, resulting in 180 samples per language.
+Repository Construction Task: We selected repositories with fewer than 12 invocation chains while
+ensuring full file coverage. This resulted in varying sample counts across languages (e.g., Python: 230,
+Java: 70). To manage manual verification costs, we aimed for 40–60 samples per language. Human
+review filtered out non-compliant cases (Appendix C.1), and we adjusted the distribution to approximate
+normality as in the dependency recognition task.
+Multi-file Editing Task: We selected code snippets with chains of lengths 2, 3, and 4, ensuring they
+came from different repositories. For each language, we generated 500–2000 samples (varying by
+language) using GPT-4o. We then verified if the number of generated files matched the requirements and
+used LLM to check whether the generated snippets met the criteria. We ran multiple rounds of refinement
+and removed code comments from the snippets. Human annotators applied manual corrections, discarding
+non-compliant samples and finalizing the dataset.
+
+C     Human Review Criteria
+C.1 Repository Construction
+Human annotators perform the following criteria to select the final set of samples:
+   First, the repository description should provide a brief and clear summary of the purpose and func-
+tionality of the repository. It should be logically coherent, free from contradictions, and align with the
+functional components of the repository. In addition, the description should include all important features
+and functionalities of the repository, ensuring a comprehensive overview. Next, the functional description
+for each file should clearly outline the core features and capabilities of the file. It should be accurate and
+brief, reflecting the actual code behavior of the file while adhering to the conventions and terminology of
+the repository.
+   Finally, the relationships between files, functions, and modules should be accurately represented in the
+generated descriptions. The dependencies of each file and the interactions within the repository must be
+clearly conveyed, ensuring that the dependencies reflect the actual structure of the repository.
+
+C.2 Multi-file Editing
+After the LLM-based filtering step, pre-selected samples are passed to human annotators for manual
+verification. This process is designed to ensure accuracy and consistency across multiple files.
+   First, annotators check whether the new functionalities are described in a way that is consistent with the
+code’s behavior and the intended programming logic. They then confirm that the changes align with the
+existing codebase, are semantically correct, and do not introduce errors or bugs. Modifications must be
+coherent not only within the specific file but throughout the project, maintaining consistency in terms of
+structure, style, and performance. Annotators also cross-check that all modified files reflect the appropriate
+changes, ensuring that updates in one file do not conflict with others.
+                                                      7164
+Static Analysis for Code Correctness. We use static analysis tools to ensure syntax correctness.
+After verifying the logic of newly implemented functionalities, annotators apply language-specific static
+analyzers to detect syntax errors:
+
+    • C, C++: Cppcheck
+
+    • C#: StyleCop
+
+    • Python: Pylint
+
+    • Java: SpotBugs
+
+    • TypeScript/JavaScript: ESLint
+
+    • PHP: PHPCS
+
+Finally, annotators manually correct any remaining issues, including syntax errors and logical inconsisten-
+cies with the intended requirements, to produce gold-standard code for evaluation.
+
+D      Diversity of Data
+
+
+
+
+Figure 7: Topic distribution. Different programming languages and frameworks into various fields, such as
+Development, Tools, Systems, Data Science, and more.
+
+
+E     Prompt Templates
+E.1     Curating Prompts for Dependency Recognition Data
+      Data Curation for Dependency Recognition
+
+    You are an AI assistant that summarizes file functionality. Your task: 1. Read the file content
+    provided by the user. 2. Analyze and understand the file’s main purpose. 3. Summarize the
+    core functionality in 1-2 concise sentences. 4. Provide only the summary, without any additional
+    information or commentary.
+
+
+                                                  7165
+      Data Curation for Dependency Recognition
+
+  You are an AI assistant that summarizes project functionality. Your task: 1. Read the README
+  content provided by the user. 2. Analyze and understand the project’s main purpose and features. 3.
+  Summarize the core functionality of the project in 2-3 concise sentences. 4. Provide the summary
+  in JSON format with two keys: "description" and "function". 5. The "description" should briefly
+  describe what the project is. 6. The "function" should summarize the main features or capabilities
+  of the project.
+  Example output:
+      {
+           "description":␣"An␣AI-powered␣game␣solver␣for␣2048",
+           "function":␣"Utilizes␣expectimax␣optimization␣with␣efficient␣bitboard␣representation␣to␣
+               play␣2048.␣Can␣control␣browser-based␣game␣and␣provides␣both␣command-line␣and␣browser-
+               control␣versions."
+      }
+
+
+
+
+E.2        Curating Prompts for Multi-file Editing Data
+
+      Data Curation for In-place Edits with Chain Length 2
+
+  Based on the above code snippets, complete the following instructions and output according to the
+  format required in Step 3: 1. Identify interactions across two files:Identify a segment in one file
+  (#file 1) that is invoked by another file (#file 2). Exclude import parts in both files and specify only
+  relevant code segments in the corresponding files. 2. Add a new feature: • Modify the part in #file 1
+  that is being invoked by #file 2. • Update the corresponding code in #file 2 to handle the changes in
+  #file 1. • If new code snippets are required, append them at the end of each file. 3. Output format:
+      {
+          "called\_code\_segment":␣"\#file␣1␣segment␣being␣invoked␣(excluding␣`import`)",
+          "invoking\_code\_segment":␣"\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣`import`)",
+          "feature\_description":␣"Description␣of␣the␣new␣feature",
+          "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach.",
+          "modified\_complete\_code":␣"Provide␣the␣complete␣code␣with␣the␣required␣modifications␣for␣
+              both␣files.␣Include␣the␣modified␣code␣snippets␣for␣\#file␣1␣and␣\#file␣2.␣Use␣comments:
+              ␣\#Modify␣for␣modified␣parts␣and␣\#New␣for␣newly␣added␣parts␣to␣indicate␣whether␣the␣
+              change␣is␣an␣addition␣or␣modification."
+      }
+
+
+
+
+      Data Curation for In-place Edits with Chain Length 3
+
+   Based on the above code snippets, complete the following instructions and output according to the
+   format required in Step 3.
+  1. **Identify interactions across three files:**
+  - Identify a segment in one file (‘#file 1‘) that is invoked by another file (‘#file 2‘). - Identify how
+   this interaction is further used or invoked in a third file (‘#file 3‘). - Check if ‘#file 2‘ contains a
+   segment invoked by ‘#file 3‘. If so, document this invocation explicitly. - Exclude ‘import‘ parts in
+   all cases and specify only relevant code segments in the corresponding files.
+   2. **Add a new feature:**
+  - Modify the part in ‘#file 1‘ that is being called by ‘#file 2‘. - Update ‘#file 2‘ to handle the
+   modified code from ‘#file 1‘ and ensure any related code segments used by ‘#file 3‘ are updated
+   accordingly. - If ‘#file 3‘ directly interacts with updated segments in ‘#file 2‘, modify the code in
+  ‘#file 3‘ to accommodate the changes. - If new code snippets are required, append them at the end
+   of each file.
+   3. Output format:
+
+                                                    7166
+{
+  "called\_code\_segment\_file\_1":␣"Relevant␣\#file␣1␣segment␣being␣invoked␣(excluding␣`
+       import`)",
+  "invoking\_code\_segment\_file\_2":␣"Relevant␣\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣
+       `import`)",
+  "called\_code\_segment\_file\_2":␣"Relevant␣\#file␣2␣segment␣being␣invoked␣by␣\#file␣3␣(
+       excluding␣`import`)",
+  "using\_code\_segment\_file\_3":␣"Relevant␣\#file␣3␣segment␣using␣or␣interacting␣with␣\#file
+       ␣2␣or␣\#file␣1␣(excluding␣`import`)",
+  "feature\_description":␣"Description␣of␣the␣new␣feature",
+  "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach,
+       including any changes to interactions between \#file 2 and \#file 3.",
+␣␣"modified\_complete\_code":␣"Provide the complete code with the required modifications for
+     all three files. Include the modified code snippets for \#file 1, \#file 2, and \#file 3.
+      Use comments:␣\#Modify␣for␣modified␣parts␣and␣\#New␣for␣newly␣added␣parts␣to␣indicate␣
+     whether␣the␣change␣is␣an␣addition␣or␣modification."
+}
+
+
+
+
+Data Curation for In-place Edits with Chain Length 4
+
+Based on the above code snippets, complete the following instructions and output according to the
+format required in Step 4.
+1. Identify interactions across four files:
+• Identify a segment in one file (#file 1) that is invoked by another file (#file 2). • Identify how this
+interaction is further used or invoked in a third file (#file 3). • Check if #file 2 contains a segment
+invoked by #file 3. If so, document this invocation explicitly. • Check if #file 3 contains a segment
+invoked by a fourth file (#file 4). If so, document this invocation explicitly. • Exclude import parts
+in all cases and specify only relevant code segments in the corresponding files.
+2. Add a new feature:
+• Modify the part in #file 1 that is being called by #file 2. • Update #file 2 to handle the modified
+code from #file 1 and ensure any related code segments used by #file 3 are updated accordingly.
+• If #file 3 directly interacts with updated segments in #file 2, modify the code in #file 3 to
+accommodate the changes. • Update #file 4 if it interacts with or depends on any updated segments
+in #file 3. • If new code snippets are required, append them at the end of each file.
+3. Output format:
+
+{
+  "called\_code\_segment\_file\_1":␣"Relevant␣\#file␣1␣segment␣being␣invoked␣(excluding␣`
+       import`)",
+  "invoking\_code\_segment\_file\_2":␣"Relevant␣\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣
+       `import`)",
+  "called\_code\_segment\_file\_2":␣"Relevant␣\#file␣2␣segment␣being␣invoked␣by␣\#file␣3␣(
+       excluding␣`import`)",
+  "using\_code\_segment\_file\_3":␣"Relevant␣\#file␣3␣segment␣using␣or␣interacting␣with␣\#file
+       ␣2␣or␣\#file␣1␣(excluding␣`import`)",
+  "called\_code\_segment\_file\_3":␣"Relevant␣\#file␣3␣segment␣being␣invoked␣by␣\#file␣4␣(
+       excluding␣`import`)",
+  "using\_code\_segment\_file\_4":␣"Relevant␣\#file␣4␣segment␣using␣or␣interacting␣with␣\#file
+       ␣3␣(excluding␣`import`)",
+  "feature\_description":␣"Description␣of␣the␣new␣feature",
+  "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach,
+       including any changes to interactions between the four files.",
+␣␣"modified\_complete\_code":␣"Provide the complete code with the required modifications for
+     all four files. Include the modified code snippets for \#file 1, \#file 2, \#file 3, and
+     \#file 4. Use comments:␣\#Modify␣for␣modified␣parts␣and␣\#New␣for␣newly␣added␣parts␣to␣
+     indicate␣whether␣the␣change␣is␣an␣addition␣or␣modification."
+}
+
+
+
+
+                                                 7167
+Data Curation for Expansion Edits with Chain Length 2
+
+Based on the above code snippets, complete the following instructions and output according to the
+format required in Step 3:
+1. **Identify interactions across two files:**
+- Identify a segment in one file (#file 1) that is invoked by another file (#file 2). - Exclude import
+parts in both files and specify only relevant code segments in the corresponding files.
+2. **Add a new feature:**
+- Modify the part in #file 1 that is being invoked by #file 2. - Create a new file (‘#file 3‘) to
+implement additional functionality for the new feature. - Update #file 1 to invoke code from #file
+3 where applicable. - Update #file 2 to invoke code from #file 3 where applicable. - Ensure the
+changes maintain compatibility across #file 1 and #file 2. - If new code snippets are required,
+append them at the end of each file.
+3. Output format:
+
+{
+  "called\_code\_segment":␣"\#file␣1␣segment␣being␣invoked␣(excluding␣`import`)",
+  "invoking\_code\_segment":␣"\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣`import`)",
+  "new\_file\_code\_segment":␣"Relevant␣code␣snippets␣added␣in␣\#file␣3␣(excluding␣`import`)",
+  "feature\_description":␣"Description␣of␣the␣new␣feature",
+  "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach,
+       including the purpose and integration of \#file 3.",
+␣␣"modified\_complete\_code":␣"Provide the complete code with the required modifications for
+     \#file 1, \#file 2, and the new file (\#file 3). Use comments:␣\#Modify␣for␣modified␣
+     parts␣and␣\#New␣for␣newly␣added␣parts␣to␣indicate␣whether␣the␣change␣is␣an␣addition␣or␣
+     modification."
+}
+
+
+
+
+Data Curation for Expansion Edits with Chain Length 3
+
+Extended Instruction for Interactions Across Three Files
+Based on the above code snippets, complete the following instructions and output according to the
+format required in Step 3:
+1. Identify interactions across three files: • Identify a segment in one file (#file 1) that is invoked
+by another file (#file 2). • Identify how this interaction is further used or invoked in a third file
+(#file 3). • Check if #file 2 or #file 3 contains segments that directly or indirectly depend on #file 1
+or interact with one another. Document these invocations explicitly. • Exclude import parts in all
+cases and specify only relevant code segments in the corresponding files.
+2. Add a new feature: • Modify the part in #file 1 that is being invoked by #file 2 and/or #file 3. •
+Create a new file (#file 4) to implement additional functionality for the new feature. • Update #file
+1 to invoke code from #file 4 where applicable. • Update #file 2 and/or #file 3 to handle changes
+in #file 1 and invoke relevant code from #file 4. • Ensure compatibility across all interactions
+involving #file 1, #file 2, #file 3, and the new file (#file 4). • If new code snippets are required,
+append them at the end of each file.
+3. Output format:
+
+                                                 7168
+      {
+        "called\_code\_segment\_file\_1":␣"\#file␣1␣segment␣being␣invoked␣(excluding␣`import`)",
+        "invoking\_code\_segment\_file\_2":␣"\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣`import`)
+             ",
+        "invoking\_code\_segment\_file\_3":␣"\#file␣3␣segment␣invoking␣\#file␣1␣or␣\#file␣2␣(
+             excluding␣`import`)",
+        "new\_file\_code\_segment":␣"Relevant␣code␣snippets␣added␣in␣\#file␣4␣(excluding␣`import`)",
+        "feature\_description":␣"Description␣of␣the␣new␣feature",
+        "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach,
+             including the purpose and integration of \#file 4.",
+      ␣␣"modified\_complete\_code":␣"Provide the complete code with the required modifications for
+           \#file 1, \#file 2, \#file 3, and the new file (\#file 4). Use comments:␣\#Modify␣for␣
+           modified␣parts␣and␣\#New␣for␣newly␣added␣parts␣to␣indicate␣whether␣the␣change␣is␣an␣
+           addition␣or␣modification."
+      }
+
+
+
+E.3       Prompts for Inference
+      Prompt Template Used for Dependency Recognition
+
+  There are files #filename. Analyze their content and determine the dependency relationship
+  between files. Output with the following request.
+  1.Don’t give analysis process and using the same file title.
+  2.Simply and only output the dependency relationship list using its file names with the format
+  [’a.py’,’b.py’,’c.py’] if b depends on a , c depends on b.
+  3.You must strictly output the response with the format:[’a.py’,’b.py’,’c.py’] Example output:
+  ["file1.py", "file2.py", "file3.py"]
+  Here’s the code snippet: #code_content.
+
+      Prompt Template Used for Repository Construction
+
+  You are an AI assistant tasked with generating a project structure based on the given repository
+  information. Your task:
+  1. Analyze the project description, function, and file information provided.
+  2. Generate a project structure that shows the dependencies between files.
+  3. Return the structure in the format [[file1, file2, file3], [file4, file5], ...], where each sublist
+  represents a chain of dependencies (file2 calls file1, file3 calls file2, etc.).
+  4. Provide only the list structure, without any additional explanation.
+  5. You must strictly follow the output format.
+  Here’s the project information:
+  Project Description: #description Project Function: #function
+  Files in the project: #files
+  Based on this information, please generate the project structure showing the dependencies between
+  files. Remember to return only the list structure without any additional explanation.
+  Example output format:
+  [["file1.py", "file2.py", "file3.py"], ["file4.py", "file5.py"]]
+
+      Prompt Template Used for Multi-file Editing
+
+  Based on the above code snippets, complete the following instructions and output according to the
+  format specified in Step 3:
+  1. Identify the segment in one file that is invoked by another file (excluding the import parts) and
+  specify the relevant code segment in the called file. 2. Modify the given code to implement the
+
+                                                    7169
+#function. This requires modifying the part being called. If new code snippets are needed, add
+them to the end of each respective file. 3. Output format:
+
+{
+    "called\_code\_segment":␣"\#file␣1␣segment␣being␣invoked␣(excluding␣`import`)",
+    "invoking\_code\_segment":␣"\#file␣2␣segment␣invoking␣\#file␣1␣(excluding␣`import`)",
+    "feature\_description":␣"Description␣of␣the␣new␣feature",
+    "detailed\_feature\_description":␣"General␣explanation␣of␣the␣modification␣approach",
+    "modified\_complete\_code":␣"Provide␣the␣complete␣code␣with␣the␣required␣modifications.␣
+        Output␣the␣modified␣code␣snippets.␣Use␣comments␣like␣\#Modify␣for␣modified␣parts␣and␣\#
+        New␣for␣newly␣added␣parts␣to␣indicate␣whether␣the␣change␣is␣an␣addition␣or␣modification
+        ."
+}
+
+
+
+
+                                              7170
+E.4     Prompts for Evaluation
+      Prompt Template Used for Evaluating Multi-file Editing
+
+  Gt: {gt} Pred: {pred}
+  Using Gt as the correct answer, compare the content of Pred with Gt and evaluate Pred based on the
+  following aspects. Each aspect contains tailored evaluation criteria to handle the complexities of
+  multi-file interactions and feature integration. The output must follow the JSON format described
+  in Point 6.
+  Evaluation Aspects
+  1. Correctness of Function Calls Objective: Evaluate the accuracy of all function calls between seg-
+  ments and across files. • Ensure: • Each invoking_code_segment correctly calls its corresponding
+  called_code_segment as per Gt. • Calls include appropriate parameter matching, order, and context
+  alignment. • Evaluation Criteria: • Does the function signature match, including parameter names,
+  types, and order? • Are correct arguments passed, meeting expectations in feature_description
+  and detailed_feature_description? • Is the pre- or post-logic necessary for context included? • Are
+  cross-file dependencies invoked correctly, as shown in modified_complete_code?
+  Scoring Rules: • 5 points: All function calls are completely correct and match Gt, including
+  parameters, order, and logical dependencies. • 4 points: Mostly correct with minor parameter or
+  comment issues but no major gaps. • 3 points: Partially correct; missing key parameters, logic, or
+  dependencies. • 2 points: Significant issues in invocation logic, causing likely runtime errors. • 0-1
+  points: Calls are incorrect, incomplete, or not implemented.
+  2. Alignment with Feature Requirements Objective: Check if the code in Pred aligns with
+  the intended feature and modification goals. • Ensure: • Every call reflects requirements in fea-
+  ture_description and detailed_feature_description. • The new or modified logic directly implements
+  the required functionality. • Evaluation Criteria: • Does the logic adhere to the functional goals
+  described? • Does it integrate with multi-file dependencies correctly (if applicable)? • Are the new
+  components in new_file_code_segment aligned with expectations?
+  Scoring Rules: • 5 points: Perfectly aligned with feature requirements; implementation is logically
+  complete. • 4 points: Correctly aligned but with potential optimizations or minor improvements. •
+  3 points: Partially fulfills requirements with clear gaps in alignment. • 2 points: Loosely aligned
+  with significant logic missing. • 0-1 points: Not aligned or entirely unrelated to the described
+  requirements.
+  3. Accuracy of Functionality Implementation Objective: Verify the correctness of the implemen-
+  tation, focusing on functional outcomes. • Evaluation Criteria: • Does the functionality fully
+  satisfy the requirements in feature_description? • Are components correctly loaded, initialized, or
+  referenced? • Are all dependencies resolved for seamless multi-file integration?
+  Scoring Rules: • 5 points: Fully accurate implementation without functional defects. • 4 points:
+  Mostly accurate with minor issues or deviations. • 3 points: Partially correct but lacking essential
+  steps or logic. • 2 points: Basic framework present but largely incomplete. • 0-1 points: Non-
+  functional due to missing or incorrect logic.
+  4. Completeness of Implementation Objective: Ensure that all functional components, including
+  new and modified ones, are fully implemented. • Evaluation Criteria: • Are all required segments
+  across files defined and updated per Gt? • Does the implementation cover all subparts described
+  in detailed_feature_description? • Are all new dependencies (#New segments) and modifications
+  (#Modify segments) accounted for?
+  Scoring Rules: • 5 points: Complete implementation with no omissions. • 4 points: Nearly
+  complete, with only minor omissions. • 3 points: Significant missing functionality, but partially
+  meets requirements. • 2 points: Too many missing components, achieving minimal functionality. •
+  0-1 points: Nearly all components are missing or incorrect.
+  5. Code Quality Objective: Assess the overall quality, maintainability, and readability of the
+  code. • Evaluation Criteria: • Readability: Clear naming, concise comments, and consistent
+
+                                                  7171
+style. • Maintainability: Modular structure, minimal duplication, and extensibility. • Efficiency:
+Appropriate algorithms, data structures, and resource use.
+Scoring Rules: • 5 points: Excellent quality with clean, efficient, and maintainable code. • 4 points:
+Good quality, but minor readability or efficiency issues. • 3 points: Average quality; readable but
+not optimized or modular. • 2 points: Poor quality; lacks structure or suffers from inefficiencies. •
+0-1 points: Unreadable, unstructured, or inefficient code.
+6. JSON Output Format
+
+{
+    "correctness_score":␣5,
+    "purpose_alignment_score":␣4,
+    "functionality_accuracy_score":␣5,
+    "functionality_completeness_score":␣4,
+    "code_quality_score":␣5
+}
+
+
+
+
+                                                7172
+F   Task Case
+    Instance of Dependency Recognition
+
+    "files":["’bilireq/bilireq/login/_init_.py’",          "’bilireq/bilireq/typing.py’",   "’bilire-
+    q/test/test_login.py’"],
+    "content":
+    import asyncio
+    from base64 import b64encode
+    from io import BytesIO
+    from typing import Optional, Union
+
+    from qrcode.image.pure import PyPNGImage
+    from qrcode.main import QRCode
+    from _typing import T_Auth
+    from auth import Auth, WebAuth
+    from ..exceptions import ResponseCodeError
+    from ..utils import get, post
+    from .pwd_login import pwd_login as _pwd_login
+    from .qrcode_login import get_qrcode_login_info, get_qrcode_login_result
+    from .sms_login import send_sms
+    from .sms_login import sms_login as _sms_login
+    from .web_qrcode_login import get_web_qrcode_login_info, get_web_qrcode_login_url
+
+    BASE_URL = "https://passport.bilibili.com/api/v2/oauth2/"
+
+    async def refresh_token(auth: T_Auth = None, *, reqtype="app", **kwargs):
+        url = f"{BASE_URL}refresh_token"
+        return await post(url, auth=auth, reqtype=reqtype, **kwargs)
+
+    async def get_token_info(auth: T_Auth = None, *, reqtype="app", **kwargs):
+        url = f"{BASE_URL}info"
+        return await get(url, auth=auth, reqtype=reqtype, **kwargs)
+
+    class Login:
+        auth_code: str
+        qrcode_url: str
+        tel: int
+        cid: int
+        captcha_key: str
+
+       async def get_web_qrcode_url(self) -> str:
+           r = await get_web_qrcode_login_url()
+           self.auth_code = r["qrcode_key"]
+           self.qrcode_url = r["url"]
+           return self.qrcode_url
+
+       async def get_qrcode_url(self) -> str:
+           r = await get_qrcode_login_info()
+           self.auth_code = r["auth_code"]
+           self.qrcode_url = r["url"]
+           return self.qrcode_url
+
+       async def get_qrcode(self, url: Optional[str] = None,
+                           print_qr=False, base64_encode=False,
+           url = url or (await self.get_qrcode_url()
+                        if login_type == "app"
+                        else await self.get_web_qrcode_url())
+
+           qr = QRCode()
+           qr.add_data(url)
+
+           if print_qr:
+               qr.print_tty()
+               return None
+
+           img = qr.make_image(image_factory=PyPNGImage)
+
+
+                                                    7173
+        buf = BytesIO()
+        img.save(buf)
+
+        if not base64_encode:
+            return buf.getvalue()
+        return b64encode(buf.getvalue()).decode()
+
+    async def web_qrcode_login(self, auth_code=None, retry=-1, interval=1):
+        auth_code = auth_code or self.auth_code
+        # Implementation continues...
+
+"gt":["’bilireq/bilireq/_typing.py’", "’bilireq/bilireq/login/_init_.py’", "’bilireq/test/test_login.py’"
+]
+
+Instance of Repository Construction
+
+"repo": "got-your-back",
+"description": "GYB is a command-line tool for backing up Gmail messages to a local computer.",
+"function": "Utilizes Gmail’s API over HTTPS to securely download and store emails locally,
+offering installation options for Linux, MacOS, and Windows.",
+"files": [ { "file": "got-your-back/fmbox.py", "function": "This library provides functionality
+to read and manipulate mbox files sequentially, allowing extraction, modification, and removal
+of email headers, as well as iterating through messages in an mbox file." }, "file": "got-your-
+back/gyb.py", "function": "This script is a command-line tool for backing up and restoring Gmail
+messages. It supports various actions such as backup, restore, count, purge, and label management,
+and integrates with Google APIs for Gmail and Google Workspace services. The tool uses OAuth
+2.0 for authentication and supports both user accounts and service accounts." , "file": "got-your-
+back/labellang.py", "function": "Unable to read file content." ],
+"gt": "[[’got-your-back/labellang.py’, ’got-your-back/gyb.py’], [’got-your-back/fmbox.py’, ’got-
+your-back/gyb.py’]]"
+
+Instance of Repository Construction
+
+"repo": "ip_basic",
+
+"content":
+'import␣ip_basic/ip_basic/vis_utils.py'
+import cv2
+
+def cv2_show_image(window_name, image, size_wh=None, location_xy=None):
+    """Helper function for specifying window size and location when displaying images with cv2.
+
+
+    Args:
+        window_name: str window name
+        image: ndarray image to display
+        size_wh: window size (w, h)
+        location_xy: window location (x, y)
+    """
+
+    if size_wh is not None:
+        cv2.namedWindow(window_name, cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_NORMAL)
+        cv2.resizeWindow(window_name, *size_wh)
+    else:
+        cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+
+    if location_xy is not None:
+        cv2.moveWindow(window_name, *location_xy)
+
+
+
+                                                  7174
+   cv2.imshow(window_name, image)
+
+'import␣ip_basic/demos/depth_completion.py'
+import glob
+import os
+import sys
+import time
+import cv2
+import numpy as np
+import png
+from ip_basic import depth_map_utils
+from ip_basic import vis_utils
+
+def main():
+    """Depth maps are saved to the 'outputs' folder."""
+    ##############################
+    # Options
+    ##############################
+    # Validation set
+    input_depth_dir = os.path.expanduser('~/Kitti/depth/depth_selection/val_selection_cropped/
+        velodyne_raw')
+    data_split = 'val'
+
+   # Test set
+   # input_depth_dir = os.path.expanduser('~/Kitti/depth/depth_selection/
+       test_depth_completion_anonymous/velodyne_raw')
+   # data_split = 'test'
+
+   # Fast fill with Gaussian blur @90Hz (paper result)
+   fill_type = 'fast'
+   extrapolate = True
+   blur_type = 'gaussian'
+
+   # Fast Fill with bilateral blur, no extrapolation @87Hz (recommended)
+   # fill_type = 'fast'
+   # extrapolate = False
+   # blur_type = 'bilateral'
+
+   # Multi-scale dilations with extra noise removal, no extrapolation @ 30Hz
+   # fill_type = 'multiscale'
+   # extrapolate = False
+   # blur_type = 'bilateral'
+
+   # Save output to disk or show process
+   save_output = True
+
+   ##############################
+   # Processing
+   ##############################
+   if save_output:
+       # Save to Disk
+       show_process = False
+       save_depth_maps = True
+   else:
+       if fill_type == 'fast':
+           raise ValueError('"fast"␣fill␣does␣not␣support␣show_process')
+
+       # Show Process
+       show_process = True
+       save_depth_maps = False
+
+   # Create output folder
+   this_file_path = os.path.dirname(os.path.realpath(__file__))
+   outputs_dir = this_file_path + '/outputs'
+   os.makedirs(outputs_dir, exist_ok=True)
+
+   output_folder_prefix = 'depth_' + data_split
+   output_list = sorted(os.listdir(outputs_dir))
+
+
+
+                                              7175
+if len(output_list) > 0:
+    split_folders = [folder for folder in output_list if folder.startswith(
+         output_folder_prefix)]
+    if len(split_folders) > 0:
+        last_output_folder = split_folders[-1]
+        last_output_index = int(last_output_folder.split('_')[-1])
+    else:
+        last_output_index = -1
+else:
+    last_output_index = -1
+output_depth_dir = outputs_dir + '/{}_{:03d}'.format(output_folder_prefix,
+     last_output_index + 1)
+
+if save_output:
+    if not os.path.exists(output_depth_dir):
+        os.makedirs(output_depth_dir)
+    else:
+        raise FileExistsError('Already␣exists!')
+    print('Output␣dir:', output_depth_dir)
+
+# Get images in sorted order
+images_to_use = sorted(glob.glob(input_depth_dir + '/*'))
+
+# Rolling average array of times for time estimation
+avg_time_arr_length = 10
+last_fill_times = np.repeat([1.0], avg_time_arr_length)
+last_total_times = np.repeat([1.0], avg_time_arr_length)
+
+num_images = len(images_to_use)
+for i in range(num_images):
+
+   depth_image_path = images_to_use[i]
+
+   # Calculate average time with last n fill times
+   avg_fill_time = np.mean(last_fill_times)
+   avg_total_time = np.mean(last_total_times)
+
+   # Show progress
+   sys.stdout.write('\rProcessing␣{}␣/␣{},␣'
+                   'Avg␣Fill␣Time:␣{:.5f}s,␣'
+                   'Avg␣Total␣Time:␣{:.5f}s,␣'
+                   'Est␣Time␣Remaining:␣{:.3f}s'.format(
+                       i, num_images - 1, avg_fill_time, avg_total_time,
+                       avg_total_time * (num_images - i)))
+   sys.stdout.flush()
+
+   # Start timing
+   start_total_time = time.time()
+
+   # Load depth projections from uint16 image
+   depth_image = cv2.imread(depth_image_path, cv2.IMREAD_ANYDEPTH)
+   projected_depths = np.float32(depth_image / 256.0)
+
+   # Fill in
+   start_fill_time = time.time()
+   if fill_type == 'fast':
+       final_depths = depth_map_utils.fill_in_fast(
+           projected_depths, extrapolate=extrapolate, blur_type=blur_type)
+   elif fill_type == 'multiscale':
+       final_depths, process_dict = depth_map_utils.fill_in_multiscale(
+           projected_depths, extrapolate=extrapolate, blur_type=blur_type,
+           show_process=show_process)
+   else:
+       raise ValueError('Invalid␣fill_type␣{}'.format(fill_type))
+   end_fill_time = time.time()
+
+   # Display images from process_dict
+   if fill_type == 'multiscale' and show_process:
+
+
+
+                                          7176
+          img_size = (570, 165)
+
+          x_start = 80
+          y_start = 50
+          x_offset = img_size[0]
+          y_offset = img_size[1]
+          x_padding = 0
+          y_padding = 28
+
+          img_x = x_start
+          img_y = y_start
+          max_x = 1900
+
+          row_idx = 0
+          for key, value in process_dict.items():
+
+              image_jet = cv2.applyColorMap(
+                  np.uint8(value / np.amax(value) * 255),
+                  cv2.COLORMAP_JET)
+              vis_utils.cv2_show_image(
+                  key, image_jet,
+                  img_size, (img_x, img_y))
+
+              img_x += x_offset + x_padding
+              if (img_x + x_offset + x_padding) > max_x:
+                  img_x = x_start
+                  row_idx += 1
+              img_y = y_start + row_idx * (y_offset + y_padding)
+
+              # Save process images
+              cv2.imwrite('process/' + key + '.png', image_jet)
+
+          cv2.waitKey()
+
+       # Save depth images to disk
+       if save_depth_maps:
+           depth_image_file_name = os.path.split(depth_image_path)[1]
+
+          # Save depth map to a uint16 png (same format as disparity maps)
+          file_path = output_depth_dir + '/' + depth_image_file_name
+          with open(file_path, 'wb') as f:
+              depth_image = (final_depths * 256).astype(np.uint16)
+
+              # pypng is used because cv2 cannot save uint16 format images
+              writer = png.Writer(width=depth_image.shape[1],
+                                height=depth_image.shape[0],
+                                bitdepth=16,
+                                greyscale=True)
+              writer.write(f, depth_image)
+
+       end_total_time = time.time()
+
+       # Update fill times
+       last_fill_times = np.roll(last_fill_times, -1)
+       last_fill_times[-1] = end_fill_time - start_fill_time
+
+       # Update total times
+       last_total_times = np.roll(last_total_times, -1)
+       last_total_times[-1] = end_total_time - start_total_time
+
+
+if __name__ == "__main__":
+    main()
+
+"called_code_segment":
+def cv2_show_image(window_name, image, size_wh=None, location_xy=None):
+    """Helper function for specifying window size and location when
+
+
+
+                                            7177
+   displaying images with cv2.
+
+   Args:
+       window_name: str window name
+       image: ndarray image to display
+       size_wh: window size (w, h)
+       location_xy: window location (x, y)
+   """
+   if size_wh is not None:
+       cv2.namedWindow(window_name,
+                     cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_NORMAL)
+       cv2.resizeWindow(window_name, *size_wh)
+   else:
+       cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+
+   if location_xy is not None:
+       cv2.moveWindow(window_name, *location_xy)
+
+   cv2.imshow(window_name, image)
+
+"feature_description": "Add an option to save the displayed images to disk.",
+"detailed_feature_description": "Modify the ‘cv2_show_image‘ function in #file 1 to accept an
+additional parameter ‘save_path‘ which, if provided, will save the displayed image to the specified
+path. Update the invocation in #file 2 to include this new parameter and save the images to a
+specified directory.",
+"modified_complete_code":
+# file 1
+import cv2
+
+def cv2_show_image(window_name, image, size_wh=None, location_xy=None, save_path=None):
+    """
+    Helper function for specifying window size and location when displaying images with cv2.
+
+   Args:
+       window_name: str, window name
+       image: ndarray, image to display
+       size_wh: tuple, window size (w, h)
+       location_xy: tuple, window location (x, y)
+       save_path: str, path to save the image
+   """
+   if size_wh is not None:
+       cv2.namedWindow(window_name, cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_NORMAL)
+       cv2.resizeWindow(window_name, *size_wh)
+   else:
+       cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+
+   if location_xy is not None:
+       cv2.moveWindow(window_name, *location_xy)
+
+   cv2.imshow(window_name, image)
+
+   if save_path is not None:
+       cv2.imwrite(save_path, image)
+
+
+# file 2
+if fill_type == 'multiscale' and show_process:
+    img_size = (570, 165)
+
+   x_start = 80
+   y_start = 50
+   x_offset = img_size[0]
+   y_offset = img_size[1]
+   x_padding = 0
+   y_padding = 28
+
+
+
+                                               7178
+       img_x = x_start
+       img_y = y_start
+       max_x = 1900
+
+       row_idx = 0
+       for key, value in process_dict.items():
+           image_jet = cv2.applyColorMap(np.uint8(value / np.amax(value) * 255), cv2.COLORMAP_JET)
+           save_path = 'process/' + key + '.png'
+           vis_utils.cv2_show_image(key, image_jet, img_size, (img_x, img_y), save_path=save_path)
+
+           img_x += x_offset + x_padding
+           if (img_x + x_offset + x_padding) > max_x:
+               img_x = x_start
+               row_idx += 1
+           img_y = y_start + row_idx * (y_offset + y_padding)
+
+       cv2.waitKey()
+
+
+
+G    Crowdsourcing
+In conducting our study, we identified several potential risks to participants. Firstly, there is a risk to
+privacy and confidentiality, as participants are required to share personal information. To mitigate this, all
+data will be anonymized and stored securely, with access restricted to authorized personnel only. Secondly,
+there may be psychological risks, such as discomfort or stress during the tasks. To address this, we have
+included detailed instructions and debriefing sessions to ensure participants feel supported throughout the
+process. Additionally, participants have the right to withdraw from the study at any time without penalty.
+Lastly, while there are no significant physical risks associated with our procedures, we will monitor
+participants for any signs of distress and provide appropriate support. We pay each participant an hourly
+rate of $10. The primary participants we recruit are college students majored in software engineering with
+master degree (Age ranging 23-28).
+
+
+
+
+                                                    7179
+

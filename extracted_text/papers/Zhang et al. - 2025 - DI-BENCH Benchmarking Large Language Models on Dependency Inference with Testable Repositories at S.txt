@@ -1,0 +1,1704 @@
+        DI-B ENCH: Benchmarking Large Language Models on Dependency
+                  Inference with Testable Repositories at Scale
+Linghao Zhang* 1,2 , Junhao Wang* 1,3 , Shilin He†1 , Chaoyun Zhang1 , Yu Kang1 , Bowen Li4 ,
+  Jiaheng Wen* 1,5 , Chengxing Xie4 , Maoquan Wang1 , Yufan Huang1 , Elsie Nallipogu1 ,
+   Qingwei Lin1 , Yingnong Dang1 , Saravan Rajmohan1 , Dongmei Zhang1 , Qi Zhang1
+                                 1
+                                     Microsoft, 2 Wuhan University, 3 Tongji University,
+                                     4
+                                       Shanghai AI Laboratory, 5 Zhejiang University
+
+                                                                                             pyproject.toml
+                           Abstract                                  A Python Repository
+                                                                                              [build-system]
+                                                                       src/                   build-backend =
+        Large Language Models have advanced auto-                             init   .py      [project]
+        mated software development, however, it re-                       metrics.py          name = "A Python Project"
+        mains a challenge to correctly infer depen-                       main.py
+                                                                                              authors = [   ]
+                                                                                              classifiers = {   }
+        dencies, namely, identifying the internal com-                 tests/                 dependencies = [
+                                                                                                  "pandas 1.5.3",
+        ponents and external packages required for a                      test_main.py
+                                                                                                  "scikit-learn 1.1.0",
+        repository to successfully run. Existing stud-                 pyproject.toml         ]
+                                                                                                      Crucial for exec!
+        ies highlight that dependency-related issues                   README.md
+                                                                                              [tool.setuptools]
+        cause over 40% of observed runtime errors
+        on the generated repository. To address this,
+        we introduce DI-B ENCH1 , a large-scale bench-          Figure 1: An example of Python project dependencies.
+        mark and evaluation framework specifically
+        designed to assess LLMs’ capability on depen-           generation solutions risk failing at runtime, im-
+        dency inference. The benchmark features 581             peding further iteration, evaluation, and reliable
+        repositories with testing environments across
+                                                                deployment.
+        Python, C#, Rust, and JavaScript. Extensive
+        experiments with textual and execution-based               As illustrated in Figure 1, dependency inference
+        metrics reveal that the current best-performing         involves understanding the intricate relationships
+        model achieves only a 48% execution pass                within the codebase and mapping out the exter-
+        rate on Python, indicating significant room for         nal packages required for execution. Such depen-
+        improvement. DI-B ENCH establishes a new                dencies are typically documented in configuration
+        viewpoint for evaluating LLM performance on             files that may vary from language to language (see
+        repositories, paving the way for more robust
+                                                                Appendix A). Correctly reconstructing these rela-
+        end-to-end software synthesis.
+                                                                tionships is a foundational capability: it not only
+                                                                ensures that code generation tools produce func-
+1       Introduction
+                                                                tional and self-contained repositories, but it also in-
+                __
+                ...
+                ...   __   ...
+                           ==    ...
+                                  ...
+                                   ==
+
+
+
+
+Large Language Models (LLMs) have revolu-                       forms deeper reasoning about project architecture
+tionized automated software development, scal-                  and build systems (PyPI, 2024; crates.io, 2024).
+ing from function-level code completion (GitHub,                Consequently, mastering dependency inference is
+2023) to repository-level code synthesis (Wang                  a critical leap forward for enabling robust, end-to-
+et al., 2024; Qian et al., 2024; Ibrahimzada et al.,            end software synthesis and maintenance.
+2024). A pivotal yet often overlooked step in this                 Despite the significance of dependency infer-
+process is ensuring that generated repositories are             ence, current LLM-based approaches struggle in
+fully executable. This requires accurate inference              this area. Works like ChatDev (Qian et al., 2024)
+and integration of all necessary dependencies, both             and DevBench (Li et al., 2024a)—pioneers in
+internal (across project components) and external               repository-level generation using multi-agent LLM
+(from package ecosystems). Without robust de-                   systems—have reported that dependency-related
+pendency inference, even the most advanced code                 issues (e.g., missing or incorrectly specified mod-
+                                                                ules) account for over 50% of their observed run-
+    * Work done during internship at Microsoft.
+    †                                                           time errors. MetaGPT (Hong et al., 2024) also
+   Correspondence to: shilhe@microsoft.com.
+    1
+   Code and data: https://github.com/Microsoft/                 demonstrates that missing or incorrectly generated
+DI-Bench                                                        dependencies represent one of the most significant
+                                                           10134
+                   Findings of the Association for Computational Linguistics: ACL 2025, pages 10134–10153
+                          July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+hallucinations when LLMs attempt to generate the            tories during dataset curation but also to serve as
+entire project. These challenges highlight the dif-         a reliable, fully automated test environment. By
+ficulty that state-of-the-art models face in accu-          using CI pipelines, we ensure that dependency
+rately navigating build systems and package repos-          checks remain robust, scalable, and faithful to
+itories. Although existing repository-level bench-          real-world development practices.
+marks such as SWEBench (Jimenez et al., 2023),
+RepoBench (Liu et al., 2023), and DevBench (Li          • Granular Evaluation Metrics: We combine
+et al., 2024a) offer valuable insights into a model’s     coarse-grained runtime executability measures
+ability to handle large contexts and generate code        with fine-grained precision and recall on inferred
+at scale, none focuses on systematically evaluating       dependencies. This dual-layered approach en-
+dependency inference capabilities.                        ables systematic analysis of both functional cor-
+   To address this critical gap, we introduce DI-         rectness and textual accuracy with richer in-
+B ENCH, the first comprehensive repository-level          sights.
+benchmark dedicated to dependency inference. DI-
+                                                        By spotlighting dependency inference and offering
+B ENCH comprises 581 verified repositories, includ-
+                                                        a dedicated benchmark, our work lays the founda-
+ing 387 regular-sized and 194 large-sized, across
+                                                        tion for advancing LLMs toward robust, end-to-end
+four popular programming languages (Python, C#,
+                                                        repository-level software synthesis.
+Rust, and JavaScript). Each repository is carefully
+curated to assess a model’s ability to identify both    2     Related Works
+internal and external dependencies. We pair this
+dataset with a rigorous, multi-faceted evaluation       Repository-level coding tasks have attracted in-
+framework. Beyond measuring textual matching            creasing attention in recent years. Many bench-
+accuracy between model-generated and ground-            marks (Zhang et al., 2023; Liu et al., 2023; Ding
+truth dependencies, we propose a novel CI-based         et al., 2023) center on code completion tasks at var-
+execution evaluation by reusing each repository’s       ious granularities - from individual lines and API
+intrinsic Continuous Integration (CI) pipelines as      calls to entire function implementations. SWE-
+automated test harnesses. This approach enables         Bench and its variant (Jimenez et al., 2023; Yang
+scalable and objective assessment of end-to-end ex-     et al., 2024) challenge LLMs and LLM-powered
+ecutability, eliminating the costly and error-prone     systems with real-world scenarios, using issues
+need for manual environment setup.                      and pull requests from popular Python reposi-
+   Through comprehensive experiments involv-            tories on GitHub. While these benchmarks fo-
+ing various LLMs and prompting strategies, we           cus on assistant-like tasks, recent work explores
+observed that even the best-performing LLM              LLMs’ capabilities in complete project generation.
+achieved only a 48% executability rate on Python.       DevBench (Li et al., 2024a) decomposes the de-
+This finding highlights significant room for future     velopment process into distinct stages and eval-
+improvement in this area. Our analysis revealed         uates AI performance at each stage. Agent-As-
+that several factors influence performance, includ-     a-Judge (Zhuge et al., 2024) introduces DevAI,
+ing the dependency amount and repository size.          innovatively employing LLM agents as evaluators
+Notably, issues such as hallucination and chal-         of development outcomes.
+lenges related to dependency metadata emerged              However, existing works have not adequately
+as critical bottlenecks that adversely affect model     addressed build configuration evaluation: code
+performance.                                            completion tasks (Zhang et al., 2023; Liu et al.,
+   In summary, our contributions are as follows:        2023; Ding et al., 2023) do not generate build
+                                                        files, and issue-fixing benchmarks like SWE-
+• DI-B ENCH Benchmark: We introduce a pio-
+                                                        Bench (Jimenez et al., 2023) contain only 1% of
+  neering, large-scale, dependency-focused bench-
+                                                        patches related to build configurations. In reposi-
+  mark featuring 581 repositories spanning 4 pop-
+                                                        tory generation tasks (Li et al., 2024a; Zhuge et al.,
+  ular programming languages. It establishes a
+                                                        2024), build file generation is merely treated as one
+  new standard for evaluating LLMs’ capabilities
+                                                        subtask without dedicated evaluation.
+  in realistic, repository-scale scenarios.
+                                                           Recent works on dependency or version spe-
+• Dual-Use CI Infrastructure: We leverage CI            cific code generation (Wu et al., 2024b; Liu et al.,
+  workflows not only to identify executable reposi-     2024b; Islah et al., 2024; Kuhar et al., 2024) have
+                                                   10135
+                                    Generate code:
+                                                             🧑💻      Help me write the code
+                                                                      do the following: ...
+                                                                                              Generate con guration le:
+
+                                     🤖 LLM                                                    🤖 LLM
+                                    import sklearn.metrics                                    dependencies = [               Run test       AttributeError: module
+                                    import pandas as pd                                           "pandas 0.20.3",
+                                                                                                  "scikit-learn 1.2.2",
+                                                                                                                                        🤕 'sklearn.metrics' has
+                                                                                                                                          no attribute 'SCORERS'
+                                    def get_metric():                                         ]
+                                        if task     'classification':
+                                            if label[columns[0]].nunique() > 2:               Ground Truth
+                                                metric = 'accuracy'                           dependencies = [
+                                            else:                                                                            Run test
+                                                                                                                                        🙂 Test Pass!
+                                                                                                  "pandas 1.5.3",
+                                                metric = 'roc_auc'                                "scikit-learn 1.1.0",
+                                        else:                                                 ]
+                                            metric = 'r2'
+                                        assert metric in sklearn.metrics.SCORERS.keys()       Version mismatch:
+                                                                                              requires scikit-learn<=1.1.0   LLM may fail to identify dependencies
+                                     Cannot be executed directly ❌
+                                     Need dependency packages!                                Deprecated in version 1.2.0         used in its generated code
+
+
+                                                  Figure 2: An example of incorrectly identifying dependencies used in code.
+
+
+                              explored code generation tasks based on evolving                             Formally, the task is formulated as below: Given
+                              dependencies and API usage changes. Our paper                             a software repository containing many source
+                              aims to infer the dependencies from existing code,                        code files and build configuration files where
+                              which can be seen as the reverse process. Prior                           dependency-related sections are masked, the de-
+                              research in dependency inference (Ye et al., 2022;                        pendency inference task aims to generate a list of
+                              damnever, 2024) has predominantly focused on                              inferred dependencies to fill into the configuration.
+>
+=
+    =
+    =
+    =
+        =
+            fi
+                 >
+                 =
+                     =
+                     =
+                         fi
+                              Python ecosystems using traditional program anal-                         Formally, we define the task as:
+                              ysis techniques, while lacking broader language
+                                                                                                            F : (R, {bm    m         m
+                                                                                                                      1 , b2 , ..., bk }) → {b1 , b2 , ..., bk } (1)
+                              coverage. Our study fills in this gap by providing
+                              a benchmark specifically designed for evaluating                          where R denotes the repository including all source
+                              dependency inference capability across multiple                           files, bm
+                                                                                                                i is a build configuration file with depen-
+                              mainstream languages.                                                     dency masked/removed, bi is a build configura-
+                                                                                                        tion with the inferred dependencies. The output
+                              3   Dependency Inference                                                  candidate space consists of every possible com-
+                                                                                                        binations of dependencies and versions for each
+                              Although many studies focus on repository code                            programming language, while format and gram-
+                              generation with LLMs recently, there exists a sig-                        mar of dependencies are also considered during
+                              nificant gap between the generated code and the ex-                       evaluation. For example, in a Python project, given
+                              ecutable and operational software, Dependency. In                         a pyproject.toml file with masked dependency
+                              this paper, we adapt Dependency Inference, which                          sections and all source code files, the task is to edit
+                              aims to generate a list of dependencies based on the                      pyproject.toml file to specifying all dependen-
+                              source code. As shown in Figure 2, the code gener-                        cies required by the project.
+                              ated by LLM cannot be executed directly without
+                              installing the required dependencies; However, it is                      4      DI-B ENCH
+                              non-trivial to identify the correct dependencies us-                      Focused on the task of dependency inference, we in-
+                              ing LLMs. The example shows that the LLM gen-                             troduce DI-B ENCH, a meticulously curated, large-
+                              erates dependencies with a wrong version (‘scikit-                        scale benchmark dataset and evaluation framework
+                              learn==1.1.0’ rather than ‘scikit-learn>=1.2.2’),                         at the repository level. DI-B ENCH encompasses
+                              resulting in execution failure.                                           581 real-world, testable repository instances across
+                                 Automatic and accurate dependency inference                            4 programming languages, providing a comprehen-
+                              makes end-to-end code development possible by                             sive platform for assessing LLM-based methods in
+                              installing the inferred dependencies for execution.                       identifying and managing repository dependencies.
+                              Furthermore, it can enable key scenarios like fully-
+                              automated evaluation and iterative code improve-                          4.1     Statistics & Features
+                              ment with execution feedback. Besides the reposi-                         DI-B ENCH’s instances, sourced from real-world
+                              tory, dependency inference can be also applied to                         repositories, are categorized into two subsets based
+                              small code snippets like Python Notebook, incre-                          on repository size: regular and large. The regu-
+                              mental code changes, and etc.                                             lar subset includes repositories with fewer than
+                                                                                                 10136
+                      Table 1: Comparison of features between existing benchmarks and DI-B ENCH
+
+   Benchmark                           Task                       Evaluation              Scope        Languages              #Repo   Curation
+   MBPP (Austin et al., 2021)          Code Generation            Unit Tests              Function     Python                 N/A     Manual
+   HumanEval (Chen et al., 2021)       Code Generation            Unit Tests              Function     Python                 N/A     Manual
+   ClassEval (Du et al., 2023)         Code Generation            Unit Tests              Class        Python                 N/A     Manual
+   RepoEval (Zhang et al., 2023)       Code Completion            Textual & Unit Tests    Repo-level   Python                 14      Manual
+   RepoBench (Liu et al., 2023)        Retrieval & Completion     Only Textual            Repo-level   Python, Java           1,669   Automated
+   CrossCodeEval (Ding et al., 2023)   Code Completion            Only Textual            Repo-level   Python, Java, C#, TS   1,002   Automated
+   EvoCodeBench (Li et al., 2024b)     Code Generation            Unit Tests              Repo-level   Python                 25      Automated
+   RepoMasterEval (Wu et al., 2024a)   Code Completion            Unit Tests              Repo-level   Python, TS             6       Manual
+   DI-B ENCH                           Dependency Inference       Textual & Test Suite    Repo-level   Python, Rust, C#, JS   581     Automated
+
+
+
+        Table 2: Statistical summary of DI-B ENCH                              undergoes verification to ensure its validity.
+ Subset      Lang     #Files   #LoC     #Tokens     #Deps.      #Tests
+                                                                               Diverse Long Inputs. The dataset includes two
+             Python    30.9     3.0K          31K      5.5       47.1
+                                                                               subsets, regular and large, with a wide distribution
+             Rust      20.2     3.4K          32K     10.8       21.0          of context lengths, ranging from small repositories
+ Regular     C#        69.7     4.1K          39K     25.9       30.6          with a few files to large projects with over 200 files.
+             JS        14.9     1.6K          15K      5.7       42.7
+             Avg.      33.9     3.0K          29K     11.9       35.3          Continually Updatable. We have developed a
+             Python   268.3    45.6K       519K       11.8      547.3          dataset curation pipeline that is fully automated,
+             Rust      95.0    23.9K       283K       45.4      155.4          scalable, and continuously updatable, eliminating
+ Large       C#       353.9    37.3K       369K       44.5      132.6
+             JS       144.9    26.0K       367K       16.2      304.4          the need for manual annotation to set up environ-
+             Avg.     218.0    33.4K       385K       29.7      285.1          ments and run tests.
+                                                                               Open Solution. Our evaluation framework fea-
+                                                                               tures two complementary datasets: while both the
+120k tokens2 , ensuring they fit within the con-
+                                                                               regular and large sets welcome various approaches
+text length limits of recent LLMs. It comprises
+                                                                               including language models and agentic systems,
+387 instances with an average of 11.9 dependen-
+                                                                               the large set presents additional challenges of
+cies. The large subset consists of 194 reposito-
+                                                                               model context limits, specifically motivating the
+ries with more than 120k tokens and the average
+                                                                               exploration of novel methodologies.
+dependency count is 29.7. Table 2 provides de-
+tailed statistics of DI-B ENCH, while Figure 10                                4.2       Dataset Construction
+illustrates the overall distribution of token and de-
+                                                                               Creating a dataset that supports execution-based
+pendency counts using Kernel Density Estimation
+                                                                               evaluation at the repository level is challenging.
+(KDE) curves. The dataset exhibits a wide size
+                                                                               Previous works often involve manual setting up
+distribution, with smaller repositories being more
+                                                                               environments and writing test scripts, which can
+prevalent. Table 1 shows a comparative analysis of
+                                                                               require significant human and engineering effort
+features distinguishing DI-B ENCH from existing
+                                                                               and cannot scale up to larger datasets. As shown in
+code task benchmarks. The unique attributes of
+                                                                               Table 1, the existing largest repository-level bench-
+DI-B ENCH include:
+                                                                               mark supporting test execution contains only 25
+Beyond Code. DI-B ENCH focuses on a crucial                                    repositories. To address this, we leverage GitHub
+challenge in real-world software development: de-                              Actions (GitHub, 2024)—a widely used continu-
+pendency inference. This essential aspect is often                             ous integration (CI) tool that allows developers to
+overlooked in existing studies.                                                automate test execution through YAML configura-
+Test Execution. DI-B ENCH not only evaluates re-                               tion files. By reusing these developer-written CI
+sult correctness through textual matching but also                             workflows within repositories, we propose an au-
+executes project test suites, providing a straightfor-                         tomated curation pipeline that eliminates human
+ward and reliable evaluation.                                                  engagement during the benchmark construction,
+Practical and Verified. The repository instances                               ultimately resulting in a dataset of 581 testable
+included in DI-B ENCH are sourced from real-                                   repositories—23 times larger than the largest pre-
+world projects on GitHub, thus making the bench-                               vious benchmark. With the large-scale dataset, we
+mark both practical and challenging. Each project                              can provide more generalizable insights and more
+                                                                               robust evaluations. Figure 3 illustrates steps to
+   2
+       Token counts are calculated with Llama 3.2 tokenizer.                   construct DI-B ENCH with details listed below.
+                                                                         10137
+                                   Repository Crawling               Test Job Locating                                Execution Validating
+                                   ‣ 4 Languages                  ‣ Which is Testing CI?                            ‣ CI Runner
+                                                                   .github/
+                                                                                                                       ‣ Run actions/checkout                 1s
+                                                                     └──workflows/
+                                                                        ├──lint.yml                                    ‣ Run actions/setup-python           55s
+                                                                        ├──test.yml
+                                   ‣ Stars > 100                        └──publish.yml
+                                                                                                                       ‣ Install dependencies             1m 21s
+
+
+                                   ‣ Size < 10 MB                   name: Main test
+                                                                    jobs:
+                                                                                              Locate Testing Job
+                                                                                                                       ‣ Run test
+                                                                                                                        132 passed, 3 skipped in 320.76s
+                                                                                                                                                          5m 20s
+
+
+
+                                   ‣ Github Actions Enabled          test:
+                                                                       runs-on: ubuntu-latest                          ‣ Complete Job                         0s
+                                                                     steps:
+                                                                     - name: Install dependencies
+                                                                       run: pip install .[dev]
+                                                                     - name: Run test                                                     mask
+                                    Candidate Repos                    run: pytest ./test_folder                   Veri ed                          Repo Instance
+
+
+                                                       Figure 3: CI-based curation pipeline for DI-B ENCH.
+
+
+                         Repository Crawling. The goal of this phase                     Dependency Masking. After the validation, we
+                         is to collect GitHub repositories that meet the                 utilized an automated script to remove the sections
+                         following criteria: 1) Written in one of the four               specifying dependencies in the configuration files.
+                         programming languages: Python, C#, Rust, or                     We further performed sanitization by removing any
+                         JavaScript (the characteristics of these languages              existing dependency lock files (e.g., in JavaScript)
+                         and their dependency configurations are detailed                to prevent potential ground truth leakage and en-
+                         in Appendix A). These languages are popular, pos-               sure proper execution. This process ultimately pro-
+                         sess a standardized dependency packages ecosys-                 duced the instances included in DI-B ENCH.
+                         tem, and have clear standards for specifying de-
+=
+    =
+        .
+            .
+                .
+                    fi
+                                         =
+                                             =
+                         pendencies. 2) Have more than 100 stars, serv-                   5      Experiment Setup
+                         ing as a quality filter criterion. 3) Repository
+                                                                                         This section provides a detailed description of the
+                         size is less than 10MB to avoid extremely large
+                                                                                         experimental settings, including the LLMs, base-
+                         repositories and maintain a manageable dataset
+                                                                                         line methods, and evaluation metrics.
+                         size. 4) Most importantly, the repository must have
+                         GitHub Actions enabled, indicated by the presence                Baseline Methods. We designed three baseline
+                         of the .github/workflows folder. Repositories                    systems with various prompting strategies to eval-
+                         that meet these criteria proceed as candidate repos-             uate how LLMs perform in the dependency in-
+                         itories into subsequent phases.                                  ference task, intentionally avoiding complex tech-
+                                                                                          niques such as agent-based methods.
+                         Test Job Locating. Repositories often define
+                         multiple workflows to perform tasks unrelated to                 • All-In-One: The approach concatenates all the
+                         testing, such as linting and publishing. These tasks               source code of a repository into a single query for
+                         may also be defined within different jobs in the                   model generation. It serves as a straightforward
+                         same workflow configuration file. Due to the lack                  yet computationally intensive baseline.
+                         of a specific naming convention, we introduce an
+                         LLM-assisted locating process to identify the spe-               • File-Iterate: The method processes each individ-
+                         cific jobs responsible for executing project tests.                ual file in the repository to generate dependen-
+                         At the execution stage, only the test job will be run.             cies, with the results subsequently aggregated
+                                                                                            to feed into the model for generating the final
+                         Execution Validating. We use act (nektos,                          output. This simulates a modular and distributed
+                         2024) as a local runner for GitHub Actions, en-                    reasoning approach.
+                         abling local execution of repository testing CI.
+                         In this phase, by executing the test jobs of can-                • Imports-Only: The approach collects all import-
+                         didate repositories, we obtain those that success-                 related statements from the code base as the in-
+                         fully follow the workflow and pass all tests as ex-                put context to LLMs using tree-sitter (tree-sitter,
+                         pected. The validation phase ensures that the se-                  2024). For Python and JavaScript, we extract all
+                         lected repositories are correct and executable, high-              import statements; for C# and Rust, we extract
+                         lighting the advantage of our proposed CI-based                    all use statements. More details about tree-sitter
+                         testing approach: fully automated and scalable.                    are provided in the Appendix H.4.
+                                                                                  10138
+   Additionally, we report the human performance         File-Iterate, and Imports-Only on GPT-4o and GPT-
+in Appendix C via recruiting experienced develop-        4o-Mini (Table 10 in Appendix F.1), encompass-
+ers. Two additional baselines including program          ing both the regular and large subsets. Table 3
+analysis approach and Retrieval-Augmented Gener-         shows the results with several key insights:
+ation (RAG) baseline are presented in Appendix E.
+                                                         Challenging Nature of Dependency Inference
+Metrics. we use textual and execution-based met-         Dependency inference presents a significant chal-
+rics, and the fake rate in evaluation.                   lenge for contemporary LLMs. In the regular sub-
+                                                         set (< 120k tokens), even the best-performing mod-
+• Textual Accuracy: This metric assesses whether         els achieved executability rates of below 50% for
+  the generated dependencies align with the              scripting languages such as Python and JavaScript
+  ground truth from a textual matching perspec-          and only around 10% for compiled languages like
+  tive. We compute the Precision (ratio of correct       Rust and C#. These findings underscore the lim-
+  dependencies among model-generated ones), Re-          itations of current models in accurately inferring
+  call (Ratio of correct dependencies among all          dependencies in various languages.
+  ground-truth ones), and F1 (The harmonic mean
+  of the above).                                         Impact of Repository Size Large repositories,
+                                                         characterized by extensive contexts and complex
+• Executability Rate: This metric measures               dependency structures, are more challenging for
+  whether the project can be successfully built and      dependency inference. Executability rates in the
+  executed through CI testing pipeline with the          large subset were markedly lower across all base-
+  generated dependencies. A score of 1 is assigned       line methods compared to the regular subset. For
+  if all tests passed successfully; otherwise, a score   File-Iterate and Imports-Only, the performance gap
+  of 0 will be given. Whether the tests pass is the      was especially evident, indicating the difficulty of
+  most direct and reliable indicator of the correct-     adapting these methods to large repositories.
+  ness of the generated dependencies.
+                                                         Importance of Models and Prompting Strate-
+• Fake Rate: This metric represents the propor-          gies The choice of backbone LLMs and the con-
+  tion of the generated dependencies that cannot         struction of prompts play crucial roles in deter-
+  be found in the package ecosystem (for external        mining performance outcomes. For instance, the
+  dependencies) or in the local repository direc-        All-In-One approach with GPT-4o, by merging
+  tory (for internal dependencies). It highlights the    the entire code base into a single query, consis-
+  hallucination issue in LLMs, where non-existent        tently outperformed other methods on executability.
+  dependencies or versions are generated.                However, this approach does not work for larger
+                                                         repositories. While the File-Iterate and Imports-
+Models. Since code repositories are usually very         Only methods can process large repositories, their
+long, we choose LLMs that support at least               performance significantly declined without the full
+128k context windows as the backbone mod-                code context. The finding reveals the trade-off be-
+els, including proprietary models: GPT-4o (Ope-          tween prompting strategies and repository sizes to
+nAI, 2024b), GPT-4o-mini (OpenAI, 2024a),                achieve optimal performance on the task.
+Claude 3.5 Sonnet (Anthropic, 2025), and Gem-
+ini 2.0 Flash (Google, 2025), and open-source            Hallucination Issues A recurring issue across
+models: Qwen-Coder-V2.5-Instruct (Hui et al.,            all methods was the generation of hallucinated de-
+2024), Llama 3.1-Instruct (Grattafiori et al., 2024),    pendencies, i.e., non-existent packages or versions,
+DeepSeek-Coder-V2-Lite-Instruct (MoE) (Guo               as indicated by the Fake Rate. Specifically, we
+et al., 2024) and DeepSeek V3 (Liu et al., 2024a).       observed a remarkably higher Fake Rate on large
+Detailed settings on model serving are presented         subset with Imports-Only method. In Section 6.3,
+in Appendix H.5.                                         we will show that the hallucination adversely af-
+                                                         fected the executability.
+6   Experimental Results
+                                                         6.2   Performance of Different Models
+6.1 Performance of Baseline Methods                      For simplicity, we report benchmark results on the
+We start by conducting preliminary experiments           DI-B ENCH Regular dataset using the All-In-One
+utilizing three baseline systems — All-In-One,           approach in the following sections. The method
+                                                    10139
+Table 3: Performance of benchmark methods across programming languages and repository sizes on GPT-4o, where
+Exec denotes the executability rate, P/R/F1 denote Precision, Recall, and F1-score, FR denotes Fake Rate, which is
+the lower, the better. Note that the Large repositories cannot fit into the All-In-One method (denoted with ‘-’).
+
+                                                                 Regular                               Large
+                Lang         Method
+                                                Exec        P           R    F1    FR    Exec    P       R     F1     FR
+                             All-In-One          42.9     61.8     73.6     67.2   2.8     -     -      -       -       -
+                Python       File-Iterate        29.6     38.1     75.6     50.7   4.5    8.0   19.5   35.3    25.1    6.4
+                             Imports-Only        36.7     56.5     74.9     64.4   3.9   18.0   36.9   46.9    41.3   23.1
+                             All-In-One          11.2     93.7     74.4     82.9   0.8    -      -      -       -      -
+                Rust         File-Iterate        7.1      74.7     75.6     75.2   1.1   2.0    45.0   68.8    54.4   6.3
+                             Imports-Only-        4.1     88.9     65.0     75.1   1.0   2.0    84.9   50.6    63.4   12.4
+                             All-In-One          13.5     59.9     39.4     47.5   3.7    -      -      -       -      -
+                C#           File-Iterate        5.2      27.7     34.1     30.6   6.8   0.0    20.4   33.0    25.2   6.0
+                             Imports-Only         3.1     52.7     29.8     38.1   5.2   0.0    49.1   19.2    27.6   6.3
+                             All-In-One          43.2     86.9     67.7     76.1   4.8     -     -      -       -      -
+                JavaScript   File-Iterate        32.6     52.2     62.6     57.0   2.9   15.6   34.2   52.1    41.3   2.7
+                             Imports-Only        22.1     73.6     46.7     57.1   6.2    6.7   55.4   15.5    24.2   2.0
+
+                                                                            means that the model missed to generate some de-
+                                                                            pendencies that are required during the testing eval-
+        5.3%                                Categories
+    10.5%         29.8%         Missing Dependency in test                  uation. Additionally, “Dependency Not Found in
+                                Dependency Not Found in build               Build” and “Invalid Dependency Version in Build”
+  14.0%                         Invalid Dependency Version in build
+                                Mismatched Dependency Version in test       also account for a significant proportion. These in-
+    17.5%                       Other Failure in test
+               22.8%            Other Failure in build                      dicate that the model-generated dependency spec-
+                                                                            ifications either include nonexistent packages or
+                                                                            specify nonexistent versions, leading to failures
+Figure 4: Distribution of failure categories (GPT-4o,
+All-In-One setting, Python).
+                                                                            when installing generated dependencies. More
+                                                                            analysis on case studies and representative root
+                                                                            causes are presented in Appendix G.
+has shown superior performance in Table 3 and can
+                                                                            6.3    Further Analysis and Ablation Study
+reflect a zero-shot setting for the dependency infer-
+ence task. Specifically, in this section, we evaluate                       In this section, we conduct further analysis with
+various LLMs and report the results in Table 4.                             focuses on how repository size and the amount
+It reveals Claude 3.5 Sonnet achieves outstand-                             of dependencies affect dependency inference per-
+ing performances across all languages. Notably,                             formance, as well as the impact of dependency
+DeepSeek V3 outperforms all models on Python                                metadata and the hallucination issue.
+and JavaScript. The Qwen-7B model demonstrates                              Challenges in dependency inference for larger
+superior performance than the other two small                               repositories with more dependencies. As illus-
+open-sourced models. In addition, we vary the                               trated in Figure 5, inference accuracy decreases
+model sizes based on the QWen2.5-Coder-Instruct                             significantly as the number of dependencies grows.
+series, where the model size ranges from 3B, 7B,                            This trend is consistent across all languages, partic-
+14B to 32B. We observed that the model in gen-                              ularly those with complex dependency structures
+eral achieves better performance when increasing                            like Rust and JavaScript. The decline in perfor-
+the model size. The results and more analysis are                           mance is attributed to the difficulty of maintaining
+presented in Appendix F.2.                                                  accurate dependency mappings as their quantity
+Failure Categories and Distribution. To better                              increases, highlighting spaces for future enhance-
+understand why the execution failed with model-                             ment of LLMs. Besides, we made further analysis
+generated dependencies, we manually analyzed                                about how the repository size affect the perfor-
+the failure cases of GPT-4o, the best-performing                            mance on the regular dataset and results are de-
+model, under the All-In-One setting in Python.                              picted in Figure 13 (Appendix F.3). We observed
+As shown in Figure 4, the most common failure                               a negative correlation between repository size and
+category is “Missing Dependency in Test”, which                             model performance, which aligns with the find-
+                                                                    10140
+   Table 4: Model performance across programming languages with the All-In-One approach on DI-B ENCH.
+
+            Language      Model                             Size        Exec    P      R     F1     FR
+                          GPT-4o                            -           42.9   61.8   73.6   67.2    2.8
+                          GPT-4o-mini                       -           24.5   56.5   57.5   57.0    2.0
+                          Gemini 2.0 Flash                  -           42.0   75.0   73.8   74.4    1.6
+                          Claude 3.5 Sonnet                 -           39.0   74.4   79.6   76.9    1.3
+            Python
+                          Qwen2.5-Coder-7B-Instruct         7B          22.4   55.4   44.7   49.5    5.3
+                          Llama-3.1-8B-Instruct             8B          13.3   28.8   38.4   32.9    4.3
+                          DeepSeek-Coder-V2-Lite-Instruct   16B(MoE)    17.3   48.0   48.6   48.3   18.4
+                          DeepSeek V3                       671B(MoE)   48.0   72.5   74.3   73.4   1.5
+                          GPT-4o                            -           11.2   93.7   74.4   82.9    0.8
+                          GPT-4o-mini                       -           7.1    76.0   49.1   59.7    1.0
+                          Gemini 2.0 Flash                  -           14.0   94.7   76.2   84.5    1.6
+                          Claude 3.5 Sonnet                 -           39.0   96.8   92.6   94.7    8.2
+            Rust
+                          Qwen2.5-Coder-7B-Instruct         7B          6.1    71.3   41.0   52.0    2.0
+                          Llama-3.1-8B-Instruct             8B          1.0    58.2   37.0   45.2   10.7
+                          DeepSeek-Coder-V2-Lite-Instruct   16B(MoE)    2.0    75.9   40.8   53.0    2.8
+                          DeepSeek V3                       671B(MoE)   20.0   93.5   82.5   87.7   1.4
+                          GPT-4o                            -           13.5   59.9   39.4   47.5    3.7
+                          GPT-4o-mini                       -           4.2    41.5   22.3   29.0   11.9
+                          Gemini 2.0 Flash                  -           21.0   65.1   48.2   55.4    4.3
+                          Claude 3.5 Sonnet                 -           31.0   74.7   54.1   62.8    0.4
+            C#
+                          Qwen2.5-Coder-7B-Instruct         7B          1.0    22.7   17.1   19.5   14.9
+                          Llama-3.1-8B-Instruct             8B          0.0    15.2    7.6   10.1   23.2
+                          DeepSeek-Coder-V2-Lite-Instruct   16B(MoE)    1.0    33.6    7.4   12.1    9.2
+                          DeepSeek V3                       671B(MoE)   16.0   60.0   38.9   47.2   3.0
+                          GPT-4o                            -           43.2   86.9   67.7   76.1   4.8
+                          GPT-4o-mini                       -           16.8   84.6   31.6   46.0   2.5
+                          Gemini 2.0 Flash                  -           24.0   89.6   71.9   79.8   1.1
+                          Claude 3.5 Sonnet                 -           53.0   88.0   87.7   87.9   2.1
+            JavaScript
+                          Qwen2.5-Coder-7B-Instruct         7B          16.8   81.8   43.3   56.6   3.5
+                          Llama-3.1-8B-Instruct             8B          9.5    67.2   16.7   26.8   1.5
+                          DeepSeek-Coder-V2-Lite-Instruct   16B(MoE)    17.9   83.9   32.0   46.3   2.4
+                          DeepSeek V3                       671B(MoE)   54.0   79.1   77.6   78.3   9.4
+
+
+Table 5: Execution success improvement by replacing          arises from incorrect metadata generation in depen-
+predicted dependency metadata with oracle metadata.          dencies, such as package version constraints, extra
+                                                             features and so on, (examples can be found in Ap-
+   Language      Exec    Exec (with Orac.)        ∆
+                                                             pendix A). To validate this hypothesis, we replaced
+   Python        42.9          55.1           +28.4%
+                                                             the predicted dependencies with oracle metadata
+   Rust          11.2          38.8          +246.4%
+   C#            13.5          15.6           +15.6%         and observed a notable increase in the executability
+   JavaScript    43.2          67.4           +50.5%         rate. As shown in Table 5, the Python executability
+                                                             rate improved from 42.9% to 55.1%, representing
+                                                             a relative increase of 28.4%. It demonstrates the
+ing obtained in Table 3. This suggests that long-            importance of accurate dependency metadata for
+context reasoning (Hsieh et al., 2024; Bai et al.,           successful execution of dependency configurations.
+2024) remains a significant challenge for LLMs, as           Hallucination hurts the executability. We ob-
+longer input contexts lead to increased complexity.          served all models generate hallucinated dependen-
+Reasoning the dependency metadata is a bot-                  cies that do not exist, as indicated by the fake rate.
+tleneck. In previous experiments, we found that              Although the fake rate was relatively low, exclud-
+while textual accuracy was relatively high, the exe-         ing the hallucinated dependencies can improve the
+cutability rate was significantly lower. For exam-           executability, as shown in Table 6. These improve-
+ple, GPT-4o achieved a precision of 61.8% and                ments, though modest, reinforce the need for more
+recall of 73.6% on Python, while the executability           accurate dependency predictions. Hallucination
+rate was only 42.9%. We suspect this discrepancy             issues remain one of the primary obstacles to im-
+                                                       10141
+                                        Python                                      Rust
+                                                  Total
+                                                              35
+                                                                                              Total          with diverse sizes could potentially enrich our find-
+                      40                          Exec Pass                                   Exec Pass
+                                                              30                                             ings. ❷ In our experiments, we employed the GPT-
+Number of Instances
+
+
+
+                                                              25
+                      30                                                                                     4o and GPT-4o mini models, which operate as
+                                                              20
+                      20                                      15
+                                                                                                             black boxes. The outputs may vary due to poten-
+                                                              10                                             tial model upgrades or fluctuations in resources.
+                      10
+                                                              5                                              To mitigate this issue, we provide the dates of the
+                      0                                       0                                              model versions used as a reference and set the tem-
+                           0-4
+                                   4-8
+
+                                      2
+                                    -16
+                                    -20
+                                    -24
+
+                                      4
+
+
+                                                                   0-4
+                                                                           4-8
+
+                                                                              2
+                                                                            -16
+                                                                            -20
+                                                                            -24
+
+                                                                              4
+                                  8-1
+
+
+
+
+                                  >2
+
+
+
+
+                                                                          8-1
+
+
+
+
+                                                                          >2
+                                                                                                             perature to 0 to ensure more consistent outputs.
+                                 12
+                                 16
+                                 20
+
+
+
+
+                                                                         12
+                                                                         16
+                                                                         20
+                                         C#                                      JavaScript
+                                                  Total       50                              Total          ❸ Test coverage for each repository may not be
+                      25                          Exec Pass                                   Exec Pass
+                                                              40                                             exhaustive, meaning some test cases might not en-
+Number of Instances
+
+
+
+
+                      20
+                                                              30                                             compass every possible code path. However, as
+                      15
+                                                                                                             the tests were developed by project contributors,
+                                                              20
+                      10
+                                                                                                             the results are expected to reflect practical settings
+                      5                                       10
+                                                                                                             accurately.
+                      0                                       0
+                             0-8
+
+                                6
+                              -24
+                              -32
+                              -40
+                              -48
+
+                                8
+
+
+                                                                   0-4
+                                                                         4-8
+
+                                                                                    2
+                                                                                  -16
+                                                                                  -20
+                                                                                  -24
+
+                                                                                    4
+                            8-1
+
+
+
+
+                            >4
+
+
+
+
+                                                                                8-1
+
+
+
+
+                                                                                >2
+                           16
+                           24
+                           32
+                           40
+
+
+
+
+                                                                               12
+                                                                               16
+                                                                               20
+
+
+                                 Dependency Count                              Dependency Count
+
+           Figure 5: Execution pass rate w.r.t dependency count.
+
+               Table 6: Impact of hallucination on exeutability rate.
+
+                           Language        Exec     Exec w.o. Fake Dep.                           ∆
+                           Python          41.8                43.8                      +4.8%
+                           Rust            11.2                13.3                     +18.8%
+                           C#              12.5                13.5                      +8.9%
+                           JavaScript      43.2                43.2                       +0%
+
+
+
+       proving the reliability of dependency inference.
+
+       7                   Conclusion
+      We introduce DI-B ENCH, the first benchmark ded-
+      icated to dependency inference across 581 repos-
+      itories in four programming languages: Python,
+      C#, Rust, and JavaScript. In addition to measur-
+      ing textual accuracy, we propose a novel CI-based
+      evaluation that incorporates actual tests execution.
+      Extensive experiments on various open-source and
+      proprietary LLMs demonstrate that even the most
+      advanced models struggle to infer dependencies
+      accurately, highlighting opportunities for future ad-
+      vancements. We believe this study lays the ground-
+      work for repository-level code development, with
+      dependency inference serving as a pivotal step to-
+      ward fully automated code generation.
+
+       Limitations
+       Our study acknowledges several limitations.
+       ❶ Due to constraints in computing resources, our
+       evaluation primarily focused on five mainstream
+       models, selecting smaller model sizes. While these
+       models are sufficiently representative, broadening
+       the scope to include a greater variety of LLMs
+                                                                                                          10142
+References                                               Google. 2025. Gemini 2.0 Flash. https://deepmind.
+                                                           google/technologies/gemini/flash/.
+Anthropic. 2025. Claude 3.5 Sonnet. https://www.
+  anthropic.com/news/claude-3-5-sonnet.                  Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+                                                           Abhinav Pandey, and et al. Abhishek Kadian.
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten
+                                                           2024. The llama 3 herd of models. Preprint,
+   Bosma, Henryk Michalewski, David Dohan, Ellen
+                                                           arXiv:2407.21783.
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, et al.
+   2021. Program synthesis with large language models.   Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie,
+   arXiv preprint arXiv:2108.07732.                        Kai Dong, Wentao Zhang, Guanting Chen, Xiao
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu,            Bi, Yu Wu, YK Li, et al. 2024. Deepseek-coder:
+  Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao          When the large language model meets programming–
+  Liu, Aohan Zeng, Lei Hou, Yuxiao Dong, Jie Tang,         the rise of code intelligence.    arXiv preprint
+  and Juanzi Li. 2024. Longbench: A bilingual, mul-        arXiv:2401.14196.
+  titask benchmark for long context understanding.       Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu
+  Preprint, arXiv:2308.14508.                               Zheng, Yuheng Cheng, Jinlin Wang, Ceyao Zhang,
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming                 Zili Wang, Steven Ka Shing Yau, Zijuan Lin, Liyang
+ Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-          Zhou, Chenyu Ran, Lingfeng Xiao, Chenglin Wu,
+ plan, Harri Edwards, Yuri Burda, Nicholas Joseph,          and Jürgen Schmidhuber. 2024. MetaGPT: Meta pro-
+ Greg Brockman, Alex Ray, Raul Puri, Gretchen               gramming for a multi-agent collaborative framework.
+ Krueger, Michael Petrov, Heidy Khlaaf, Girish Sas-         In The Twelfth International Conference on Learning
+ try, Pamela Mishkin, Brooke Chan, Scott Gray,              Representations (ICLR).
+ Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz
+                                                         Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shan-
+ Kaiser, Mohammad Bavarian, Clemens Winter,
+                                                           tanu Acharya, Dima Rekesh, Fei Jia, Yang Zhang,
+ Philippe Tillet, Felipe Petroski Such, Dave Cum-
+                                                           and Boris Ginsburg. 2024. Ruler: What’s the real
+ mings, Matthias Plappert, Fotios Chantzis, Eliza-
+                                                           context size of your long-context language models?
+ beth Barnes, Ariel Herbert-Voss, William Hebgen
+                                                           Preprint, arXiv:2404.06654.
+ Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie
+ Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain,    Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-
+ William Saunders, Christopher Hesse, Andrew N.            iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,
+ Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan          Bowen Yu, Keming Lu, et al. 2024. Qwen2. 5-coder
+ Morikawa, Alec Radford, Matthew Knight, Miles             technical report. arXiv preprint arXiv:2409.12186.
+ Brundage, Mira Murati, Katie Mayer, Peter Welinder,
+ Bob McGrew, Dario Amodei, Sam McCandlish, Ilya          Ali Reza Ibrahimzada, Kaiyao Ke, Mrigank Pawagi,
+ Sutskever, and Wojciech Zaremba. 2021. Evaluating         Muhammad Salman Abid, Rangeet Pan, Saurabh
+ large language models trained on code. Preprint,          Sinha, and Reyhaneh Jabbarvand. 2024. Repository-
+ arXiv:2107.03374.                                         level compositional code translation and validation.
+                                                           arXiv preprint arXiv:2410.24117.
+crates.io. 2024. The Rust community’s crate registry.
+   https://crates.io/.                                   Nizar Islah, Justine Gehring, Diganta Misra, Eilif
+                                                           Muller, Irina Rish, Terry Yue Zhuo, and Mas-
+damnever. 2024.       A tool to generate require-
+                                                           simo Caccia. 2024. Gitchameleon: Unmasking the
+  ments.txt for Python project, and more than that.
+                                                           version-switching capabilities of code generation
+  https://github.com/damnever/pigar.
+                                                           models. arXiv preprint arXiv:2411.05830.
+Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad,
+  Hantian Ding, Ming Tan, Nihal Jain, Murali Krishna     Carlos E Jimenez, John Yang, Alexander Wettig,
+  Ramanathan, Ramesh Nallapati, Parminder Bhatia,          Shunyu Yao, Kexin Pei, Ofir Press, and Karthik
+  Dan Roth, and Bing Xiang. 2023. Crosscodeeval:           Narasimhan. 2023. Swe-bench: Can language mod-
+  A diverse and multilingual benchmark for cross-file      els resolve real-world github issues? arXiv preprint
+  code completion. Preprint, arXiv:2310.11248.             arXiv:2310.06770.
+
+Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,       Sachit Kuhar, Wasi Uddin Ahmad, Zijian Wang, Ni-
+  Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng            hal Jain, Haifeng Qian, Baishakhi Ray, Murali Kr-
+  Sha, Xin Peng, and Yiling Lou. 2023. Classe-             ishna Ramanathan, Xiaofei Ma, and Anoop Deoras.
+  val: A manually-crafted benchmark for evaluating         2024. Libevolutioneval: A benchmark and study
+  llms on class-level code generation. arXiv preprint      for version-specific code generation. arXiv preprint
+  arXiv:2308.01861.                                        arXiv:2412.04478.
+
+GitHub. 2023. GitHub Copilot – Your AI pair program-     Bowen Li, Wenhan Wu, Ziwei Tang, Lin Shi, John
+  mer. https://github.com/features/copilot.                Yang, Jinyang Li, Shunyu Yao, Chen Qian, Binyuan
+                                                           Hui, Qicheng Zhang, Zhiyin Yu, He Du, Ping Yang,
+GitHub. 2024. GitHub Actions: Automate your work-          Dahua Lin, Chao Peng, and Kai Chen. 2024a. De-
+  flow from idea to production. https://github.            vbench: A comprehensive benchmark for software
+  com/features/actions.                                    development. Preprint, arXiv:2403.08604.
+                                                    10143
+Jia Li, Ge Li, Xuanming Zhang, Yihong Dong, and          John Yang, Carlos E. Jimenez, Alex L. Zhang, Kil-
+   Zhi Jin. 2024b. Evocodebench: An evolving code          ian Lieret, Joyce Yang, Xindi Wu, Ori Press,
+   generation benchmark aligned with real-world code       Niklas Muennighoff, Gabriel Synnaeve, Karthik R.
+   repositories. arXiv preprint arXiv:2404.00599.          Narasimhan, Diyi Yang, Sida I. Wang, and Ofir
+                                                           Press. 2024. Swe-bench multimodal: Do ai systems
+Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang,              generalize to visual software domains? Preprint,
+  Bochao Wu, Chengda Lu, Chenggang Zhao, Chengqi           arXiv:2410.03859.
+  Deng, Chenyu Zhang, Chong Ruan, et al. 2024a.
+  Deepseek-v3 technical report.   arXiv preprint         Hongjie Ye, Wei Chen, Wensheng Dou, Guoquan Wu,
+  arXiv:2412.19437.                                        and Jun Wei. 2022. Knowledge-based environment
+                                                           dependency inference for python programs. In 2022
+Tianyang Liu, Canwen Xu, and Julian McAuley.               IEEE/ACM 44th International Conference on Soft-
+  2023. Repobench: Benchmarking repository-level           ware Engineering (ICSE), pages 1245–1256.
+  code auto-completion systems. arXiv preprint
+  arXiv:2306.03091.                                      Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+                                                           Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+Zeyu Leo Liu, Shrey Pandit, Xi Ye, Eunsol Choi, and        Weizhu Chen. 2023. Repocoder: Repository-level
+  Greg Durrett. 2024b. Codeupdatearena: Benchmark-         code completion through iterative retrieval and gen-
+  ing knowledge editing on api updates. arXiv preprint     eration. arXiv preprint arXiv:2303.12570.
+  arXiv:2407.06249.
+                                                         Mingchen Zhuge, Changsheng Zhao, Dylan Ash-
+nektos. 2024. act: Run your GitHub Actions locally.        ley, Wenyi Wang, Dmitrii Khizbullin, Yunyang
+  https://nektosact.com/.                                  Xiong, Zechun Liu, Ernie Chang, Raghuraman Kr-
+                                                           ishnamoorthi, Yuandong Tian, Yangyang Shi, Vikas
+OpenAI. 2024a. GPT-4o mini: advancing cost-efficient       Chandra, and Jürgen Schmidhuber. 2024. Agent-
+  intelligence.                                            as-a-judge: Evaluate agents with agents. Preprint,
+                                                           arXiv:2410.10934.
+OpenAI. 2024b. Hello GPT-4o. https://openai.
+  com/index/hello-gpt-4o/.
+
+PyPI. 2024. Find, install and publish Python packages
+  with the Python Package Index. https://https:
+  //pypi.org/.
+
+Chen Qian, Wei Liu, Hongzhang Liu, Nuo Chen, Yufan
+  Dang, Jiahao Li, Cheng Yang, Weize Chen, Yusheng
+  Su, Xin Cong, Juyuan Xu, Dahai Li, Zhiyuan Liu,
+  and Maosong Sun. 2024. Chatdev: Communica-
+  tive agents for software development. Preprint,
+  arXiv:2307.07924.
+
+tree-sitter. 2024. Tree-sitter. https://tree-sitter.
+   github.io/tree-sitter/.
+
+Xingyao Wang, Boxuan Li, Yufan Song, Frank F.
+  Xu, Xiangru Tang, Mingchen Zhuge, Jiayi Pan,
+  Yueqi Song, Bowen Li, Jaskirat Singh, Hoang H.
+  Tran, Fuqiang Li, Ren Ma, Mingzhang Zheng, Bill
+  Qian, Yanjun Shao, Niklas Muennighoff, Yizhe
+  Zhang, Binyuan Hui, Junyang Lin, Robert Bren-
+  nan, Hao Peng, Heng Ji, and Graham Neubig.
+  2024. OpenHands: An Open Platform for AI Soft-
+  ware Developers as Generalist Agents. Preprint,
+  arXiv:2407.16741.
+
+Qinyun Wu, Chao Peng, Pengfei Gao, Ruida Hu, Haoyu
+  Gan, Bo Jiang, Jinhe Tang, Zhiwen Deng, Zhanming
+  Guan, Cuiyun Gao, et al. 2024a. Repomastereval:
+  Evaluating code completion via real-world reposito-
+  ries. arXiv preprint arXiv:2408.03519.
+
+Tongtong Wu, Weigang Wu, Xingyu Wang, Kang Xu,
+  Suyu Ma, Bo Jiang, Ping Yang, Zhenchang Xing,
+  Yuan-Fang Li, and Gholamreza Haffari. 2024b. Ver-
+  sicode: Towards version-controllable code genera-
+  tion. arXiv preprint arXiv:2406.07411.
+                                                    10144
+A    Example of Configuration Files
+This section introduces the types of configuration
+files for the four languages involved in this paper.
+These files specify project dependencies and serve
+as carriers for storing inference results. They also
+exercise the capabilities of LLMs to interact with
+modern programming languages build systems, it
+is important to provide a clear demonstration here.
+Python (Figure 6) pyproject.toml is the con-
+figuration file used by most Python projects. It
+includes sections for specifying metadata such as
+package names and authors, defining project de-
+pendencies, and configuring various development
+tools.
+
+
+
+
+                                                            Figure 7: An example of Cargo.toml in Rust
+
+
+                                                        larly those managed with Node.js. It defines meta-
+                                                        data such as the project name, version, and descrip-
+                                                        tion, and specifies dependencies, scripts, and entry
+                                                        points for the project.
+                                                          It can be found that dependency management
+                                                        constitutes the majority of the configuration files.
+
+                                                        B   Distribution of DI-B ENCH Dataset on
+                                                            Token Count and Dependency Amount
+                                                        Figure 10 illustrates the distribution of token and
+                                                        dependency counts across different programming
+                                                        languages (Python, Rust, C#, and JavaScript) for
+Figure 6: An example of pyproject.toml in Python
+                                                        both Regular and Large repositories. For Regu-
+                                                        lar repositories, the token count distribution shows
+Rust (Figure 7) Cargo.toml is the configuration         that Python and Rust have a higher density at lower
+file used in Rust projects. A single repository may     token counts, indicating that these languages typi-
+contain multiple local crates, each with its own        cally have smaller codebases. In contrast, C# and
+Cargo.toml, requiring proper configuration of in-       JavaScript display a more spread-out distribution,
+ternal dependency references.                           suggesting a wider range of codebase sizes. When
+C# (Figure 8) Similar to Rust projects, C# repos-       examining Large repositories, the token count dis-
+itories are often structured as solutions contain-      tribution shifts substantially, with all languages
+ing multiple internal projects. Each project uses a     showing a lower density, highlighting the increased
+.csproj configuration file to specify external and      complexity and size of codebases in larger reposi-
+internal dependencies and configure compilation         tories.
+options.                                                   The dependency count distribution for Regular
+JavaScript (Figure 9) package.json is the con-          repositories reveals that most dependencies are con-
+figuration file used in JavaScript projects, particu-   centrated in the lower range across all languages,
+                                                   10145
+                                                                                      1e 5
+                                                                                  3                Python       0.100
+
+
+
+
+                                                              Density (Regular)
+                                                                                                   Rust
+                                                                                  2                C#           0.075
+                                                                                                   JavaScript   0.050
+                                                                                  1
+                                                                                                                0.025
+                                                                                  0                             0.000
+                                                                                      0k 25k 50k 75k 100k               0     50      100      150
+                                                                                       1e 6
+                                                                                                         0.03
+                                                                         2.0
+
+
+
+
+                                                       Density (Large)
+                                                                         1.5                             0.02
+                                                                         1.0
+                                                                                                         0.01
+                                                                         0.5
+                                                                         0.0                             0.00
+                                                                           120k500k 1000k1500k2000k2500k      0               50      100      150
+                                                                                     Token count                            Dependency count
+
+
+                                                      Figure 10: Distribution of token and dependency count.
+
+
+
+    Figure 8: An example of example.csproj in C#
+                                                      Experiment Setting In DI-B ENCH, LLMs need
+                                                      to curate the list of dependencies by going through
+                                                      the entire repository. To mimic this process, we
+                                                      recruited 4 developers who have at least two years
+                                                      Python development experience as annotators. We
+                                                      sampled 40 repositories from the Python language
+                                                      of the regular subset for labelling, and each repos-
+                                                      itory involves two annotators to ensure the anno-
+                                                      tation quality. For each repository, the annotator
+                                                      needs to produce a list of dependencies (includ-
+                                                      ing name and version) by reading the source code
+                                                      in which the original dependencies were removed.
+                                                      It is worth noting that the human annotators are
+                                                      allowed to execute the code to test whether the de-
+                                                      pendency list is correct and use as feedback. We
+                                                      also set a 20-minute time limit for completing each
+                                                      repository. The complete instructions for human
+                                                      annotators can be found in Figure 11.
+Figure 9: An example of package.json in JavaScript
+                                                      Results Table 7 presents the average metric
+                                                      scores of annotators on the sampled instances, com-
+                                                      pared with three prompting baselines of GPT-4o.
+with Python and Rust having slightly higher den-
+                                                      Human performance slightly exceeded the best
+sities at lower counts. For Large repositories, the
+                                                      score achieved by GPT-4o. In practice, all the
+dependency count distribution shows a similar pat-
+                                                      dependencies are crafted by human developers by
+tern but with slightly higher densities for C# and
+                                                      iteratively identifying the dependency information
+JavaScript, indicating these languages tend to have
+                                                      during code development. In our experiment, de-
+more dependencies in larger codebases.
+                                                      velopers inferred the used packages and versions
+                                                      by consulting dependency package’s documenta-
+C     Human Experiment                                tion and analyzing API usage in the code. When
+                                                      dependency resolution fails or test execution en-
+Since repository-level dependency inference is a      counters errors, developers can iteratively refine
+new task in LLM benchmarking, we conducted            their answers by referring to the error messages.
+a human experiment on DI-B ENCH to better un-         We observed that participants often relied on search
+derstand the general manner and performance of        and multi-round debugging to complete their an-
+human developers in this task and to uncover the      swers. This further highlights the significant room
+gap between LLMs and humans.                          for improvement in methods on our benchmark.
+                                                   10146
+1    # Instructions for Human Annotators
+2
+3    ## What You Receive :
+4    A Python repository where the dependency section in pyproject . toml is masked ( only
+     this file is affected ) .
+5
+6    ##   What You Do :
+7    1.   Analyze and infer the dependencies used in the repository .
+8    2.   Edit pyproject . toml in place , filling in the dependency section .
+9    3.   Ensure comprehensive coverage of all dependencies used in the code .
+10   4.   Complete each repository within 20 minutes .
+11   5.   Specify versions and metadata if necessary .
+12   6.   Use command - line tools and execute code as needed .
+13
+14   ## What You Deliver :
+15   A repository with the dependency section in pyproject . toml fully restored .
+16
+17   ## Data Consent Notice :
+18   By participating in this annotation task , you agree that your annotations will be
+     used as part of a human experiment dataset for research purposes . The collected
+     data will be included in a research paper and made publicly available .
+
+
+                                       Figure 11: Instructions for human annotators.
+
+
+      Approach          Exec      P       R      F1     FR     E    RAG Baseline
+
+      All-In-One        47.5    63.3    78.5    70.1    1.5    We propose a simple Retrieval-Augmented Gen-
+      File-Iterate      25.0    37.4    75.1    49.9    4.5    eration (RAG) approach based on our Imports-
+      Imports-Only      35.0    54.5    80.4    65.0    3.9    Only baseline for dependency inference. For each
+                                                               source file, the method utilizes tree-sitter to ex-
+      Human             77.5    82.4    91.9    86.9    1.3    tract dependency-related statements. These state-
+                                                               ments serve as queries to retrieve semantically sim-
+     Table 7: Human Performance vs. LLM Baselines (on
+                                                               ilar content within the same file. The underly-
+     40 Python Instances)
+                                                               ing hypothesis is that code segments with textual
+                                                               similarity to import statements may contain infor-
+     An agentic approach capable of searching external         mation for determining appropriate dependency
+     information and performing interactive debugging          versions. We conduct experiments with two re-
+     would be a promising direction.                           trieval approaches: BM25, and Embedding-based
+                                                               retrieval using OpenAI’s text-embedding-ada-002
+      Approach          Exec      P       R      F1     FR     model. Performance are shown in Table 9. Our
+                                                               experimental results reveals several key limitations
+      All-In-One        42.9    61.8    73.6    67.2    2.8
+                                                               in our current RAG implementation. First, using
+      File-Iterate      29.6    38.1    75.6    50.7    4.5
+                                                               dependency-related statements as queries may be
+      Imports-Only      36.7    56.5    74.9    64.4    3.9
+                                                               overly simplistic, failing to capture the rich con-
+      Pigar             29.0    24.3    44.3    31.4    0.3    textual information needed for dependency version
+                                                               selection. Second, while the retrieved code seg-
+     Table 8: Program analysis-based traditional method vs.    ments show textual similarity to the queries, they
+     LLM baselines                                             may not contain the critical information necessary
+                                                               for version determination. Finally, our approach to
+                                                               utilizing the retrieved content requires refinement,
+     D    Program Analysis Baseline
+                                                               as we need more effective strategies for integrating
+     Several tools are available for analyzing external        and leveraging this information. The chunk size for
+     dependencies in Python codebases, we choose pi-           BM25 and embeddin 512 and we use top-3 retrieve
+     gar(damnever, 2024) as a baseline. The perfor-            results.
+     mance of pigar in our python subset is shown in              These findings suggest substantial room for im-
+     Table 8. The lower score showing that LLM’s mo-           provement in RAG methods on our benchmark. Fu-
+     tivation on dependency inference.                         ture research directions could explore more sophis-
+                                                          10147
+ Lang         Approach         Exec    P      R     F1     FR          ods to handle different repository scales efficiently.
+ Python       All-In-One       42.9   61.8   73.6   67.2   2.8         The conclusion aligns with the findings we ob-
+              File-Iterate     29.6   38.1   75.6   50.7   4.5
+              Imports-Only     36.7   56.5   74.9   64.4   3.9
+                                                                       tained in Section 6.1. Besides, the variability sug-
+              RAG(BM25)        36.0   60.6   71.2   65.5   3.1         gests that a one-size-fits-all approach is insufficient,
+              RAG(embedding)   34.0   63.9   69.5   66.6   1.6         and tailored strategies are necessary to maintain
+ Rust         All-In-One       11.2   93.7   74.4   82.9   0.8         high performance across different contexts.
+              File-Iterate     7.1    74.7   75.6   75.2   1.1
+              Imports-Only     4.1    88.9   65.0   75.1   1.0
+              RAG(BM25)        4.0    87.1   59.4   70.6   2.6         F.2                Performance When Varying the Model
+              RAG(embedding)   3.0    92.7   60.2   73.0   1.4
+                                                                                          Size
+ C#           All-In-One       13.5   59.9   39.4   47.5   3.7
+              File-Iterate     5.2    27.7   34.1   30.6   6.8         Figure 12 presents the performance of All-In-One
+              Imports-Only     3.1    52.7   29.8   38.1   5.2
+              RAG(BM25)        2.0    89.4   62.7   73.7   1.3         approach on Regular dataset with different sizes of
+              RAG(embedding)   7.0    53.1   33.3   40.9   4.2         Qwen2.5-Coder-Instruct models. We observed a
+ Javascript   All-In-One       43.2   86.9   67.7   76.1   4.8         general trend where larger models consistently im-
+              File-Iterate     32.6   52.2   62.6   57.0   2.9
+              Imports-Only     22.1   73.6   46.7   57.1   6.2
+                                                                       proved executability and textual accuracy metrics
+              RAG(BM25)        11.0   80.1   40.9   54.2   4.9         across four languages. Besides, when increasing
+              RAG(embedding)   12.0   75.8   37.4   50.1   3.2         the model size for compiled languages ike Rust
+                                                                       and C#, textual accuracy increases sharply, but the
+Table 9: Import-Only baseline Combined with Different
+RAG Methods for Context Enhancement vs. Other
+                                                                       executability remains relative low, demonstrating
+Baselines                                                              the great value of our execution-based evaluation
+                                                                       in benchmarking.
+
+ticated query construction approaches that incor-                                         Exec Pass vs Model Size                                  F1 Score vs Model Size
+                                                                                          Python                                         80
+porate code semantic features and project context;                              30
+                                                                                          Rust
+                                                                                          C#
+                                                                                          JavaScript                                     60
+enhance similarity computation methods to retrieve
+                                                                    Exec Pass
+
+
+
+
+                                                                                                                              F1 Score
+                                                                                20                                                       40
+more relevant content; and design more effective
+                                                                                10
+strategies for analyzing and integrating retrieved                                                                                       20
+
+information. Additionally, the integration of code                              0
+                                                                                     3B                7B         14B   32B                   3B        7B         14B      32B
+analysis techniques and project dependency graphs                                                        Model Size                                       Model Size
+
+could potentially enhance the performance of RAG                       Figure 12: Model performance across programming
+methods.                                                               languages for Qwen2.5-Coder-Instruct
+
+F     Additional Experiments
+F.1 Performance of Baseline Methods with                               F.3                Performance When Varying the
+    GPT-4o-mini                                                                           Repository Size
+Table 10 presents the performance of various                           In Table 3, we can observe that that dependency
+benchmark methods across different languages and                       inference performance deteriorates when applied
+repository sizes (Regular and Large) on GPT-4o-                        to larger datasets. However, whether this finding
+mini. Notably, the effectiveness of these meth-                        is generally applicable is unconfirmed. Therefore,
+ods varies significantly between Regular and Large                     we conducted a further analysis within the regular
+repositories, with performance generally declining                     dataset which contains repositories of varying sizes.
+as repository size increases. Python and Rust show                     The results are depicted in Figure 13, showing a
+relatively higher performance in Regular reposito-                     decline in executability rates as repository size in-
+ries compared to C# and JavaScript, which struggle                     creases. Hence, there exists a negative correlation
+more consistently across both repository sizes. Fur-                   between repository size and model performance
+thermore, the Imports-Only method for Python and                       both between and within datasets. This suggests
+File-Iterate method for Rust stand out with com-                       that long-context reasoning remains a significant
+paratively better performance in Regular reposito-                     challenge for LLMs, as longer input contexts lead
+ries. The results indicate that while some methods                     to increased complexity in managing the project
+perform well in smaller repositories, there is a sig-                  dependencies. This finding aligns with previous
+nificant drop in effectiveness in larger repositories,                 studies on long-context reasoning (Hsieh et al.,
+underscoring the importance of optimizing meth-                        2024; Bai et al., 2024).
+                                                                 10148
+      Table 10: Performance of benchmark methods across programming languages and repository sizes on GPT-4o-mini
+      (Continue to Table 3 with a different model)
+
+                                                                                                             Regular                                Large
+                                           Lang                 Method
+                                                                                       Exec             P           R   F1      FR    Exec    P       R     F1     FR
+                                                                All-In-One              25.5        56.5         57.5   57.0    2.0    -      -       -      -      -
+                                           Python               File-Iterate            21.4        41.7         63.7   50.4    2.8   14.0   31.0    27.6   29.2   4.2
+                                                                Imports-Only            30.6        59.0         62.0   60.5    1.6   18.0   45.4    32.3   37.7   3.1
+                                                                All-In-One               7.1        76.0         49.1   59.7    1.0    -      -       -      -      -
+                                           Rust                 File-Iterate             4.1        74.8         60.4   66.8    1.5   0.0    36.9    45.2   40.6   4.5
+                                                                Imports-Only             1.0        77.7         49.4   60.4    1.0   0.0    64.1    23.8   34.7   4.0
+                                                                All-In-One               3.1        41.2         18.8   25.8   12.6    -      -       -      -      -
+                                           C#                   File-Iterate             3.1        25.0         22.8   23.8   15.6   0.0    19.2    13.6   15.9   5.8
+                                                                Imports-Only             3.1        44.2         23.5   30.7    6.7   0.0    34.7    14.1   20.1   6.2
+                                                                All-In-One              17.9        84.6         31.6   46.0    2.5    -      -        -     -      -
+                                           JavaScript           File-Iterate            16.8        45.7         25.8   33.0    7.2   2.2    27.0    20.2   23.1   3.5
+                                                                Imports-Only            13.7        67.5         19.0   29.6    1.3   2.2    57.9     9.1   15.7   0.0
+
+
+                                          Python                                          Rust
+                                                         Total                                          Total
+                                                                                                                            leNotFoundError during test execution.
+                      40                                             40
+                                                         Exec Pass                                      Exec Pass
+Number of Instances
+
+
+
+
+                      30                                             30
+
+                      20                                             20
+                                                                                                                        • Dependency Not Found in build (Figure 15):
+                                                                                                                          In the mrtolkien_fastapi_simple_security
+                      10                                             10
+                                                                                                                          instance, the model inferred a dependency named
+                      0                                              0
+                                                                                                                          sqlite3, which does not exist in pip, causing the
+                            0k
+
+                                  0k
+
+                                         0k
+
+                                                0k
+
+                                                         k
+                                                               0k
+
+
+
+                                                                           0k
+
+                                                                                 0k
+
+                                                                                        0k
+
+                                                                                               0k
+
+                                                                                                        k
+                                                                                                              0k
+                                                         00
+
+
+
+
+                                                                                                        00
+                           0-2
+
+                                 k-4
+
+                                       k-6
+
+                                              k-8
+
+
+
+                                                              -12
+
+
+
+                                                                          0-2
+
+                                                                                k-4
+
+                                                                                      k-6
+
+                                                                                             k-8
+
+
+
+                                                                                                             -12
+
+
+
+
+                                                                                                                          pip install command to fail.
+                                                    k-1
+
+
+
+
+                                                                                                   k-1
+                                 20
+
+                                      40
+
+                                            60
+
+
+
+
+                                                                                20
+
+                                                                                     40
+
+                                                                                           60
+                                                           0k
+
+
+
+
+                                                                                                            0k
+                                                  80
+
+
+
+
+                                                                                                 80
+                                                          10
+
+
+
+
+                                                                                                         10
+
+
+
+
+                                             C#                                        JavaScript
+                      35
+                                                         Total       70                                 Total
+                      30                                 Exec Pass                                      Exec Pass
+                                                                     60                                                 • Invalid Dependency Version in build (Fig-
+Number of Instances
+
+
+
+
+                      25
+                                                                     50
+                      20
+                                                                     40
+                                                                                                                          ure 16): In the Zuehlke_ConfZ instance, the
+                      15                                             30                                                   model specified an invalid version for the de-
+                      10                                             20
+                       5                                             10
+                                                                                                                          pendency python-dotenv, which requires Python
+                       0                                              0                                                   >=3.8, while the project is using Python 3.7. This
+                                                                                                                          caused the pip install stage to fail due to unre-
+                            0k
+
+                                  0k
+
+                                         0k
+
+                                                0k
+
+                                                         k
+                                                               0k
+
+
+
+                                                                           0k
+
+                                                                                 0k
+
+                                                                                        0k
+
+                                                                                               0k
+
+                                                                                                        k
+                                                                                                              0k
+                                                         00
+
+
+
+
+                                                                                                        00
+                           0-2
+
+                                 k-4
+
+                                       k-6
+
+                                              k-8
+
+
+
+                                                              -12
+
+
+
+                                                                          0-2
+
+                                                                                k-4
+
+                                                                                      k-6
+
+                                                                                             k-8
+
+
+
+                                                                                                             -12
+                                                    k-1
+
+
+
+
+                                                                                                   k-1
+                                 20
+
+                                      40
+
+                                            60
+
+
+
+
+                                                                                20
+
+                                                                                     40
+
+                                                                                           60
+                                                           0k
+
+
+
+
+                                                                                                            0k
+                                                  80
+
+
+
+
+                                                                                                 80
+
+
+
+
+                                                                                                                          solved dependencies.
+                                                          10
+
+
+
+
+                                                                                                         10
+
+
+
+
+                                       Repository Size                                Repository Size
+
+                      Figure 13: Execution pass rate w.r.t repository size
+                                                                                                                        • Mismatched Dependency Version in test (Fig-
+                                                                                                                          ure 17): In the codeskyblue_tidevice3 in-
+       G Case Study
+                                                                                                                          stance, the model correctly inferred the depen-
+      To gain a better understanding of the root causes                                                                   dency pymobiledevice3 but specified an incor-
+      and patterns of LLM errors in dependency reason-                                                                    rect version, preventing the import of certain
+      ing, we conduct an in-depth analysis of a repre-                                                                    attributes in the code.
+      sentative sample for each error category (Figure
+      4) in this section. Figure 14–17 presents the de-
+      tailed information of four fail instances inferred                                                                   We found that the model often fails due to infer-
+      by GPT-4o, including a comparison between the                                                                     ring incorrect dependency versions or missing de-
+      model-generated results and the ground truth, as                                                                  pendencies used in the code. Our ablation study in
+      well as the error messages encountered during fail-                                                               Section 6.3 also demonstrates that reasoning about
+      ure.                                                                                                              dependency metadata (e.g., versions) is a bottle-
+                                                                                                                        neck. This indicates that the model’s dependency-
+       • Missing Dependency in test (Figure 14): In the                                                                 related knowledge for the four languages is insuffi-
+         open2c_bioframe instance, the model missed                                                                     cient and exhibits a significant degree of hallucina-
+         the matplotlib package, resulting in a Modu-                                                                   tion.
+                                                                                                                    10149
+# Instance: `open2c_bioframe`                          # Instance: `Zuehlke_ConfZ`
+
+## Dependencies Generated by GPT-4o                    ## Dependencies Generated by GPT-4o
+dependencies = [                                       [tool.poetry.dependencies]
+    "numpy",                                           python = "^3.7.2"
+    "pandas",                                          pydantic = "^1.10.2"
+    "requests",                                        PyYAML = "^6.0"
+    "pyyaml",                                          toml = "^0.10.2"
+    "importlib_metadata; python_version<'3.8'",        python-dotenv = "^1.0.0"
+]
+                                                       ## Ground Truth
+## Ground Truth                                        [tool.poetry.dependencies]
+dependencies = [                                       python = "^3.7.2"
+    "matplotlib",                                      pydantic = ">=1.9.0, <3.0.0"
+    "numpy>=1.10, <3",                                 PyYAML = ">=5.4.1, <7.0.0"
+    "pandas>=1.3",                                     python-dotenv = ">=0.19.2, <2.0.0"
+    "pyyaml",                                          toml = "^0.10.2"
+    "requests",
+    "typing-extensions ; python_version<'3.9'",        ## Error Message
+    "importlib-metadata ;                              [test/run-test]  | The current project's
+    ,→ python_version<'3.8'",                          ,→ Python requirement (>=3.7.2,<4.0.0) is not
+    "importlib-resources ;                             ,→ compatible with some of the required
+    ,→ python_version<'3.9'",                          ,→ packages Python requirement:
+]                                                      [test/run-test]  |   - python-dotenv requires
+                                                       ,→ Python >=3.8, so it will not be satisfied
+## Error Message                                       ,→ for Python >=3.7.2,<3.8
+[CI/Test] | bioframe/vis.py:4: in <module>             [test/run-test]  |
+[CI/Test] | import matplotlib as mpl                   [test/run-test]  | Because no versions of
+[CI/Test] | E ModuleNotFoundError: No                  ,→ python-dotenv match >1.0.0,<1.0.1 ||
+,→ module named 'matplotlib'                           ,→ >1.0.1,<2.0.0
+                                                       [test/run-test]  | and python-dotenv (1.0.0)
+                                                       ,→ requires Python >=3.8, python-dotenv is
+                                                       ,→ forbidden.
+Figure 14: A case of the category Missing Dependency
+                                                       [test/run-test]  | So, because python-dotenv
+in test                                                ,→ (1.0.1) requires Python >=3.8
+                                                       [test/run-test]  | and confz depends on
+# Instance: `mrtolkien_fastapi_simple_security`        ,→ python-dotenv (^1.0.0), version solving
+                                                       ,→ failed.
+## Dependencies Generated by GPT-4o
+[tool.poetry.dependencies]
+python = ">=3.7.2,<4"                                  Figure 16: A case of the category Invalid Dependency
+fastapi = "^0.95.0"
+pydantic = "^1.10.0"                                   Version in build
+starlette = "^0.20.4"
+sqlite3 = { version = "*", optional = true }
+                                                       H     Experimental Settings
+## Ground Truth
+[tool.poetry.dependencies]                             H.1    Baseline All-In-One
+python = ">=3.7.2,<4"
+fastapi = ">=0.70"                                     In All-In-One, our baseline approach feeds the
+urllib3 = ">=1.26.12"                                  entire codebase as input context to the LLM and
+## Error Message                                       processes the task through a single LLM call. The
+[Python Tests/tests]  | Updating dependencies          model simultaneously generates all build configu-
+[Python Tests/tests]  | Resolving                      rations, which are then parsed to obtain the updated
+,→ dependencies...
+[Python Tests/tests]  |                                build files. The complete prompt template used for
+[Python Tests/tests]  | Because                        this approach is detailed in Figure 18.
+,→ fastapi-simple-security depends on sqlite3
+,→ (*) which does not match any versions,
+                                                       H.2    Baseline Imports-Only
+,→ version solving failed.
+[Python Tests/tests]  Failure - Main Install           Imports-Only follows the same prompting strategy
+,→ python dependencies
+                                                       as All-In-One with a single LLM call. The key
+                                                       distinction lies in the input composition: while All-
+Figure 15: A case of the category Dependency Not       In-One includes the complete codebase, Imports-
+Found in build                                         Only only incorporates the import statements from
+                                                       source files in the input context. This selective ap-
+                                                       proach focuses the model’s attention on the most
+                                                   10150
+# Instance: `codeskyblue_tidevice3`                           of the comprehensively updated build files derived
+                                                              from this two-stage process.
+## Dependencies Generated by GPT-4o
+[tool.poetry.dependencies]
+python = "^3.8"                                               H.4   Tree-sitter
+click = "^8.1.3"                                              Tree-sitter is a parsing system widely used in
+pymobiledevice3 = "^1.0.0"
+requests = "^2.31.0"                                          code analysis that generates concrete syntax trees
+pydantic = "^1.10.2"                                          for source code. In our implementation, we uti-
+Pillow = "^10.0.0"
+packaging = "^23.1"
+                                                              lize Tree-sitter to extract import statements and
+fastapi = "^0.95.2"                                           dependency-related code segments across different
+uvicorn = "^0.22.0"                                           programming languages. Tree-sitter’s language-
+imageio = "^2.31.1"
+                                                              agnostic nature and robust parsing capabilities en-
+## Ground Truth                                               able our system to maintain consistent analysis
+[tool.poetry.dependencies]                                    quality across Python, JavaScript, Rust, and other
+python = "^3.8"
+pymobiledevice3 = "^4.2.3"                                    supported languages. Tree-sitter queries provide a
+click = "*"                                                   powerful pattern-matching language for searching
+pydantic = "^2.5.3"                                           syntax trees. The query language allows precise
+fastapi = "*"
+requests = "*"                                                targeting of syntax tree patterns using a declarative,
+numpy = "*"                                                   S-expression-based syntax. Below is the queries
+imageio = {extras = ["ffmpeg"], version =
+,→ "^2.33.1"}
+                                                              we used to extract import statements.
+pillow = "^10.0"                                          1   # Python
+zeroconf = "^0.132.2"                                     2   [( import_statement )
+                                                              ( import_from_statement )] @import
+## Error Message                                          3
+[Python Package/test]  | tidevice3/api.py:17:             4   # Rust
+,→ in <module>                                            5   ( use_declaration ) @use
+[Python Package/test]  |     from                         6
+,→ pymobiledevice3.lockdown import                        7   # C#
+,→ LockdownClient, create_using_usbmux, usbmux            8   ( using_directive ) @use
+[Python Package/test]  | E   ImportError:                 9
+,→ cannot import name 'create_using_usbmux'              10   # JavaScript
+,→ from 'pymobiledevice3.lockdown'                       11   ( import_statement ) @import
+,→ (/project/.venv/lib/python3.8/site-packages
+,→ /pymobiledevice3/lockdown.py)
+
+                                                              H.5   Model Serving
+Figure 17: A case of the category Mismatched Depen-           For GPT-4o and GPT-4o-mini, we utilize the spe-
+dency Version in test                                         cific versions gpt-4o-20240806 and gpt-4o-mini-
+                                                              20240718, accessed through the OpenAI API. For
+                                                              Gemini-2.0-Flash we utilize the specific version of
+dependency-relevant code segments. We leverage                gemini-2.0-flash-001, accessed through the Google
+tree-sitter to extract import statements across dif-          API. For Claude-3.5-Sonnet we utilize the specific
+ferent programming languages, with detailed usage             version of claude-3-5-sonnet-20241022, accessed
+information provided in Appendix H.4.                         through the Anthropic API. For opensource mod-
+                                                              els, we employ checkpoints available on Hugging
+H.3 Baseline File-Iterate                                     Face. We serve deepseek-v3 and deepseek-r1 with
+File-Iterate employs a two-stage prompting strat-             A100 GPU cluster, and other models with 4 A100
+egy. In the first stage, it processes source files            GPUs in single node using VLLM. The decoding
+individually, applying the same prompt template               strategy is configured as greedy decoding with a
+which is detailed in Appendix H.1 as previous base-           maximum output token limit of 8,000.
+lines but with a single file as context per LLM call.
+This generates separate build files edits for each
+source file. In the second stage, for each build file,
+we merge its various updates from the first stage
+using a dedicated LLM call, where the prompt is
+shown in Figure 19. The merge prompt template is
+detailed in Appendix H.3. The final output consists
+                                                    10151
+1    Edit the build files to include all necessary dependency - related configurations to
+     ensure the project builds and runs successfully . Output a copy of each build file .
+2
+3    You will receive four sections of information to configure dependencies in build
+     files :
+4    1. ** Project Structure **: A tree structure representing the project ' s layout .
+5    2. ** Environment Specifications **: Details about the operating system and language
+     SDK where the project will run .
+6    3. ** Source Code **: The full source code of the project .
+7    4. ** Build Files **: Build files missing dependency configurations , which you will
+     need to update .
+8
+9    ! Important Notes :
+10   1. The project may include multiple build files . Ensure you update all of them
+     with the necessary dependency configurations .
+11   2. Only edit the files listed in the " Build Files " section .
+12   3. Limit your edits strictly to dependency configurations within the build files .
+13
+14   To suggest changes to a file you MUST return the entire content of the updated
+     file .
+15   You MUST use this * file listing * format :
+16
+17   path / to / filename . js
+18   ```
+19   // entire file content ...
+20   // ... goes in between
+21   ```
+22
+23   Every * file listing * MUST use this format :
+24   - First line : the filename with any originally provided path ; no extra markup ,
+     punctuation , comments , etc . ** JUST ** the filename with path .
+25   - Second line : opening ```
+26   - ... entire content of the file ...
+27   - Final line : closing ```
+28
+29   To suggest changes to a file you MUST return a * file listing * that contains the
+     entire content of the file .
+30   * NEVER * skip , omit or elide content from a * file listing * using "..." or by adding
+     comments like "... rest of code ..."!
+31   Create a new file you MUST return a * file listing * which includes an appropriate
+     filename , including any appropriate path .
+32
+33   --- Begin of Project Structure ---
+34   { project_structure }
+35   --- End of Project Structure ---
+36
+37   --- Begin of Environment Specifications ---
+38   { env_specs }
+39   --- End of Environment Specifications ---
+40
+41   --- Begin of Source Code ---
+42   { src_section }
+43   --- End of Source Code ---
+44
+45   --- Begin of Build Files ---
+46   { build_section }
+47   --- End of Build Files ---
+
+
+                           Figure 18: Prompt template used to generate build file.
+
+
+
+
+                                                   10152
+1    Here is a list of edits to a project ' s build files , which is generated by add
+     dependency configuration according to each source file . Edit the build files to
+     merge all edits in the " Build File Edits " section to ensure the project builds and
+     runs successfully . Output a copy of the build file .
+2
+3    You will receive four sections of information to configure dependencies in build
+     files :
+4    1. ** Project Structure **: A tree structure representing the project ' s layout .
+5    2. ** Environment Specifications **: Details about the operating system and language
+     SDK where the project will run .
+6    3. ** Build File Edits **: A list of edited build file , which you will need to merge .
+7    4. ** Build File **: Build files missing dependency configurations , which you will
+     need to update based on above edits .
+8
+9    To suggest changes to a file you MUST return the entire content of the updated
+     file .
+10   You MUST use this * file listing * format :
+11
+12   path / to / filename . js
+13   ```
+14   // entire file content ...
+15   // ... goes in between
+16   ```
+17
+18   Every * file listing * MUST use this format :
+19   - First line : the filename with any originally provided path ; no extra markup ,
+     punctuation , comments , etc . ** JUST ** the filename with path .
+20   - Second line : opening ```
+21   - ... entire content of the file ...
+22   - Final line : closing ```
+23
+24   To suggest changes to a file you MUST return a * file listing * that contains the
+     entire content of the file .
+25   * NEVER * skip , omit or elide content from a * file listing * using "..." or by adding
+     comments like "... rest of code ..."!
+26   Create a new file you MUST return a * file listing * which includes an appropriate
+     filename , including any appropriate path .
+27
+28   --- Begin of Project Structure ---
+29   { project_structure }
+30   --- End of Project Structure ---
+31
+32   --- Begin of Environment Specifications ---
+33   { env_specs }
+34   --- End of Environment Specifications ---
+35
+36   --- Begin of Build File Edits - - -
+37   { build_file_edits }
+38   --- End of Build Files Edits - - -
+39
+40   --- Begin of Build File ---
+41   { build_section }
+42   --- End of Build File ---
+
+
+                               Figure 19: Prompt used to merge build file edits.
+
+
+
+
+                                                    10153
+

@@ -1,0 +1,274 @@
+   ArtifactSync: Automated Repository Synchronization through
+               Hierarchical Change Impact Analysis
+                                    Ebube Alor                                                  João Pedro de Souza Olivo Tardivo
+                  ebubechukwu.alor@mail.concordia.ca                                            joao.tardivo.15@estudante.unespar.edu.br
+                         Concordia University                                                       Universidade Estadual do Paraná
+                       Montréal, Quebec, Canada                                                         Apucarana, Paraná, Brazil
+
+                     SayedHassan Khatoonabadi                                                                   Emad Shihab
+               sayedhassan.khatoonabadi@concordia.ca                                                     emad.shihab@concordia.ca
+                        Concordia University                                                               Concordia University
+                     Montréal, Quebec, Canada                                                            Montréal, Quebec, Canada
+Abstract                                                                                April 12–18, 2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 4 pages.
+When developers change source code, related artifacts like docu-                        https://doi.org/10.1145/3774748.3787617
+mentation and tests often become outdated, creating inconsistencies
+that are difficult to fix manually. We introduce ArtifactSync, a tool
+that leverages Large Language Models (LLMs) for automated cross-                        1    Introduction
+artifact consistency maintenance. LLMs are uniquely suited for this                     Modern software projects consist of numerous interconnected arti-
+task because they can understand semantic relationships across                          facts. Beyond the source code, these include documentation, unit
+diverse artifact types, such as code, documentation, and tests that                     tests, build scripts, and configuration files, all of which are essential
+traditional static analysis cannot capture. ArtifactSync performs                       for the development, maintenance, and comprehension of the soft-
+change impact analysis using a hierarchical approach that starts by                     ware [16]. A critical challenge in the software lifecycle is maintain-
+scanning file names and progressively “zooms in” on uncertain files,                    ing consistency and synchronization among these diverse artifacts.
+requesting more detailed context only when necessary. This tar-                         When a developer introduces a new feature or refactors existing
+geted change impact analysis makes the evaluation of large reposito-                    code, corresponding changes are often required in other parts of the
+ries both feasible and cost-effective. ArtifactSync is implemented                      repository. Failure to update all related artifacts in lockstep leads to
+as both a command-line tool and an interactive VS Code extension.                       inconsistencies, which manifest as outdated documentation, failing
+Within the editor, it presents each detected inconsistency with a                       or missing tests, and broken builds [11, 15, 16]. This “artifact drift”
+clear explanation and an actionable fix that developers can apply                       contributes significantly to technical debt, complicates onboard-
+directly. Our preliminary evaluation across two open-source repos-                      ing for new developers, and increases the overall cost of software
+itories shows that ArtifactSync achieved up to 100% accuracy in                         maintenance [1, 11, 15, 16].
+both identifying impacted artifacts and generating corresponding                           Currently, developers rely on a combination of manual diligence,
+fixes. A demonstration is available at https://youtu.be/AfLe_I_OnA0                     code reviews, static analysis tools, and Continuous Integration
+and the tool at https://github.com/Alor-e/artifact-sync.                                (CI) pipelines to manage these dependencies. However, these ap-
+                                                                                        proaches have limitations. Manual checks place a heavy cognitive
+CCS Concepts                                                                            load on developers, who must remember every implication of their
+• Software and its engineering → Software maintenance tools;                            changes [16]. Static analysis tools can detect syntactic relationships
+Software maintenance.                                                                   but struggle with semantic dependencies across different artifact
+                                                                                        types. While CI pipelines can detect some issues, such as failing
+Keywords                                                                                tests, they cannot identify what is missing, such as the absence of
+Change Impact Analysis, Software Artifact Synchronization, Hier-                        a test for a new public method or the need for a documentation
+archical Context Retrieval, Automatic Fix Suggestion                                    update [4]. Recent advances in Large Language Models (LLMs) have
+                                                                                        shown remarkable capabilities in code understanding and reasoning
+ACM Reference Format:                                                                   [3]. LLMs can understand semantic relationships across different
+Ebube Alor, João Pedro de Souza Olivo Tardivo, SayedHassan Khatoonabadi,                artifact types that traditional approaches cannot capture. How-
+and Emad Shihab. 2026. ArtifactSync: Automated Repository Synchroniza-                  ever, leveraging LLMs to perform comprehensive change impact
+tion through Hierarchical Change Impact Analysis. In 2026 IEEE/ACM 48th
+                                                                                        analysis across repositories, identifying and rectifying artifact in-
+International Conference on Software Engineering (ICSE-Companion ’26),
+                                                                                        consistencies introduced by commits, remains a largely unexplored
+                                                                                        and challenging problem.
+                                                                                           To address this challenge, we introduce ArtifactSync, a novel
+This work is licensed under a Creative Commons Attribution 4.0 International License.   tool that automates the detection (via change impact analysis) and
+ICSE-Companion ’26, Rio de Janeiro, Brazil                                              resolution of inconsistencies among software artifacts. ArtifactSync
+© 2026 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-2296-7/2026/04                                                      is available as both a command-line tool and a VS Code extension,
+https://doi.org/10.1145/3774748.3787617                                                 designed to integrate seamlessly into a developer’s workflow by
+ICSE-Companion ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                               Alor et al.
+
+
+                                        User                                         (1) Context                  (2) Hierarchical CIA
+                                                                                     Preparation
+                                                                                      Repository               Initial            Sure
+                                                                                      Commit diff              Triage             List
+            VS Code Extension                        Python Backend
+                                                                                      README
+                                                                                      Directory tree
+               Settings Input                           CIA Engine                    .gitignore
+                                                                                                              Unsure
+              (e.g., API Keys)                      (identifies impacts)                                       List
+
+
+                                                                                      User
+                                                        Consistency                  Decision                  Add
+              Results Display
+                                                         Evaluator                                            Context
+             (Impacts & Fixes)                                                         Review                                     Still
+                                                    (detect sync issues)
+                                                                                       Apply                 Name                Unsure?
+                                                                                       Reject                Overview
+                                                    Fix Recommender                                          Full Content
+                Apply Fixes
+                                                        (generates
+                 (1-click)                              solutions)
+                                                                                   (3) Consistency
+                                                                                  Assessment & Fix          Re-evaluate
+                                                                                  Recommendation               with
+                                                                                                            New Context          Now Sure
+                                                       LLM Interface                 Sync Issues?
+                Repository                                                           What to fix?
+               (File System)                                                         Generate fixes
+                                                                                                          Prune (unrelated)
+
+
+
+Figure 1: System architecture of ArtifactSync showing the                  Figure 2: Hierarchical change impact analysis workflow of
+interaction between the frontend and backend.                              ArtifactSync showing the main phases.
+
+analyzing the impact of recent code changes across the entire repos-
+itory. The tool operates by first examining the latest commit to           the analysis engine (Python backend), enabling both command-line
+understand the changes made to the source code. It then intelli-           and IDE-integrated workflows. This separation allows developers
+gently identifies related artifacts—such as code files, documentation      to choose their preferred interaction mode while maintaining con-
+files, test suites, or configuration scripts—that may be out-of-sync.      sistent analysis capabilities.
+For each detected inconsistency, ArtifactSync provides a clear,               The core innovation of ArtifactSync lies in its hierarchical
+natural language explanation of the inconsistency, suggests a con-         approach to change impact analysis. Rather than processing an en-
+crete code or text-based fix, and offers the developer the option to       tire repository at once (which would be computationally expensive
+automatically apply the correction.                                        and exceed LLM context limits) the tool strategically reduces the
+    To evaluate ArtifactSync, we defined 20 common inconsis-               search space by progressively focusing on relevant artifacts. This
+tency scenarios that practitioners frequently encounter, such as           approach makes repository-wide analysis both feasible and more
+adding a feature without updating documentation or writing code            cost-effective, enabling the tool to handle large-scale projects that
+without corresponding tests, across two open-source repositories.          would otherwise be impractical.
+Our preliminary evaluation shows ArtifactSync is highly effec-
+tive, identifying inconsistencies with up to 100% accuracy in com-         2.1    Design Rationale
+mon scenarios and generating appropriate fixes for the majority of         ArtifactSync focuses on analyzing commits rather than uncom-
+them. To facilitate reproducibility and encourage further research,        mitted changes for several key reasons. Commits represent atomic
+the source code for the command-line backend is publicly available1        units of change with clear boundaries and developer intent. They
+and the repository for the VS Code extension includes a pre-built          provide a stable reference point for analysis and ensure reproducibil-
+installer2 . The remainder of this paper is organized as follows:          ity. Additionally, commit messages often contain valuable context
+Section 2 details the design and architecture of ArtifactSync. Sec-        about the nature and purpose of changes, which aids in understand-
+tion 3 describes the core technologies used for its implementation.        ing their potential impact on related artifacts.
+Section 4 presents our preliminary evaluation methodology and                 The tool employs two complementary strategies to achieve scala-
+results. Section 5 reviews related work, and Section 6 concludes the       bility: (1) Hierarchical directory traversal: Starting with a broad
+paper and discusses future work.                                           view of the repository structure and adaptively drilling down into
+                                                                           specific directories only when necessary. (2) Progressive content
+2    Tool Design                                                           resolution: Examining files at increasing levels of detail (name →
+ArtifactSync is designed as a two-component system that per-               overview → full content) based on uncertainty about their rele-
+forms automated change impact analysis and consistency main-               vance.
+tenance across software repositories. As shown in Figure 1, the               These strategies work together to minimize the amount of con-
+architecture separates user interaction (VS Code extension) from           text processed while maximizing the accuracy of impact detection.
+1 https://github.com/Alor-e/artifact-sync-backend                          By requesting additional detail only for uncertain cases, the system
+2 https://github.com/Alor-e/artifact-sync                                  avoids the cost and complexity of analyzing every file in detail.
+ArtifactSync: Automated Repository Synchronization through Hierarchical Change Impact Analysis          ICSE-Companion ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+We use the LLM to guide the traversal: it decides what to open                        2.3        User Interaction Model
+next, what to skip, and how much to read, keeping repo-wide CIA                       The design prioritizes developer control and transparency through-
+scalable.                                                                             out the analysis process. As shown in Figure 1, users interact with
+                                                                                      ArtifactSync through the VS Code extension, which provides: Set-
+                                                                                      tings input: Secure storage of API keys and preferences; Results
+2.2     Analysis Workflow
+                                                                                      display: Clear presentation of impacted files with explanations;
+Figure 2 illustrates the complete workflow of ArtifactSync, which                     Apply fixes (1-click): Direct application of recommended changes
+consists of three main phases:                                                        within the editor.
+   Phase 1: Context Preparation. The analysis begins when a                              This design ensures that developers maintain full control over
+user provides a repository and specifies a target commit to analyze.                  which changes are applied while benefiting from automated analy-
+The system first applies .gitignore rules to exclude irrelevant files,                sis and recommendation generation. The system presents its find-
+reducing the search space before analysis begins. It then gathers                     ings as suggestions rather than automatic modifications, allowing
+essential context including the repository’s file tree structure, the                 developers to review, understand, and selectively apply fixes based
+README content for project understanding, and the commit diff                         on their judgment and project requirements.
+showing what changed. This lightweight initial context serves as
+the foundation for subsequent analysis while avoiding the overhead                    3     Implementation
+of loading unnecessary file contents.
+                                                                                      This section describes how the three-phase workflow presented
+   Phase 2: Hierarchical Change Impact Analysis (CIA). This
+                                                                                      in Section 2 is implemented. ArtifactSync uses Python for the
+phase represents the core of ArtifactSync’s approach. As detailed
+                                                                                      backend analysis engine and JavaScript for the VS Code extension
+in Figure 2, the system performs an iterative process to identify
+                                                                                      frontend.
+which artifacts are impacted by the commit:
+   The process begins with an initial triage that classifies all reposi-              Backend (Analysis Engine). The Python backend implements the
+tory items into two lists based on their apparent relationship to the                 workflow described in Figure 2. In Phase 1, the system consolidates
+commit: Sure list: Artifacts that appear to be impacted by the com-                   configuration from command-line arguments and environment
+mit based on available information. Unsure list: Artifacts where                      variables, applies .gitignore rules to exclude irrelevant files, con-
+the impact is plausible but cannot be determined without additional                   structs the repository tree structure, retrieves commit changes via
+context.                                                                              Git commands, and extracts project context from the README. The
+   For items in the Unsure list, the system enters an iterative re-                   LLM communication layer supports multiple providers (OpenAI,
+finement loop. In each iteration, the LLM re-evaluates uncertain                      Gemini, Anthropic) and orchestrates parallel API calls for efficient
+artifacts with progressively more detailed context. When the LLM                      artifact processing. Phase 2 implements the hierarchical analysis
+requires more information to make a determination, it can request:                    by querying the LLM for uncertain items, progressively requesting
+File overview: Function signatures, class definitions, and structural                 additional context (file overview → full content) as needed, and
+information; Full file contents: Complete source code when struc-                     recursively traversing subdirectories. Iteration limits prevent un-
+tural information is insufficient; Subdirectory analysis: Recursive                   bounded refinement loops. Phase 3 initiates parallel LLM calls to
+examination of nested directories when needed.                                        assess each impacted artifact and generate fixes when inconsisten-
+   Based on the additional context, artifacts are either moved to the                 cies are detected.
+Sure list, pruned as unrelated, or kept for further refinement. This                  Frontend (VS Code Extension). The VS Code extension imple-
+“just-in-time” context provisioning ensures that expensive opera-                     ments the user interaction model shown in Figure 1. It provides
+tions, like loading entire files, are performed only when necessary.                  secure storage for LLM provider selections and API keys, invokes
+The loop continues until the Unsure list is empty or a predefined it-                 the Python backend with workspace-specific parameters, displays
+eration limit is reached, at which point remaining items are pruned                   identified impacts with natural language explanations and fix rec-
+to prevent infinite processing.                                                       ommendations, and offers “Apply Fix” buttons that programmati-
+   Phase 3: Consistency Assessment and Fix Recommenda-                                cally modify files through the VS Code API.
+tion. Once the final set of impacted artifacts is identified, the focus
+shifts from which artifacts are affected to how they are affected and                 4     Evaluation
+what should be done about it. For each artifact in the Sure list, the                 To evaluate ArtifactSync, we created 10 single-change commits for
+system performs a three-step assessment:                                              each of two open-source repositories (20 total): Crawl4AI and Unity
+   First, it determines whether the impact causes any consistency                     Catalog. Each commit introduced a targeted change designed to
+issues. An artifact may be related to a change without requiring                      break synchronization between artifacts (e.g., code and docs). We
+updates—for instance, a test file might reference changed code                        measured the tool’s performance at three stages: identifying the
+but still function correctly. Second, if inconsistencies are detected                 correct impact, recommending a solution, and generating the final
+(such as outdated documentation or missing test cases), the system                    fix. Furthermore, to simulate a common scenario where developers
+analyzes what specific updates are needed. The resolution might                       group numerous updates into one large commit, we combined the
+involve modifying the impacted file itself or updating other related                  changes from the 10 individual scenarios into a single, massive
+artifacts. Finally, the LLM generates concrete, actionable recom-                     commit for each repository. This also served as a stress test.
+mendations for resolving each inconsistency, providing both an                           When analyzing the individual commits, ArtifactSync performed
+explanation of the issue and the specific changes needed.                             perfectly on all 10 Crawl4AI scenarios. For the 10 Unity Catalog
+ICSE-Companion ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                       Alor et al.
+
+
+commits, it correctly identified the impact in all cases (10/10),        for the final fix generation. We find its semantic understanding is
+though the recommendations and fixes were only partially correct         essential for enabling our scalable, hierarchical analysis and for the
+in two instances (8/10). Our analysis traced these partial failures to   subsequent automated repair. Our preliminary evaluation demon-
+the LLM returning incorrect file paths, likely due to the project’s      strated the tool’s effectiveness across all three stages of its work-
+deeply nested directory structure of up to 12 levels.                    flow: successfully identifying impacted artifacts, recommending
+   The stress test with the single large commits presented a much        appropriate solutions, and generating correct fixes. ArtifactSync
+harder challenge. Across the 20 combined changes, the tool correctly     represents a significant step towards fully automated, cross-artifact
+identified the impact in 80% of cases (16/20), provided a correct        maintenance in modern software engineering.
+recommendation in 75% (15/20), and generated a correct fix in 65%           For future work, we plan to introduce a memory to ArtifactSync,
+(13/20). This drop in accuracy is expected, as the large commits         allowing it to learn from past analyses. Currently, our tool treats
+contained multiple changes that interfered with one another.             each commit independently, analyzing the repository from scratch.
+                                                                         A memory would enable important findings, such as which arti-
+5    Related Work                                                        facts are traceable to one another, to persist across commits. For
+                                                                         example, if a pattern is identified during one repository traversal,
+The challenge of maintaining consistency between code and other
+                                                                         this knowledge can be stored. By reusing these learned patterns,
+software artifacts has been a long-standing area of research. Our
+                                                                         subsequent analyses can avoid redundant exploration, making the
+work builds upon traditional change impact analysis and more
+                                                                         tool progressively faster and more token-efficient over time.
+recent LLM-powered approaches.
+Traditional and ML-based Change Impact Analysis. Early
+                                                                         References
+work in change impact analysis focused on static relationships,           [1] Paris Avgeriou, Ipek Ozkaya, Alexander Chatzigeorgiou, Marcus Ciolkowski,
+with tools like Chianti using program analysis to identify which              Neil A Ernst, Ronald J Koontz, Eltjo Poort, and Forrest Shull. 2023. Technical
+tests might be affected by code changes [13]. Subsequent research             Debt Management: The Road Ahead for Successful Software Delivery. In Proc.
+                                                                              ICSE-FoSE 2023.
+applied machine and deep learning to predict the co-evolution of          [2] Jianlei Chi, Xiaotian Wang, Yuhan Huang, Lechen Yu, Di Cui, Jianguo Sun, and
+production and test code. Models like SITAR [14], CEPROT [5],                 Jun Sun. 2024. ReAccept: Automated Co-Evolution of Production and Test Code
+and Drift [8] improved the accuracy of identifying outdated tests.            Based on Dynamic Validation and Large Language Models. arXiv:2411.11033
+                                                                              (2024).
+While these approaches effectively prioritize maintenance tasks,          [3] Alex Gu, Baptiste Rozière, Hugh Leather, Armando Solar-Lezama, Gabriel Syn-
+they typically only detect if an update is needed, leaving devel-             naeve, and Sida I Wang. 2024. Cruxeval: A Benchmark for Code Reasoning,
+                                                                              Understanding and Execution. arXiv:2401.03065 (2024).
+opers to craft the actual fix. Our approach uses an LLM for this          [4] Michael Hilton, Timothy Tunnell, Kai Huang, Darko Marinov, and Danny Dig.
+initial detection because its semantic reasoning is essential for the         2016. Usage, Costs, and Benefits of Continuous Integration in Open-Source
+subsequent automated repair. This LLM-driven approach is also                 Projects. In Proc. ASE 2016.
+                                                                          [5] Xing Hu, Zhuang Liu, Xin Xia, Zhongxin Liu, Tongtong Xu, and Xiaohu Yang.
+what enables our scalable, hierarchical analysis, a key aspect of our         2023. Identify and Update Test Cases When Production Code Changes: A
+contribution.                                                                 Transformer-Based Approach. In Proc. ASE 2023.
+LLM-based Artifact Maintenance. The advent of LLMs has en-                [6] Dias Jakupov. 2024. DocAider: Automated Documentation Maintenance
+                                                                              for Open-Source GitHub Repositories. Microsoft Tech Community Blog.
+abled tools that automate both the identification and repair of in-           https://techcommunity.microsoft.com/blog/educatordeveloperblog/docaider-
+consistencies, though they often focus on a single artifact type. In          automated-documentation-maintenance-for-open-source-github-
+                                                                              repositories/4245588
+the testing domain, tools like ReAccept [2], UTFix [12], and Synter       [7] Jun Liu, Jiwei Yan, Yu Xie, Jun Yan, and Jian Zhang. 2024. Fix the Tests: Aug-
+[7] can automatically generate corrected versions of obsolete tests.          menting LLMs to Repair Test Cases with Static Collector and Neural Reranker.
+In the documentation domain, RepoAgent [10] and DocAider [6]                  In Proc. IEEE ISSRE 2024.
+                                                                          [8] Lei Liu, Sinan Wang, Yepang Liu, Jinliang Deng, and Sicen Liu. 2023. Drift: Fine-
+generate and maintain repository-level documentation, while other             Grained Prediction of the Co-Evolution of Production and Test Code via Machine
+work focuses on specific tasks like updating code comments [9].               Learning. Internetware (2023).
+These powerful tools, however, are typically specialized and do not       [9] Zhongxin Liu, Xin Xia, Meng Yan, and Shanping Li. 2020. Automating Just-In-
+                                                                              Time Comment Updating. In Proc. ASE 2020.
+address cross-artifact inconsistencies holistically.                     [10] Qinyu Luo, Yining Ye, Shihao Liang, Zhong Zhang, Yujia Qin, Yaxi Lu, Yesai Wu,
+   In contrast to these works, ArtifactSync is designed to main-              Xin Cong, Yankai Lin, Yingli Zhang, Xiaoyin Che, Zhiyuan Liu, and Maosong Sun.
+                                                                              2024. RepoAgent: An LLM-Powered Open-Source Framework for Repository-
+tain consistency across multiple artifact types simultaneously. By            Level Code Documentation Generation. arXiv:2402.16667 (2024).
+performing a hierarchical analysis over the entire repository, our       [11] Shane McIntosh, Bram Adams, Thanh HD Nguyen, Yasutaka Kamei, and Ahmed E
+tool reasons about the relationships between production code, doc-            Hassan. 2011. An Empirical Study of Build Maintenance Effort. In Proc. ICSE
+                                                                              2011.
+umentation, and tests within a unified framework. In addition to         [12] Shanto Rahman, Sachit Kuhar, Berk Cirisci, Pranav Garg, Shiqi Wang, Xiaofei
+detecting out-of-sync artifacts, it also automatically proposes and           Ma, Anoop Deoras, and Baishakhi Ray. 2025. UTFix: Change Aware Unit Test
+applies updates, bridging the gap between detection-focused ap-               Repairing Using LLM. arXiv:2503.14924 (2025).
+                                                                         [13] Xiaoxia Ren, Fenil Shah, Frank Tip, Barbara Ryder, and Ophelia Chesley. 2004.
+proaches and tools that target only a single type of artifact.                Chianti: A Tool for Change Impact Analysis of Java Programs. In Proc. OOPSLA
+                                                                              2004.
+                                                                         [14] Sinan Wang, Ming Wen, Yepang Liu, Ying Wang, and Rongxin Wu. 2021. Under-
+6    Conclusion and Future Work                                               standing and Facilitating the Co-Evolution of Production and Test Code. In Proc.
+                                                                              IEEE SANER 2021.
+Maintaining consistency among diverse software artifacts like code,      [15] Fengcai Wen, Csaba Nagy, Gabriele Bavota, and Michele Lanza. 2019. A Large-
+tests, and documentation is a persistent challenge in software devel-         Scale Empirical Study on Code-Comment Inconsistencies. In Proc. ICPC 2019.
+opment. In this paper, we introduced ArtifactSync, a novel tool          [16] Andy Zaidman, Bart Van Rompaey, Arie Van Deursen, and Serge Demeyer. 2011.
+                                                                              Studying the Co-Evolution of Production and Test Code in Open Source and
+designed to automate this process. A core aspect of our approach is           Industrial Developer Test Processes Through Repository Mining. Empir. Softw.
+leveraging an LLM for the initial change impact analysis, not just            Eng. 16, 3 (2011), 325–364. doi:10.1007/s10664-010-9143-7
+

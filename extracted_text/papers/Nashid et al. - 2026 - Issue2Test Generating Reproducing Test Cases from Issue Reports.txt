@@ -1,0 +1,933 @@
+                                        Issue2Test: Generating Reproducing Test Cases from Issue Reports
+                                                                              Noor Nashid                                                                     Islem Bouzenia
+                                                                  University of British Columbia                                            CISPA Helmholtz Center for Information Security
+                                                                       Vancouver, Canada                                                                Stuttgart, Germany
+                                                                       nashid@ece.ubc.ca                                                              bouzenia.islem@pm.me
+
+                                                                           Michael Pradel                                                                       Ali Mesbah
+                                                  CISPA Helmholtz Center for Information Security                                                     University of British Columbia
+                                                               Stuttgart, Germany                                                                          Vancouver, Canada
+                                                            michael@binaervarianz.de                                                                      amesbah@ece.ubc.ca
+                                        Abstract                                                                                        1    Introduction
+arXiv:2503.16320v4 [cs.SE] 5 Jan 2026
+
+
+
+
+                                        Automated tools for solving GitHub issues are receiving significant                             Issue reports, e.g., on GitHub, are commonly used to describe bugs,
+                                        attention by both researchers and practitioners, e.g., in the form of                           missing features, and other ways to improve a software project.
+                                        foundation models and LLM-based agents prompted with issues.                                    Because addressing issues takes significant developer effort, recent
+                                        A crucial step toward successfully solving an issue is creating a                               work invests heavily in automated issue solving. Motivated by
+                                        test case that accurately reproduces the issue. Such a test case can                            benchmarks of issues in popular open-source projects, such as
+                                        guide the search for an appropriate patch and help validate whether                             SWE-bench [22], foundation models and Large Language Model
+                                        the patch matches the issue’s intent. However, existing techniques                              (LLM)-based software engineering agents compete in their ability
+                                        for issue reproduction show only moderate success. This paper                                   to successfully solve issues [9, 34–36, 42, 46, 49, 51, 52]. In addition
+                                        presents Issue2Test, an LLM-based technique for automatically                                   to approaches that directly work on issues, automated program
+                                        generating a reproducing test case for a given issue report. Unlike                             repair [25] tries to address bugs that manifest through a failing
+                                        automated regression test generators, which aim at creating passing                             test. Various techniques have been explored for automated bug
+                                        tests, our approach aims at a test that fails, and that fails specifi-                          repair [7, 15, 50].
+                                        cally for the reason described in the issue. To this end, Issue2Test                               A crucial prerequisite for successfully solving an issue or repair-
+                                        performs three steps: (1) understand the issue and gather context                               ing a bug is a test case that reproduces the problem. Unfortunately,
+                                        (e.g., related files and project-specific guidelines) relevant for re-                          issue reports rarely include executable tests that reproduce the is-
+                                        producing it; (2) generate a candidate test case; and (3) iteratively                           sue, making it challenging for developers and automated techniques
+                                        refine the test case based on compilation and runtime feedback                                  to validate potential patches. Specifically in open-source projects,
+                                        until it fails and the failure aligns with the problem described in                             contributors often lack the expertise and familiarity to construct
+                                        the issue. We evaluate Issue2Test on the SWT-bench-lite dataset,                                meaningful test cases alongside their reports. Most work on auto-
+                                        where it successfully reproduces 32.9% of the issues, achieving a                               mated program repair repair assumes reproducing test cases to be
+                                        16.3% relative improvement over the best existing technique. Our                                given. In practice, however, developers often write test cases only
+                                        evaluation also shows that Issue2Test reproduces 20 issues that                                 after a problem was fixed [11]. Automated issue solving techniques
+                                        four prior techniques fail to address, contributing a total of 60.4%                            sometimes include a step for reproducing the issue [37], but do not
+                                        of all issues reproduced by these tools. We envision our approach                               explicitly focus on this important part.
+                                        to contribute to enhancing the overall progress in the important                                   One approach for obtaining an issue-reproducing test case could
+                                        task of automatically solving GitHub issues.                                                    be automated test generation. Both traditional approaches [17, 33]
+                                                                                                                                        and neural methods [14, 47] attempt to reduce the time spent on
+                                        Keywords                                                                                        manually writing tests. However, earlier techniques often fail to
+                                        Bug reproduction, test generation, large language model                                         generate human-readable and maintainable test cases that align
+                                                                                                                                        with project conventions and effectively validate intended program
+                                        ACM Reference Format:                                                                           behavior [13]. The emergence of LLMs has significantly enhanced
+                                        Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah. 2026. Is-                          automated test generation [29, 44, 53]. LLMs can synthesize tests
+                                        sue2Test: Generating Reproducing Test Cases from Issue Reports . In . ACM,                      with human-like readability and writing style, reflecting patterns
+                                        New York, NY, USA, 13 pages. https://doi.org/10.1145/nnnnnnn.nnnnnnn
+                                                                                                                                        learned from extensive training on large code repositories [53]. This
+                                                                                                                                        capability has prompted the use of LLMs in test code generation [5,
+                                        Permission to make digital or hard copies of all or part of this work for personal or
+                                        classroom use is granted without fee provided that copies are not made or distributed
+                                                                                                                                        10, 26, 32, 40, 41, 45]. While useful for creating regression tests,
+                                        for profit or commercial advantage and that copies bear this notice and the full citation       none of these approaches addresses the problem of creating tests
+                                        on the first page. Copyrights for components of this work owned by others than the              that reproduce a specific issue.
+                                        author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+                                        republish, to post on servers or to redistribute to lists, requires prior specific permission      To address the challenge of creating issue-reproducing tests, re-
+                                        and/or a fee. Request permissions from permissions@acm.org.                                     cent work proposes test generators specifically for this purpose.
+                                        Conference’17, Washington, DC, USA                                                              Libro [24] generates tests from bug reports using LLM prompting
+                                        © 2026 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                        ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM                                                              but focuses on structured benchmarks, such as Defects4J, rather
+                                        https://doi.org/10.1145/nnnnnnn.nnnnnnn                                                         than real-world issue reproduction. Mündler et al. [30] introduce
+Conference’17, July 2017, Washington, DC, USA                                                Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+SWT-bench-lite, a subset of SWE-bench, for evaluating issue repro-          Title
+duction, and modify the prompts of existing agents for this task.           Cannot override get_FOO_display() in Django 2.2+
+Yet, these agents are neither designed nor effective at generating          Description
+issue-reproducing tests. Most recently, Auto-TDD [1] proposes a             I cannot override the get_FIELD_display function on models
+structured multi-step process, achieving a 21.7% fail-to-pass rate          since version 2.2. It works in version 2.1.
+on SWT-bench-lite. While Auto-TDD improves over prior work,                 Example:
+it does not explicitly enforce the creation of failing tests, which is
+                                                                            1 class FooBar(models.Model):
+important to successfully reproduce issues.                                 2     foo_bar = models.CharField(_("foo"), choices
+    This paper presents Issue2Test, a novel LLM-based technique                          =[(1, 'foo'), (2, 'bar')])
+                                                                            3
+for automatically generating a reproducing test case for a given
+                                                                            4       def __str__(self):
+issue report. In contrast to automated regression test generators,          5           return self.get_foo_bar_display() # This
+which aim at creating passing tests, our approach aims at a test                             returns 'foo' or 'bar' in 2.2, but '
+                                                                                             something' in 2.1
+that fails, and that fails specifically for the reason described in the     6
+issue. To this end, Issue2Test performs three steps: (1) understand         7       def get_foo_bar_display(self):
+the issue and gather context (e.g., related files and project-specific      8           return "something"
+guidelines) relevant for reproducing it; (2) generate a candidate test     What I expect is that I should be able to override this function.
+case; and (3) iteratively refine the test case based on compilation
+and runtime feedback until it fails and the failure aligns with the              Figure 1: Django-12284 issue from SWT-bench [30].
+problem described in the issue. Unlike prior work on generating
+issue-reproducing tests, Issue2Test continuously checks whether            must dedicate efforts to understanding and filling-up the missing
+the generated tests capture problem described in the issue.                details. The goal of our paper is to create a technique that suggests
+    We evaluate Issue2Test on all 276 instances of SWT-bench-              ready-to-use test cases that reproduce the problem described by
+lite, a subset of SWE-bench that has been extensively used for             the issue. In the example of Figure 1, the issue is a bug, but in other
+evaluating prior work [1, 30]. The results show that our approach:         cases it could also reflect a request for a new feature or improved
+i) outperforms all the existing baselines by generating tests for 91       performance.
+instances (13 more than the best baseline) with the best performing           Figure 2 presents a test case generated by Issue2Test for the
+LLM, ii) successfully generates tests for 20 unique issues missed by       issue described in Figure 1, successfully reproducing the reported
+any prior work and contributes 60.4% of the union of reproduced            failure. Automatically generating such reproducing tests is practi-
+issues by any technique, iii) imposes moderate costs of 5.21 cents         cally valuable: it helps developers understand the issue more clearly,
+per issue, which is orders of magnitude cheaper than what a human          provides a concrete failure scenario to aid debugging, and enables
+software developer would charge for performing the same task.              patch validation in the absence of existing tests. For AI-based tools
+    In summary, our paper contributes the following:                       and agents, the generated test serves as an executable specification
+                                                                           of the issue, potentially supporting automated repair and patch
+      • The first technique for generated issue-reproducing tests          validation workflows.
+        that explicitly aims at producing tests that fail, and that fail      While the running example involves a Django regression, many
+        for the reasons described in the issue.                            GitHub issues report failures where the underlying cause must be
+      • Empirical evidence that Issue2Test significantly outper-           carefully validated. In such cases, prior approaches often produce
+        forms the current state of the art, showing a 40.1% relative       tests that fail due to unrelated reasons, such as misconfigured envi-
+        improvement over the best existing technique.                      ronments or irrelevant assertions, without checking whether the
+      • We make our code and data publicly available, providing a          failure corresponds to the reported issue. This underscores the need
+        starting point for future work.                                    for verifying that generated test failures are semantically aligned
+                                                                           with the issue description.
+2     Approach                                                                In this section, we describe the steps and strategies used by our
+In this section, we introduce a real example from the SWT-bench            approach to generate such tests.
+dataset, the challenges accompanying the reproduction of the ex-
+ample issue, how our approach addresses it, step by step, while            2.2     Overall Design
+introducing and explaining the components and the workflow of              The overall design of our approach is shown in Figure 3. Issue2Test
+our approach, Issue2Test.                                                  automates the task of test generation by combining structured LLM
+                                                                           prompting, validation based on runtime feedback, and iterative
+2.1     Running Example                                                    refinement. Our technique provides a pipeline for generating and
+The reported Django issue, shown in Figure 1, illustrates a regres-        refining test cases derived from reported issues (e.g, the issue in
+sion where overriding get_FIELD_display() no longer works as               Figure 1). The approach is structured into three main phases, briefly
+expected. While the report describes the issue, it lacks essential         described in the following and then in detail in the subsequent
+details for straightforward replication. For instance, the issue is        subsections. Our design invokes LLMs throughout various steps of
+missing details on necessary imports, app declaration, model mi-           the approach, as shown in Figure 3.
+grations, and explicit steps to formulate and execute a test case             Phase 1, issue comprehension, analyzes the root cause of the
+with a failing assertion. Lacking these key elements, developers           problem, infers project-specific testing guidelines, and identifies
+Issue2Test: Generating Reproducing Test Cases from Issue Reports                                           Conference’17, July 2017, Washington, DC, USA
+
+
+Import Statements                                                            issue. For test cases ending in failure or an error, Issue2Test first
+1   from django.conf import settings                                         determines whether the failure is related to the reported issue; if
+2   import django                                                            not, the LLM is prompted to refine the assertion. Conversely, if the
+3   from django.db import models                                             failure is relevant (either a test assertion or a runtime error), the
+4   from django.test import TestCase
+                                                                             test case is added to the set of candidate tests. Finally, Issue2Test
+Django Settings Configuration                                                ranks all candidate tests based on their relevance and outputs a
+ 5 if not settings.configured:
+                                                                             single test case.
+ 6   settings.configure( INSTALLED_APPS=[
+ 7   'django.contrib.contenttypes', 'test_app'],                             2.3    Phase 1: Issue Comprehension
+ 8   DATABASES={'default': {'ENGINE':
+ 9  'django.db.backends.sqlite3','NAME':':memory:'}})                        The goal of this phase is to collect contextual and informative
+10 django.setup()
+                                                                             ingredients to construct the test generation prompt used in the
+Target Test Subjects (Models A and B)                                        subsequent phase.
+11 class A(models.Model):                                                    Root Cause Analysis. A typical first step, in creating tests for
+12   foo_choice = [("A", "output1"),("B", "output2")]                        an issue, is to analyze its description and extract possible causes.
+13   field_foo = models.CharField(max_length=254,                            This simple analysis allows to have an initial hypothesis about
+14                     choices=foo_choice)
+15   class Meta:                                                             the reasons behind the issue and get a first idea on what behvaior
+16     abstract = True                                                       should be reproduced and how. Capitalizing on this simple princi-
+17
+18 class B(A):
+                                                                             ple, Issue2Test systematically identifies root causes by prompting
+19   foo_choice = [("A", "output1"), ("B", "output2")                        an LLM to do the root cause analysis. As shown in Figure 4, we
+20                 ,("C", "output3")]                                        prompt the LLM to suggest different possible sets of reasons that
+21   field_foo = models.CharField(max_length=254,
+22                     choices=foo_choice)                                   could be behind the issue. As one issue might have multiple plau-
+23   class Meta:                                                             sible reasons, the LLM is also asked to suggest sets of mutually
+24     app_label = 'test_app'                                                exclusive causes where validating one negates another. For exam-
+Test Case and Assertion                                                      ple, an issue may arise from an incorrect API call or an outdated
+                                                                             dependency—distinct causes requiring separate resolutions. In Fig-
+25 class ModelDisplayTests(TestCase):
+26   def test_get_field_foo_display_for_C(self):
+                                                                             ure 5, we show the resulting analysis for Django-12284. The third
+27     instance = B(field_foo='C')                                           cause suspected by the LLM is the correct one and the one that
+28     self.assertEqual(instance.get_field_foo_display()                     led into generating a succesful reproduction of the issue shown in
+               ,'output3')
+                                                                             Figure 2. In our approach, each cause is used in a different test gener-
+                                                                             ation prompt later on. That is, in our running example, Issue2Test
+ Figure 2: Test generated by Issue2Test for Django-12284.
+                                                                             would construct three independent test generation prompts, each
+                                                                             assuming one of the three causes.
+relevant files. Issue2Test begins by analyzing a reported issue to           Project-Specific Guideline Generation. The automated test gen-
+extract essential context, including the nature of the problem, its          eration problem requires knowledge of the target project’s testing
+potential causes, and the associated code and test files. During the         frameworks, conventions, and dependency structures. A general
+first phase, the tool queries an LLM to conduct an initial root cause        approach is insufficient and cannot cover all cases, as different
+analysis, yielding a list of plausible reasons. Subsequently, a set          projects impose distinct constraints even compared to their own
+of project-specific guidelines are generated that encapsulate best           different versions. For instance, Django requires specific fixture
+practices and conventions for addressing issues in the target project,       configurations for test execution. Ideally, developers writing unit
+along with recommendations for writing isolated standalone test              tests are familiar with a project’s structure and setup, allowing them
+cases. The final step in this phase involves searching the codebase          to adhere to established conventions. However, manually crafting
+to locate relevant files based on the project’s structure.                   repository-specific test guidelines for each project is impractical
+    Phase 2, test generation, synthesizes an initial test case. The infor-   due to the time and effort required.
+mation gathered from Phase 1, combined with the issue details, is               Inspired by ExecutionAgent [8], we employ the principle of
+used to construct a test generation prompt. Issue2Test then queries          meta-prompting which enables the LLM to dynamically retrieve
+an LLM with this prompt and expects a Python script containing the           structured guidelines tailored to the repository before generation.
+testing code. The generated script is then passed through a static           Meta-prompting serves as an adaptive knowledge retrieval mecha-
+linter to detect any potential issues. If the linter identifies problems,    nism, leveraging the LLM’s pre-trained knowledge to synthesize
+the test generation prompt is augmented with the linter’s feedback,          project-specific testing conventions without relying on predefined
+and the LLM is subsequently asked to resolve these issues.                   templates. For instance, we send a query to the LLM, incorporat-
+    Phase 3, test refinement, iteratively improves the tests based on        ing the repository name, version, and issue description alongside
+execution feedback until it fails for the reasons described in the issue.    instructions to generate concise guidelines for writing executable
+To this end, the approach executes the generated test case. Each             unit tests. The LLM’s response is then used in further prompts to
+test case can result in one of three outcomes: pass, fail, or error. For     provide project-specific context for the test generation task.
+test cases that pass, Issue2Test queries the LLM to modify the test             Figure 6 illustrates a meta-prompt example for Django-12284,
+behavior so that it appropriately fails in response to the described         where Issue2Test queries the LLM to derive testing guidelines
+Conference’17, July 2017, Washington, DC, USA                                                    Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+
+              Issue                             Code base
+                                                                         Linter approved                 Run tests
+              description                                                      tests
+
+                                                                                                     Tests outcomes
+                                                  Related
+          Root cause             Meta
+                                                   files                          Pass                      Fail                       Error
+           analysis            Prompting
+                                                  search
+
+
+          Issue cause           Testing
+                                                Relevant files      Feedback: Rewrite test so it fails
+           hypothesis          guidelines
+                                                                    + runtime information                                 Error
+                                                                                                                      categorization
+
+                                                                                                           Error or failure not   Failure/error
+                                                                                                           caused by the          caused by Assertion
+                            Generated tests                                                                issue                  the issue     match
+          Test
+                                                    Linter
+        Generator                                                                        Feedback: Change assertion /
+                            Found problems                                               fix error + runtime information
+                                                 Refined/fixed
+                                                     tests                                                                               Failing tests
+
+                                                Test refiner /
+                                                 Error fixing                                                       ⭐
+                                                                                                               Best tests                   Rank
+           Marks steps where an LLM is used
+
+
+                                                             Figure 3: Approach overview
+
+
+ Root Cause Analysis Prompt                                                    Cause 1: Handling of Choices in Inherited Models
+                                                                               ... (shortened for the paper)
+                                                                               Cause 2: Cache or Meta-Class Processing
+  Task: Perform root cause analysis for the following GitHub                   ... (shortened for the paper)
+  issue: Cannot override get_FOO_display() in Django 2.2+                      Cause 3: Implementation Bug in Django’s Display Method
+  Description ...(shortened for paper)                                         –> Reason 1: There might be a bug within Django itself where the
+  • Propose distinct sets of root causes that could explain the                get_FOO_display() method does not account for inherited or
+    issue.                                                                     overridden choices correctly, particularly when choices are
+  • Integrate contextual information from the issue description.               altered at the child class level.
+  • Identify mutually exclusive or independent failure scenarios.              –> Reason 2: The method that resolves choices within Django
+                                                                               might be erroneously falling back to a default or initial state
+                                                                               rather than considering the dynamic changes made by child
+  Figure 4: Root cause analysis prompt for Django-12284.                       classes, leading to incorrect value displays.
+                                                                                  Figure 5: Root cause analysis result for Django-12284.
+
+
+specific to the Django project and version. The prompt explicitly
+provides the GitHub issue description, along with the project name            integrating meta-prompting, we aim to eliminate the need for man-
+(Django) and version (2.2+), instructing the LLM to extract rele-             ually curated test-writing instructions while ensuring adherence to
+vant testing conventions, such as required configurations, fixture            project conventions.
+setups, and execution constraints. LLMs have been trained on a vast           Locating Related Files. Developers analyze the repository struc-
+number of open-source projects, allowing them to capture diverse              ture, source code, and test files to identify those relevant to a re-
+project-specific practices and requirements, which can provide use-           ported issue. Similarly, we generate a structured repository rep-
+ful insights when working with similar repositories. However, the             resentation that enables the LLM to infer relevant files. Instead
+knowledge they utilize in their responses depends heavily on how              of scanning the entire repository, we construct a hierarchical tree
+the prompt is structured. Providing clear and detailed instructions           format that preserves directory relationships, test files, and source
+in the prompt helps ensure more relevant and accurate outputs. By             code listings. A recursive traversal extracts directory names and
+Issue2Test: Generating Reproducing Test Cases from Issue Reports                                           Conference’17, July 2017, Washington, DC, USA
+
+
+
+ Guidelines Meta Prompt                                                      Test Generation Prompt
+
+
+  Issue:                                                                      Task: Your task is to generate unit tests based on the provided
+  [Excerpts from Django-12284, shortened for the paper]                       GitHub issue description and source code. Each test case should
+  Cannot override get_FOO_display() in Django 2.2+ ...                        be designed to fail initially, confirming the existence of a bug
+  Task: Provide structured guidelines for writing a self-contained            or unimplemented feature.
+  and executable unit test for the issue above, which was reported            GitHub Issue: Cannot override get_FOO_display() in Django
+  in the project Django 2.2+.                                                 2.2+ Description ...(shortened for brevity)
+                                                                              Guidelines: To create an independent, executable unit test in
+                                                                              Django, dynamically configure settings and use an in-memory
+Figure 6: Generating project-specific test guidelines for
+                                                                              database for isolation. Configure Django Settings...(shortened)
+Django-12284
+                                                                              Root cause analysis: The Django model’s mechanism for
+                                                                              resolving choices in an inherited class might not correctly
+ IssueID: django-12284                                                        override ...
+ Found files:                                                                 Related Source File:
+ 1. django/db/models/options.py                                               1   import collections.abc
+ 2. django/db/models/fields/__init__.py                                       2   import copy
+ 3. django/db/models/fields/mixins.py                                         3   ... (shortened for paper)
+                                                                              4   def rel_db_type(self, connection):
+ 4. django/db/models/base.py                                                  5     return SmallIntegerField().
+ 5. django/db/models/query.py                                                 6            db_type(connection=connection)
+
+Figure 7: Example of retrieved related files for Django-12284.                Related Test File:
+                                                                              1 ... (shortened for paper)
+                                                                              2 class BasicFieldTests(SimpleTestCase):
+file paths while maintaining structural depth. This structured rep-           3   def test_show_hidden_initial(self):
+                                                                              4 ... (shortened for paper)
+resentation, provided alongside the reported issue, allows the LLM            5   self.assertChoicesEqual(
+to rank the most relevant files. For the running example, the list of         6   field.get_choices(include_blank=False,
+related files is shown in Figure 7.                                                       limit_choices_to={}),[self.bar1, self.bar2
+                                                                                          ],)
+
+2.4    Phase 2: Test Generation                                               Expected Output: Self-contained Python test file.
+As shown in Figure 3, we use the information from the previous step
+to construct the test generation prompt. The goal of this prompt                  Figure 8: Test Generation Prompt for Django-12284
+is to instruct the model to generate test cases that fail, so that the
+tests capture the behavior described by the issue. In Figure 8, we
+provide an example of a test generation prompt for Django-12284.               Algorithm 1 begins by running the generated test (Line 4) and
+Using the constructed prompt, the approach queries the LLM to               analyzing the results. If a test failure occurs, error categorization
+generate a test script, extracts the Python code from the response,         (Line 6) determines the failure type and whether a runtime error is
+and writes it into a file.                                                  directly related to the reported issue. If a runtime failure is due to the
+                                                                            issue, the refinement process terminates successfully (Line 8). The
+2.5    Phase 3: Test Refinement                                             corresponding prompt is shown in Figure 9, guiding this classifica-
+The third phase is the core contribution of Issue2Test, as it specif-       tion.
+ically aims at producing a test that fails, and that the failure is due        Next, for assertion failures, Issue2Test checks whether the fail-
+to the reason described in the issue. To this end, the test code gener-     ure directly corresponds to the GitHub issue (Line 13). If the asser-
+ated in the previous step is executed within a Docker environment           tion failure is issue-related, the test is considered valid. Otherwise,
+to validate its behavior. The generated test is placed into a new file      the test is further refined to better align with the issue. If no failures
+in the project’s test suite and executed in an isolated container to        occur or if the failure is unrelated to the issue, a refinement step
+prevent external dependencies from influencing the results. After           is applied (Line 21). The refinement step aims at transforming the
+test execution, logs are generated to capture the test output. These        currently passing test into a failing test, e.g., by adjusting the asser-
+logs are then analyzed to verify the outcome of the test execution.         tions. The prompt for this transformation is shown in Figure 10 for
+   Next, Issue2Test iteratively refines test cases to ensure they ac-       Django-12284, where Issue2Test instructs the LLM to modify an
+curately capture the reported issue. It operates in a feedback-guided       initially passing test to ensure it fails due to the reported issue. If
+manner, where test execution outcomes influence subsequent steps.           an assertion failure occurs but is unrelated to the issue, Issue2Test
+The process is structured around two main objectives: (i) generating        prompts the LLM to refine the assertion, ensuring that it directly
+an initial failing state before the issue is resolved and (ii) addressing   captures the expected behavior associated with the reported defect.
+failures unrelated to the reported issue. The high-level refinement            For compilation and runtime failures that are not directly related
+process is shown in Algorithm 1.                                            to the issue, Issue2Test applies targeted fixes (Line 26). Specifically,
+Conference’17, July 2017, Washington, DC, USA                                             Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+
+    Error Categorization Prompt                                           Test Modification Prompt(pass into fail)
+
+
+    Task:                                                                  Task:
+    Analyze the outcome of the below-failing test and classify it          The test case below passes even though the reported GitHub
+    into one of the following:                                             issue is unresolved. Modify the test case to ensure that it fails
+    1. Compilation Error: The test cannot be compiled.                     because of the issue below.
+    2. Runtime Error: The test crashes during execution.                   GitHub Issue:
+    3. Assertion Failure: The test runs and fails due to an assertion.     Cannot override get_FOO_display() in Django 2.2+ Descrip-
+    Also, tell whether the assertions or error is caused by the issue      tion ...(shortened for paper)
+    described below.                                                       Passing Test:
+    GitHub Issue: Cannot override get_FOO_display() in                     1 from django.conf import settings
+    Django 2.2+ Description ...(shortened for paper)                       2 import django
+    Test Execution Output:                                                 3 ... (shortened for paper)
+                                                                           4   def test_get_field_foo_display_for_A(self):
+       FAIL: test_get_field_foo_display_for_C                              5     instance = B(field_foo='A')
+       Traceback (most recent call last):                                  6     self.assertEqual(instance.
+         File "/testbed/tests/model_fields/test_new.py",                                get_field_foo_display(), 'output1')
+              line 43, in
+              test_get_field_foo_display_for_C   self.
+              assertEqual(instance.get_field_foo_display
+              (), 'output3')                                             Figure 10: Prompt used to transform a generated, passing
+       AssertionError: 'C' != 'output3'
+       - C                                                               test into a failing one.
+       + output3
+
+    Expected Response:
+       {
+           "error_type": "<compilation, runtime, or                      3.1    Experimental Setup
+                ↩→ assertion>",
+           "issue_error_relevance": <true or false>,                     3.1.1 Benchmark. We use the SWT-bench-lite benchmark, pro-
+           "repair_steps": "<corrective actions>"                        posed recently by Mündler et al. [30], as the benchmark for our
+       }
+                                                                         evaluation. SWT-bench-lite is a curated subset of the SWT-bench
+                                                                         dataset, designed to cost-efficiently evaluate the ability of language
+                                                                         models to generate unit tests that reproduce real-world software
+           Figure 9: Error categorization for Django-12284               issues. It consists of 276 instances derived from popular GitHub
+                                                                         repositories, each containing a GitHub issue description, a corre-
+                                                                         sponding issue-resolving patch, and a set of golden reference test
+                                                                         cases that fail on the original version but pass after the issue has
+                                                                         been resolved. Pull requests included in SWT-bench-lite meet the
+it searches the repository for missing imports and incorporates this
+                                                                         following criteria: (i) they are merged into the main branch, (ii)
+information into the prompt to guide the LLM in refining the test
+                                                                         they explicitly link to a resolved GitHub issue, and (iii) they modify
+case.
+                                                                         at least one test file.
+    In the final step, outside the feedback loop, the approach selects
+                                                                            In addition to the full SWT-bench-lite dataset (called all issues),
+the best test case among all failing tests produced so far. The pre-
+                                                                         we also report results on those 90 instances from SWT-bench-lite
+vious three phases may produce multiple tests, e.g., by working
+                                                                         that are part of SWE-bench Verified [12] (called verified issues).
+under different hypotheses regarding the root cause of the problem.
+                                                                         SWE-bench Verified [12] is a human-validated subset of the original
+To select the best test, we prompt the LLM with the GitHub issue,
+                                                                         SWE-bench [22]. The validation process for SWE-bench Verified,
+asking it to rank the generated test cases and retain only those
+                                                                         conducted by OpenAI, involved expert annotation to ensure that
+relevant to the issue.
+                                                                         each GitHub issue is solvable, clear, and linked to a valid bug-fixing
+                                                                         patch. Each instance was manually reviewed to confirm that the
+3     Evaluation                                                         issue description provides sufficient context and that the patch and
+To assess the effectiveness of Issue2Test we address the following       test cases accurately capture the issue and its resolution.
+research questions:
+                                                                         3.1.2 LLM Empowering Issue2Test. For all our experiments, we
+RQ1 What is the effectiveness of Issue2Test in generating fail-to-       employ GPT-4o-mini (version 2024-07-18), a cost-efficient propri-
+    pass tests, and how does it compare to the state-of-the-art?         etary model from OpenAI, as our primary model for evaluation.
+RQ2 How do different components of the approach influence the            GPT-4o-mini is smaller than GPT-4o but faster, offering a 128K
+    test generation results?                                             context window. At the time of writing the paper, the used model
+RQ3 What are the token consumption and LLM invocation costs              costs $0.15 per million input tokens and $0.60 per million output
+    of Issue2Test?                                                       tokens.
+Issue2Test: Generating Reproducing Test Cases from Issue Reports                                               Conference’17, July 2017, Washington, DC, USA
+
+
+ Algorithm 1: Execution-Driven Test Refinement                             Table 1: Issue2Test results per project on SWT-bench-lite.
+   Input: Test case 𝑇0 , GitHub issue 𝐺 , Source Code 𝑆
+   Output: Refined failing test case 𝑇 ∗ or failure                                                 Verified issues                    All issues
+ 1 𝑇 ← 𝑇0 , 𝑖𝑡𝑒𝑟 ← 0, 𝑚𝑎𝑥𝐼𝑡𝑒𝑟𝑎𝑡𝑖𝑜𝑛𝑠 ← 20                                    Project
+ 2 while 𝑖𝑡𝑒𝑟 < 𝑚𝑎𝑥𝐼𝑡𝑒𝑟𝑎𝑡𝑖𝑜𝑛𝑠 do                                                            Issues       F→P    F→P (%)       Issues     F→P    F→P (%)
+ 3     𝑡𝑒𝑠𝑡𝑅𝑒𝑠𝑢𝑙𝑡𝑠 ← RunTestAndCaptureErrors (𝑇 )
+ 4     𝑝𝑎𝑠𝑠𝑖𝑛𝑔𝑇 𝑒𝑠𝑡𝑠, 𝑓 𝑎𝑖𝑙𝑖𝑛𝑔𝑇 𝑒𝑠𝑡𝑠 ← AnalyzeTestResults (𝑡𝑒𝑠𝑡𝑅𝑒𝑠𝑢𝑙𝑡𝑠 )    django                  42     8        19.05       113        18        15.93
+ 5     // Step 1: Categorize Failure and Identify                           sympy                   22    11        50.00        71        34        47.89
+             Runtime Relevance                                              scikit-learn             9     5        55.56        23        13        56.52
+ 6     ( 𝑓 𝑎𝑖𝑙𝑢𝑟𝑒𝑇 𝑦𝑝𝑒, 𝑖𝑠𝑅𝑢𝑛𝑡𝑖𝑚𝑒𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 ) ←                         matplotlib               7     2        28.57        23         7        30.43
+         error_categorization ( 𝑓 𝑎𝑖𝑙𝑖𝑛𝑔𝑇 𝑒𝑠𝑡𝑠, 𝐺 )                         astropy                  4     3        75.00         6         3        50.00
+ 7     // Step 2: Stop If Runtime Failure is                                sphinx-doc               3     0         0.00        11         0         0.00
+             Issue-Related                                                  pydata                   1     1       100.00         5         2        40.00
+ 8     if 𝑖𝑠𝑅𝑢𝑛𝑡𝑖𝑚𝑒𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 then
+                                                                            pytest-dev               1     0         0.00        11         3        27.27
+ 9            return 𝑇 // Runtime failure correctly captures
+                issue                                                       pylint-dev               1     0         0.00         6         3        50.00
+10     end                                                                  pallets                  0     0         0.00         2         0         0.00
+11     // Step 3: Handle Assertion Failures                                 psf                      0     0         0.00         1         1       100.00
+12     𝑖𝑠𝐴𝑠𝑠𝑒𝑟𝑡𝑖𝑜𝑛𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 ← false                                    mwaskom                  0     0         0.00         4         0         0.00
+13     if 𝑓 𝑎𝑖𝑙𝑢𝑟𝑒𝑇 𝑦𝑝𝑒 = assertion then
+14            𝑖𝑠𝐴𝑠𝑠𝑒𝑟𝑡𝑖𝑜𝑛𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 ←                                   Total/Avg               90    30          33.33     276        84        30.43
+                assertion_match ( 𝑓 𝑎𝑖𝑙𝑖𝑛𝑔𝑇 𝑒𝑠𝑡𝑠, 𝐺 )
+15            if 𝑖𝑠𝐴𝑠𝑠𝑒𝑟𝑡𝑖𝑜𝑛𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 then                            first approach specifically designed for generating bug-reproducing
+16                 return 𝑇         // Assertion failure correctly         test cases. Code agents SWE-Agent [51] and AutoCodeRover [52]
+                    reflects issue
+17            end
+                                                                           were originally developed for issue solving, but were adapted for
+18     end                                                                 test generation using a prompt to create issue-reproducing unit
+19     // Step 4: Refine Test to Fail and Avoid                            tests [30]. SWE-Agent+ [30] extends SWE-Agent by executing the
+             Unrelated Assertion Failures                                  generated tests before finalizing them, improving issue-specific test
+       if ( 𝑓 𝑎𝑖𝑙𝑢𝑟𝑒𝑇 𝑦𝑝𝑒 = passing) or (not 𝑖𝑠𝐴𝑠𝑠𝑒𝑟𝑡𝑖𝑜𝑛𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑅𝑒𝑙𝑎𝑡𝑒𝑑 )
+20
+                                                                           generation. Finally, Auto-TDD [1] is a recent approach focusing on
+         then
+21            𝑇 ← test_refinement (𝑇 , 𝐺 )                                 test generation for GitHub issues similar to Issue2Test.
+22            𝑖𝑡𝑒𝑟 ← 𝑖𝑡𝑒𝑟 + 1                                                  To compare Issue2Test with publicly available techniques, we
+23            continue;                    // Retry with refined test      include non-peer-reviewed entries from the SWT-Bench Lite leader-
+24     end
+                                                                           board1 . This results in the inclusion of two variants of OpenHands [46],
+25     // Step 5: Handle Compilation or Runtime
+             Failures (Only if no prior modification)                      a generic-purpose coding agent. The first variant, OpenHands-
+26      if 𝑓 𝑎𝑖𝑙𝑢𝑟𝑒𝑇 𝑦𝑝𝑒 = compilation or 𝑓 𝑎𝑖𝑙𝑢𝑟𝑒𝑇 𝑦𝑝𝑒 = runtime then     Vanilla, uses the agent as released; the second variant, OpenHands-
+27            𝑇 ← runtime_compilation_fix (𝑇 , 𝑓 𝑎𝑖𝑙𝑖𝑛𝑔𝑇 𝑒𝑠𝑡𝑠, 𝐺, 𝑆 )      CI, augments the agent with a test-code-specific feedback extraction
+       end
+28
+                                                                           mechanism.
+29     𝑖𝑡𝑒𝑟 ← 𝑖𝑡𝑒𝑟 + 1
+30 end
+31 return ∅                                                                3.2     Effectiveness and Comparison (RQ1)
+                                                                           3.2.1 Issue2Test’s effectiveness. Table 1 presents the effectiveness
+                                                                           of Issue2Test in generating F→P test cases per project using GPT-
+   To assess the impact of different models, we further evaluate           4o-mini. The results are reported separately for verified issues
+Issue2Test with Meta Llama 3.3-70B (version meta.llama3-3-70b-             and all issues in the SWT-bench-lite dataset. Across all projects,
+instruct-v1:0 from AWS Bedrock) [28], an open-source model, and            Issue2Test achieves an overall F→P rate of 30.4%, successfully gen-
+Claude 3.5 Sonnet (version 20241022) [4], a leading proprietary            erating F→P tests for 84 out of 276 issues. On the verified subset,
+model from Anthropic.                                                      Issue2Test reproduces 30 out of 90 cases.
+3.1.3 Evaluation Metrics. To evaluate the effectiveness of gener-             The results vary across projects. Issue2Test performs best on
+ated test cases, we use the fail-to-pass (F→P) rate, as used in prior      astropy, achieving 75.0% F→P rate on the verified issues and 50.0%
+work [1, 30]. Given one test generated per issue, the metric mea-          overall, though this project has relatively few issues. Scikit-learn
+sures the proportion of generated tests that are issue-reproducing         also shows strong performance, with 55.6% F→P rate on verified
+and patch-validating, i.e., they initially fail on the pre-patch code      issues and 56.5% overall. Sympy maintains a rate close to 50% in
+and pass after the issue-resolving patch is applied. A high F→P            both categories. In contrast, Issue2Test cannot generate any F→P
+rate indicates that the generated tests correctly reproduce the is-        test on the verified issues of sphinx-doc and pytest-dev, indicating
+sue and validate its resolution, making it a crucial measure of test       challenges in generating effective test cases for these projects.
+generation quality.                                                        3.2.2 Comparison with Baselines. Table 2 compares Issue2Test
+3.1.4 Baselines. To evaluate Issue2Test, we compare it against             against the baselines (Section 3.1.4) using the same 276 instances
+several baselines that represent different approaches to test genera-      from SWT-bench-lite. Among the baselines, ZeroShot achieves
+tion, following prior work by Mündler et al. [30] and Auto-TDD [1].        the lowest F→P rate, being successful for only 5.8% of the issues.
+Zero-Shot Prompting (ZeroShot) uses direct LLM prompting to                AutoCodeRover and Libro perform better, achieving 9.1% and 15.2%,
+generate test cases based on issue descriptions. Libro [24] was the        1 https://swtbench.com
+Conference’17, July 2017, Washington, DC, USA                                              Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+Table 2: Comparing Issue2Test with baseline approaches.
+
+     Approach                                         F→P
+                                                 Total     Rate
+     ZeroShot                                       16     5.8%
+     AutoCodeRover [52]                             25     9.1%
+     ZeroShotPlus                                   28    10.1%
+     Libro [24]                                     42    15.2%
+     SWE-Agent                                      46    16.7%
+     SWE-Agent+                                     53    19.2%
+     Auto-TDD [1]                                   60    21.7%
+     OpenHands-Vanilla (Claude 3-5 Sonnet)          63    22.8%
+     OpenHands-CI (Claude 3-5 Sonnet)               78    28.3%
+     Issue2Test (Llama 3.3)                         49    17.8%
+     Issue2Test (GPT-4o-mini)                      84     30.4%
+     Issue2Test (Claude 3-5 Sonnet)                91     32.9%
+
+
+                                                                          Figure 11: Venn diagram of F→P tests across approaches.
+respectively. ZeroShotPlus improves upon ZeroShot by leveraging
+a custom diff format designed to be more robust for LLM-generated
+patches. It is worth noting that while AutoCodeRover and SWE-
+Agent are primarily designed for resolving GitHub issues through             Overall, Issue2Test differs from existing techniques by com-
+prompt modification, they are still capable of generating a moderate     bining test validation with iterative refinement, resulting in more
+number of patch-validating tests. SWE-Agent outperforms these            accurate and relevant reproducing tests. It analyzes whether fail-
+techniques with a 16.7% F→P rate, further improving to 19.2%             ures, such as compilation errors, runtime exceptions, or assertion
+with SWE-Agent+, which incorporates execution-based filtering.           mismatches, align with the issue description, rather than treat-
+The improvement in SWE-Agent+ comes from the incorporation               ing any failure as sufficient. Diagnostic signals, including stack
+of execution-based filtering, where generated tests are executed         traces and assertion errors, are incorporated into a feedback loop
+on the pre-patch code, and those that do not fail as expected are        that guides the LLM toward reproducing the issue. Furthermore,
+discarded. However, no explicit refinement is performed to correct       Issue2Test tailors test generation to project-specific conventions
+failing tests that do not fully capture the reported issue, limiting     through meta-prompting, which is critical in frameworks where
+its ability to handle assertion mismatches or refine test logic for      improper test scaffolding causes runtime errors, and it generates
+more precise issue reproduction. Auto-TDD achieved the highest           different test cases for mutually exclusive root-cause hypotheses,
+F→P rate among prior methods, generating F→P tests for 21.7%             each reflecting a plausible explanation for the issue.
+of issues. Issue2Test outperforms Auto-TDD, achieving 30.4% and              Figure 11 presents a Venn diagram comparing the F→P tests
+resolving 84 issues.                                                     generated by Issue2Test and four baseline techniques, including
+   OpenHands-Vanilla achieves 22.8% F→P rate, demonstrating              Libro, SWE-Agent+, Auto-TDD and OpenHands-CI. The diagram
+that a general-purpose agent without project-specific setup can-         shows both unique and overlapping F→P tests among these meth-
+not extract test execution feedback during test generation. In con-      ods. Issue2Test generates 20 unique F→P tests not generated by
+trast, OpenHands-CI is augmented with a continuous-integration           any other approach. This indicates that Issue2Test can generate a
+pipeline: it installs all dependencies from the project manifest, in-    significant number of tests that are not covered by existing methods.
+jects the canonical test-suite invocation, and discards any diffs        In contrast, Auto-TDD, SWE-Agent+, AutoCodeRover, and Libro
+outside the existing tests/ directory. After each generated patch,       each produce fewer unique test cases, ranging from 5 to 6. Over-
+the CI harness reruns the full suite and returns the failure trace.      all, the results demonstrate that Issue2Test not only complements
+This structured feedback raises the F→P rate to 28.3 %, an im-           prior techniques, but also is the only technique to successfully
+provement over the vanilla configuration. These results suggest          handle a larger number of cases.
+that generic-purpose agents require task-specific adaptation for
+effective automated test generation.                                     3.2.3 Examples of Successful cases. Figure 12 presents a test case ex-
+   Among the three LLMs employed in Issue2Test, Llama 3.3 yields         clusively generated by Issue2Test. None of the baseline approaches
+the lowest F→P accuracy. GPT-4o-mini improves the accuracy to            are able to generate this F→P test case for the corresponding GitHub
+30.4% at $0.0521 per issue, offering the best cost–performance bal-      issue. Once the test is executed, Issue2Test processes the failure
+ance. Issue2Test with Claude 3.5 Sonnet attains the highest accu-        logs and applies the assertion check logic to assess whether this
+racy—32.9%; however, it requires $0.66 per issue, a cost substantially   failure is expected given the issue. The output of this reasoning step
+higher than GPT-4o-mini. Unless otherwise stated, the remainder          is presented in Figure 13. This shows that the success of Issue2Test
+of this paper presents results obtained with the GPT-4o-mini con-        is its ability to analyze the assertion failure and correlate it with the
+figuration.                                                              issue description. By leveraging its assertion matching mechanism,
+ Issue2Test: Generating Reproducing Test Cases from Issue Reports                                       Conference’17, July 2017, Washington, DC, USA
+
+
+ 1   import pytest                                                          Error category: Compilation Error
+ 2   from _pytest._io.saferepr import saferepr                              Explanation: The test cannot be executed because the model
+ 3
+ 4   class SomeClass:                                                       class ’B’ is not properly configured within an application in
+ 5       def __getattribute__(self, attr):                                  INSTALLED_APPS.
+ 6           raise Exception("Attribute access failed")
+ 7
+                                                                            Root cause: The model class ’B’ does not ...(shortened for
+ 8       def __repr__(self):                                                paper)
+ 9           raise Exception("Representation failed")                       Repair steps:
+10
+11 def test_repr_internal_error_handling():                                 1. Add an explicit app_label to the class B in the Meta class.
+12     with pytest.raises(Exception, match="Attribute                       2. Ensure that ’test_app’ is correctly listed in the
+            access failed"):                                                INSTALLED_APPS configuration.
+13         SomeClass().attr
+14
+15 def test_repr_internal_error_in_repr():
+                                                                           Figure 14: Compilation failure detection in the initially gen-
+16     obj = SomeClass()                                                   erated test for django-12284
+17     with pytest.raises(Exception, match="
+                Representation failed"):
+18          repr(obj)
+19                                                                          Direct match: Yes
+20 def test_repr_internal_error_in_repr_handling():                         Reason: The assertion failure occurs because the method
+21     obj = SomeClass()
+22     try:                                                                 get_field_foo_display() does not return the expected
+23          repr(obj)                                                       output for the new choice ’C’, which is directly related to the bug
+24     except Exception:                                                    described in the GitHub issue... (shortened)
+25          pass
+26     with pytest.raises(Exception, match="
+               Representation failed"):
+                                                                           Figure 15: Assertion match after refinement step for django-
+27            repr(obj)                                                    12284
+
+Figure 12: Test case exclusively generated by Issue2Test for
+pytest-7168.                                                                Direct match: Yes
+                                                                            Reason: The assertion failure is due to the missing
+                                                                            implementation of the feature described in the GitHub issue,
+ Direct Match: Yes
+                                                                            which states that napoleon_use_param should also affect
+ Reason: The failure is expected due to the unimplemented
+                                                                            the "Other parameters" section... (shortened)
+ feature in the GitHub issue, which describes an
+ INTERNALERROR when an exception occurs in the __repr__                       Figure 16: Assertion match reasoning for sphinx-8713.
+ method.
+ The test case is designed to check the behavior of __repr__
+ when an exception is raised in __getattribute__, which                    extension. For 2 instances (sphinx-doc__sphinx-8801 and sphinx-
+ aligns with the issue.                                                    doc__sphinx-8506), we are unable to build the required Docker
+     Figure 13: Assertion failure reasoning for pytest-7168.               images. Interestingly, in 3 cases, assertion failures occurred both
+                                                                           before and after the patch was applied, preventing a successful
+                                                                           fail-to-pass transition. One such case is sphinx-doc__sphinx-8713,
+Issue2Test determines that the test failure aligns with the reported       where the generated test fails with an assertion error. Based on
+bug.                                                                       LLM prompting, this is treated as the terminating condition, as the
+   The following examples illustrate the iterative refinement that         test assertion is identified as relevant to the GitHub issue, as shown
+Issue2Test uses to generate an F→P test case for django__django-           in Figure 16.
+12284. In this case, the initially generated test fails to compile. The       In the mwaskom project, there are 4 instances, with 1 successfully
+error categorization step (Line 6 in Algorithm 1) identifies it as a       generating an F->P test using LIBRO, SWE-Agent+, SWE-Agent,
+compilation failure and produces the output shown in Figure 14.            and Auto-TDD. However, Issue2Test is unable to generate any
+Then, the repair step (Line 26) is invoked, as the failure does not        F->P tests for this case. For mwaskom__seaborn-3407, which is
+match with Step 2, Step 3, or Step 4 of the algorithm. Once the            successfully reproduced by the baselines, the test generated by
+revised test is generated in this step, it undergoes execution again       Issue2Test resulted in an assertion failure both before and after
+(Line 4). Based on the test execution outcome, the test is then            the patch. For the remaining 3 cases, we encounter runtime failures.
+re-categorized. Finally, the assertion matching logic (Line 13) deter-
+mines that the assertion failure corresponds to the reported issue         3.3    Influence of Different Components of
+(Figure 15).                                                                      Issue2Test (RQ2)
+3.2.4 Example of Failure Cases. In the sphinx-doc project, 11 issue        To understand how different components of the approach con-
+instances are analyzed, including 3 from SWE-verified. None of             tribute to the test generation, we analyze their role in producing
+the baseline techniques, including Issue2Test, can generate F→P            successful and unsuccessful test cases. As shown in Figure 17, we
+tests for this project. Of these 11 cases, 5 fail due to runtime errors,   examine four key components: assertion matching, error categoriza-
+while 1 encounter a test collection error caused by an incompatible        tion, runtime and compilation error handling, and test refinement.
+Conference’17, July 2017, Washington, DC, USA                                                              Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+
+
+                                                                                                                                      144.47
+                                                                          5888.82
+
+
+
+
+                                                                                                                                      47.31
+
+
+
+
+                                                                                                                                                                      Mean=25.64
+                                                                                                                    Mean=446.09
+                                                                          548.05
+                                                                          150.25
+                                                                                            Md=303.46
+
+
+
+
+                                                                                                                                      4.72
+                                                                                                                                                 Md=7.92
+
+
+
+
+                                                                          29.88
+
+
+
+
+                                                                                                                                      1.62
+ Figure 17: Frequency of invoked steps (average per issue).
+
+
+   Assertion matching exhibits the highest frequency in success-                            Input Tokens (K)                                   Response Tokens (K)
+ful test cases relative to unsuccessful ones, indicating that when
+Issue2Test correctly identifies an issue-related assertion, it reliably         Figure 18: Comparison of input tokens and output tokens
+generates a valid test. However, when the assertion does not align
+with the issue, additional refinement is required.                                           Mean=8.23
+   Error categorization plays a crucial role in distinguishing rele-
+                                                                          Total Cost (¢)
+
+
+
+
+vant failures from unrelated ones. It is invoked on average 13.5 times
+                                                                                                    Md=5.21
+per issue, suggesting that repeated classification of test outcomes
+is central to the refinement loop. Accurate failure classification
+contributes significantly to effective test generation.
+   Runtime and compilation error handling presents a major chal-                            0.66   11.03                                                         97
+lenge. It is invoked an average of 20.9 times per unsuccessful issue.
+This suggests that resolving test cases that crash or fail to com-                            Figure 19: LLM cost in cents (USD) per issue.
+pile is a significant bottleneck, limiting the overall effectiveness of
+Issue2Test.
+   Test refinement, designed to improve failing test cases, is in-           The cost distribution is shown in Figure 19 in USD, visualized
+voked least often (2.7 times on average for successful cases and 4.8      using a bean plot. The median cost per test case generated by
+for unsuccessful ones), suggesting that current refinement strate-        Issue2Test is 5.21 cents, with an average cost of 8.23 cents. The
+gies may be less effective and could benefit from improved test           total cost per test case ranges from 0.66 to 97 cents.
+transformation heuristics.                                                   Certain cases incur higher costs due to excessive LLM invo-
+   These results indicate that failure categorization and assertion       cations. Specifically, in GitHub projects such as Django, when
+matching contribute positively to test generation, whereas run-           Issue2Test encounters a runtime error unrelated to the reported
+time and compilation errors are the primary barriers to success.          issue, it enters an iterative refinement loop, repeatedly invoking the
+Enhancing failure resolution and refinement mechanisms could fur-         LLM in an attempt to resolve the failure. This leads to substantially
+ther improve Issue2Test’s ability to generate high-quality, issue-        higher input token consumption.
+reproducing tests.
+                                                                          4                Discussion
+3.4     RQ3: Cost                                                         Quality of Generated Tests. Following studies on the quality of
+Figure 18 presents the distribution of input and output tokens used       generated tests and their potential smells [18, 19], we manually
+by Issue2Test. The median input token consumption is 303.46K,             inspect a sample of successfully generated tests to check for smells
+with a mean of 446.09K, whereas the median output token count             and quality issues. First, we randomly sample, up to three success-
+is significantly lower at 7.92K, with a mean of 25.64K. This dis-         fully generated tests per project (some projects have fewer than
+parity arises because Issue2Test invokes the LLM primarily for            three). This results in a total of 21 tests from 8 projects. Second, we
+generating new test code, categorizing errors, and reasoning about        manually go through the generated tests and their corresponding
+failures, all of which require fewer response tokens. In contrast,        execution traces. For each generated test, we look for the categories
+input token consumption is higher due to the inclusion of GitHub          of smells described in [19], namely: (1) Act–Assert Mismatch, (2)
+issue descriptions, test case generation guidelines, and execution        Redundant Code, (3) Failed Setup, (4) Accessors and Constants.
+traces, which extend the context length.                                  We only find instances of redundant code in the inspected sample.
+Issue2Test: Generating Reproducing Test Cases from Issue Reports                                      Conference’17, July 2017, Washington, DC, USA
+
+
+Specifically, 5/21 tests had a duplicate setup, i.e., two or more test   Benchmarks for Evaluating Test Generation from GitHub
+functions instantiate the same variables with identical values and       Issues. Several benchmarks have been developed to evaluate the ef-
+identical subsequent changes to the variables. Furthermore, 2/21         fectiveness of automated test generation from GitHub issues. These
+tests had a duplicate test scenario, i.e, the same test scenario is      benchmarks provide real-world issues, developer-written patches,
+implemented in two different test cases. The percentage of these         and test cases, enabling systematic assessment of LLM-based test
+two effects is similar to the values reported in prior work [19]. On     generation techniques. SWE-bench [22] and its derivatives such
+the positive side, Issue2Test does not show any smell symptoms           SWTBench [30], and TDD-Bench-Verified [1] focus on GitHub is-
+from the other three categories. One reason for the duplication may      sue resolution by pairing reported issues with their corresponding
+be that our prompt instructs the LLM to distribute different test        fixes and test cases. Other benchmarks, such as Defects4J [23],
+scenarios and covered branches over different functions, to isolate      BugsInPy [48], and Bugswarm [43] provide datasets for evaluat-
+points of failure. Future work could investigate how to guide LLMs       ing software testing and program repair techniques. While not
+toward tests that avoid duplication and other test smells.               specifically tailored for test generation from GitHub issues, they
+                                                                         are still taken from real fixed issues and provide some context for
+Reproduction Success by Issue Category. To assess whether                bug reproduction.
+Issue2Test depends on the kind of issue addressed, we classified
+all 276 SWT-bench-lite instances according to the SWE-bench tax-         LLM-Based Test Generation. LLMs have been applied to test gen-
+onomy [22]. The full set comprises 53 bug fixes (19.2%), 11 feature      eration [16, 24, 32, 39, 40], with efforts to enhance quality by over-
+requests (4.0%), no regressions (0.0%), and 212 other issues (76.8 %),   coming coverage plateaus [26], incorporating code-aware prompt-
+the latter dominated by maintenance-oriented tags such as “help          ing [38], and leveraging coverage information [3, 20]. LLMs have
+wanted”. On the 84 issues for which Issue2Test generated repro-          also been explored for augmenting existing tests [2] refines human-
+ducing tests, the distribution is 17 bugs (20.2 %), 4 features (4.8      written test suites to improve coverage. Our work differs by focus-
+%), 0 regressions, and 63 Others (75.0 %). These correspond to per-      ing not on direct code generation but on synthesizing test cases
+category success rates of 32.1% for bugs (17/53), 36.4% for feature      specifically for reproducing issues raised on GitHub and revealing
+requests (4/11), and 29.7% for other issues (63/212). The maximum        the buggy behavior related to the issue.
+gap across category is 6.7%, indicating that Issue2Test performs         LLMs for GitHub Issue Resolution. LLMs are increasingly be-
+consistently on bug fixes, feature requests, and maintenance tasks.      ing leveraged to automate GitHub issue resolution by generating
+Improving reproduction accuracy for maintenance-style (“Other”)          patches [42]. Recent research has explored LLM-based agents that
+issues may require incorporating richer contextual information,          analyze issue reports, suggest code modifications, and improve soft-
+such as more detailed task descriptions, to guide the synthesis of       ware maintenance workflows. A key area of focus is automated
+targeted and precise test cases.                                         program repair, where agents such as RepairAgent [7] apply LLMs
+                                                                         to detect and fix defects in source code. Other approaches, includ-
+Threats to Validity. One potential threat to internal validity is the
+                                                                         ing SWE-Agent [51], MarsCode Agent [27], Magis [42], and Au-
+evaluation dataset size. We evaluate Issue2Test on SWT-bench-lite,
+                                                                         toCodeRover [52], tackle broader issue resolution tasks such as
+which consists of 276 issues from the larger SWT-bench dataset.
+                                                                         bug fixes, feature additions, and code enhancements. Our work,
+While this benchmark has been widely used in prior studies, it
+                                                                         which automatically creates reproducing test cases for said issues,
+may not fully capture the diversity of issue types encountered in
+                                                                         could help these approaches by: i) augmenting existing test suites
+practice (e.g, some projects in SWT-bench-lite have less than 10
+                                                                         and thus receiving more feedback about the behavior of code. ii)
+issues). Another limitation of Issue2Test is its reliance on meta-
+                                                                         making the repair approaches more practical and realistic by using
+prompting, which is particularly beneficial for popular open-source
+                                                                         automatically generated test cases instead of developer-written
+projects. However, while this approach enhances test generation
+                                                                         tests, often, added after fixing the bug.
+accuracy, it raises concerns about Issue2Test’s ability to generalize
+to private repositories or lesser-known projects where LLMs lack         Execution-Oriented Agents. ExecutionAgent [8] and Issue2Test
+prior exposure.                                                          both use LLMs to automate software testing tasks but differ sig-
+                                                                         nificantly in goals and techniques. ExecutionAgent focuses on au-
+Reproducibility. Our implementation and instructions for repro-          tomating the setup and execution of existing test suites by inferring
+ducing the results are available [21].                                   and running project-specific build, dependency, and test commands.
+                                                                         It assumes tests already exist and prioritizes execution without
+5   Related Work                                                         human input. In contrast, Issue2Test generates new test cases to
+                                                                         reproduce failures described in issue reports, operating under the
+Reproducible Test Case Generation. Reproducing software fail-            assumption that no reproducing test exists. It takes issue descrip-
+ures from issue reports is essential for debugging [6], regression       tions and stack traces as input to synthesize failing test logic. This
+testing [24], and automated program repair [31, 35]. In Section 3.1.4,   means, while ExecutionAgent focuses on command line actions
+we discussed approaches for reproducible test case generation. Ad-       such as installing dependencies, Issue2Test, in contrast, focuses
+ditionally, BRT Agent [11] focused on generating tests from bug          on generating test code. Subsequently, meta-prompting in Execu-
+reports, specifically in an industrial setup. The reported success of    tionAgent helps infer commands and actions tied to the repository
+BRT demonstrates that LLM-based test generation is beneficial not        structure and languages while Issue2Test uses it to reflect project-
+only for public issues but also for private internal issues at large     specific test idioms such as naming, fixtures, and assertions. Though
+companies such as Google.                                                the principle of meta-prompting is the same, Issue2Test adapts its
+Conference’17, July 2017, Washington, DC, USA                                                                Noor Nashid, Islem Bouzenia, Michael Pradel, and Ali Mesbah
+
+
+own meta-prompting for the target task. Furthermore, Issue2Test                         [6] Moritz Beller, Niels Spruit, Diomidis Spinellis, and Andy Zaidman. 2018. On the
+uses a similarity-based approach to find relevant test and code files                       dichotomy of debugging behavior among programmers. In 40th International Con-
+                                                                                            ference on Software Engineering (ICSE ’18). Association for Computing Machinery,
+while ExecutionAgent just relies on prompting and meta-promting                             572–583.
+to find relevant files at the start.                                                    [7] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. RepairAgent:
+                                                                                            An Autonomous, LLM-Based Agent for Program Repair . In IEEE/ACM 47th
+   In addition, ExecutionAgent uses runtime feedback to fix com-                            International Conference on Software Engineering (ICSE). IEEE Computer Society,
+mand execution errors (e.g., build failures), refining its inferred com-                    2188–2200.
+mands. Issue2Test uses runtime diagnostics such as stack traces                         [8] Islem Bouzenia and Michael Pradel. 2024. You name it, I run it: An LLM agent to
+                                                                                            execute tests of arbitrary projects. arXiv preprint arXiv:2412.10133 (2024).
+and assertion errors to iteratively refine the generated tests. It also                 [9] Dong Chen, Shaoxin Lin, Muhan Zeng, Daoguang Zan, Jian-Gang Wang, Anton
+introduces root cause hypothesis branching to explore alternative                           Cheshkov, Jun Sun, Hao Yu, Guoliang Dong, Artem Aliev, et al. 2024. Coder:
+failure explanations and generate diverse test cases. This failure                          Issue resolving with multi-agent and task graphs. arXiv preprint arXiv:2406.01304
+                                                                                            (2024).
+reasoning and root cause analysis approach is absent in Execution-                     [10] Yinghao Chen, Zehao Hu, Chen Zhi, Junxiao Han, Shuiguang Deng, and Jian-
+Agent.                                                                                      wei Yin. 2024. ChatUniTest: A Framework for LLM-Based Test Generation. In
+                                                                                            32nd ACM International Conference on the Foundations of Software Engineering.
+   On a high-level, while both systems rely on LLMs and meta-                               Association for Computing Machinery, 572–576.
+prompting, they serve complementary purposes: ExecutionAgent                           [11] Runxiang Cheng, Michele Tufano, Jürgen Cito, José Cambronero, Pat Rondon,
+automates test execution, while Issue2Test enables semantic test                            Renyao Wei, Aaron Sun, and Satish Chandra. 2025. Agentic Bug Reproduction for
+                                                                                            Effective Automated Program Repair at Google. arXiv preprint arXiv:2502.01821
+synthesis from natural language and runtime signals.                                        (2025).
+                                                                                       [12] N. Chowdhury, J. Aung, C. J. Shern, O. Jaffe, D. Sherburn, G. Starace, E. Mays, R.
+                                                                                            Dias, M. Aljubeh, M. Glaese, C. E. Jimenez, J. Yang, K. Liu, and A. Madry. 2024.
+6    Conclusion                                                                             Introducing SWE-bench Verified. OpenAI Blog (Aug. 2024). https://openai.com/
+                                                                                            index/introducing-swe-bench-verified/ [Online].
+In this paper, we introduce Issue2Test, a novel approach for auto-                     [13] Ermira Daka, José Miguel Rojas, and Gordon Fraser. 2017. Generating Unit Tests
+mated generation of issue-reproducing test cases, addressing a key                          with Descriptive Names or: Would You Name Your Children Thing1 and Thing2?.
+challenge in software testing and debugging. Our evaluation on                              In 26th ACM SIGSOFT International Symposium on Software Testing and Analysis.
+                                                                                            ACM, 57–67.
+the SWT-bench-lite dataset resulted in Issue2Test outperforming                        [14] E. Dinella, G. Ryan, T. Mytkowicz, and S. K. Lahiri. 2022. TOGA: A Neural
+the best baselines by an 8.7% margin in issue reproduction, success-                        Method for Test Oracle Generation. In 44th International Conference on Software
+fully generating test cases for 28 previously unreproduced issues,                          Engineering (ICSE). IEEE, 2130–2141.
+                                                                                       [15] Zhiyu Fan, Xiang Gao, Martin Mirchev, Abhik Roychoudhury, and Shin Hwei
+and contributing to 68.3% of the total issues reproduced across all                         Tan. 2023. Automated Repair of Programs from Large Language Models. In 45th
+tools. Beyond issue reproduction, our approach has broader impli-                           International Conference on Software Engineering. IEEE Press, 1469–1481.
+                                                                                       [16] Sidong Feng and Chunyang Chen. 2024. Prompting Is All You Need: Automated
+cations for automated debugging, regression testing, and program                            Android Bug Replay with Large Language Models. In 46th IEEE/ACM International
+repair. By bridging the gap between issue descriptions and exe-                             Conference on Software Engineering. 1–13.
+cutable test cases, Issue2Test streamlines the debugging process                       [17] Gordon Fraser and Andrea Arcuri. 2011. EvoSuite: Automatic Test Suite Genera-
+                                                                                            tion for Object-Oriented Software. In 19th ACM SIGSOFT Symposium and the 13th
+and facilitates more reliable automated program repair. Future work                         European Conference on Foundations of Software Engineering. ACM, 416–419.
+includes extending our methodology to support a wider range of                         [18] Geraldine Galindo-Gutierrez, Juan Pablo Sandoval Alcocer, Nicolas Jimenez-
+failure scenarios, improving test adaptation strategies, and integrat-                      Fuentes, Alexandre Bergel, and Gordon Fraser. 2025. Increasing the Effectiveness
+                                                                                            of Automatically Generated Tests by Improving Class Observability. In IEEE/ACM
+ing Issue2Test with existing automated repair pipelines to further                          47th International Conference on Software Engineering (ICSE). IEEE, 1553–1565.
+enhance software reliability and maintainability.                                      [19] Geraldine Galindo-Gutierrez, Maximiliano Narea Carvajal, Alison Fernan-
+                                                                                            dez Blanco, Nicolas Anquetil, and Juan Pablo Sandoval Alcocer. 2023. A manual
+                                                                                            categorization of new quality issues on automatically-generated tests. In IEEE In-
+Acknowledgments                                                                             ternational Conference on Software Maintenance and Evolution (ICSME). 271–281.
+                                                                                       [20] Sijia Gu, Noor Nashid, and Ali Mesbah. 2026. LLM Test Generation via Iterative
+This work was supported in part by the Canadian Natural Sciences                            Hybrid Program Analysis. In 48th IEEE/ACM International Conference on Software
+and Engineering Research Council (NSERC DG), Amazon Research                                Engineering. ACM, 12 pages.
+                                                                                       [21] Issue2Test. 2025. Issue2Test: From Issue Reports to Reproducible Test Cases with
+Awards (AWS Generative AI), the European Research Council (ERC;                             LLMs. https://github.com/test-generation/issue2test. Accessed: March 4, 2025.
+grant agreements 851895 and 101155832), and the German Research                        [22] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press,
+                                                                                            and Karthik R Narasimhan. 2024. SWE-bench: Can Language Models Resolve
+Foundation (DFG; projects 492507603, 516334526, and 526259073).                             Real-world Github Issues?. In The Twelfth International Conference on Learning
+                                                                                            Representations. https://openreview.net/forum?id=VTF8yNQM66
+                                                                                       [23] René Just, Darioush Jalali, and Michael D. Ernst. 2014. Defects4J: a database of
+References                                                                                  existing faults to enable controlled testing studies for Java programs. In Interna-
+ [1] Toufique Ahmed, Martin Hirzel, Rangeet Pan, Avraham Shinnar, and Saurabh               tional Symposium on Software Testing and Analysis. Association for Computing
+     Sinha. 2024. TDD-Bench Verified: Can LLMs Generate Tests for Issues Before             Machinery, 437–440.
+     They Get Resolved? arXiv preprint arXiv:2412.02883 (2024).                        [24] Sungmin Kang, Juyeon Yoon, and Shin Yoo. 2023. Large Language Models Are
+ [2] Nadia Alshahwan, Jubin Chheda, Anastasia Finogenova, Beliz Gokkaya, Mark               Few-Shot Testers: Exploring LLM-Based General Bug Reproduction. In 45th
+     Harman, Inna Harper, Alexandru Marginean, Shubho Sengupta, and Eddy Wang.              International Conference on Software Engineering. IEEE Press, 2312–2323.
+     2024. Automated Unit Test Improvement using Large Language Models at Meta.        [25] Claire Le Goues, Michael Pradel, and Abhik Roychoudhury. 2019. Automated
+     In 32nd ACM International Conference on the Foundations of Software Engineering        program repair. Commun. ACM 62, 12 (2019), 56–65.
+     (FSE 2024). Association for Computing Machinery, 185–196.                         [26] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K. Lahiri, and Siddhartha Sen.
+ [3] Juan Altmayer Pizzorno and Emery D. Berger. 2025. CoverUp: Effective High              2023. CodaMosa: Escaping Coverage Plateaus in Test Generation with Pre-
+     Coverage Test Generation for Python. Proc. ACM Softw. Eng. 2, FSE, Article             Trained Large Language Models. In 45th International Conference on Software
+     FSE128 (2025), 23 pages.                                                               Engineering. IEEE Press, 919–931.
+ [4] Anthropic. 2025. Claude. https://www.anthropic.com/claude/. Accessed: July 18,    [27] Yizhou Liu, Pengfei Gao, Xinchen Wang, Jie Liu, Yexuan Shi, Zhao Zhang, and
+     2025.                                                                                  Chao Peng. 2024. Marscode agent: Ai-native automated bug fixing. arXiv preprint
+ [5] Patrick Bareiß, Beatriz Souza, Marcelo d’Amorim, and Michael Pradel. 2022. Code        arXiv:2409.00899 (2024).
+     Generation Tools (Almost) for Free? A Study of Few-Shot, Pre-Trained Language     [28] Llama. 2025. The open-source AI models you can fine-tune, distill and deploy
+     Models on Code. CoRR abs/2206.01335 (2022). arXiv preprint arXiv:2206.01335 10         anywhere. https://www.llama.com/. Accessed: July 18, 2025.
+     (2022).
+Issue2Test: Generating Reproducing Test Cases from Issue Reports                                                               Conference’17, July 2017, Washington, DC, USA
+
+
+[29] Arghavan Moradi Dakhel, Vahid Majdinasab, Amin Nikanjam, Foutse Khomh,                 [50] Chunqiu Steven Xia and Lingming Zhang. 2022. Less training, more repairing
+     Michel C. Desmarais, and Zhen Ming (Jack) Jiang. 2023. GitHub Copilot AI pair               please: revisiting automated program repair via zero-shot learning. In 30th ACM
+     programmer: Asset or Liability? Journal of Systems and Software 203 (2023),                 Joint European Software Engineering Conference and Symposium on the Founda-
+     111734.                                                                                     tions of Software Engineering. Association for Computing Machinery, 959–971.
+[30] Niels Mündler, Mark Müller, Jingxuan He, and Martin Vechev. 2024. SWT-Bench:           [51] John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao,
+     Testing and Validating Real-World Bug-Fixes with Code Agents. Advances in                   Karthik R Narasimhan, and Ofir Press. 2024. SWE-agent: Agent-Computer In-
+     Neural Information Processing Systems 37 (2024), 81857–81887.                               terfaces Enable Automated Software Engineering. In The Thirty-eighth Annual
+[31] Noor Nashid, Daniel Ding, Keheliya Gallaba, Ahmed E. Hassan, and Ali Mesbah.                Conference on Neural Information Processing Systems.
+     2025. Characterizing Multi-Hunk Patches: Divergence, Proximity, and LLM                [52] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+     Repair Challenges. In 40th IEEE/ACM International Conference on Automated                   toCodeRover: Autonomous Program Improvement. In 33rd ACM SIGSOFT Inter-
+     Software Engineering. IEEE, 13 pages.                                                       national Symposium on Software Testing and Analysis. Association for Computing
+[32] Noor Nashid, Mifta Sintaha, and Ali Mesbah. 2023. Retrieval-Based Prompt                    Machinery, 1592–1604.
+     Selection for Code-Related Few-Shot Learning. In 45th International Conference         [53] Albert Ziegler, Eirini Kalliamvakou, X. Alice Li, Andrew Rice, Devon Rifkin,
+     on Software Engineering. IEEE Press, 2450–2462.                                             Shawn Simister, Ganesh Sittampalam, and Edward Aftandilian. 2022. Productivity
+[33] Carlos Pacheco, Shuvendu K. Lahiri, Michael D. Ernst, and Thomas Ball. 2007.                Assessment of Neural Code Completion. In 6th ACM SIGPLAN International
+     Feedback-Directed Random Test Generation. In International Conference on Soft-              Symposium on Machine Programming. ACM, 21–29.
+     ware Engineering. IEEE Computer Society, 75–84.
+[34] Mauro Pezzè, Silvia Abrahão, Birgit Penzenstadler, Denys Poshyvanyk, Abhik
+     Roychoudhury, and Tao Yue. 2025. A 2030 Roadmap for Software Engineering.
+     ACM Transactions on Software Engineering and Methodology 34, 5, Article 118
+     (2025), 55 pages.
+[35] Pat Rondon, Renyao Wei, José Cambronero, Jürgen Cito, Aaron Sun, Siddhant
+     Sanyam, Michele Tufano, and Satish Chandra. 2025. Evaluating Agent-based
+     Program Repair at Google. arXiv preprint arXiv:2501.07531 (2025).
+[36] Abhik Roychoudhury, Corina Pasareanu, Michael Pradel, and Baishakhi Ray.
+     2025. AI Software Engineer: Programming with Trust. arXiv e-prints (2025),
+     arXiv–2502.
+[37] Haifeng Ruan, Yuntong Zhang, and Abhik Roychoudhury. 2025. SpecRover:
+     Code Intent Extraction via LLMs . In 47th International Conference on Software
+     Engineering (ICSE). IEEE Computer Society, 963–974.
+[38] Gabriel Ryan, Siddhartha Jain, Mingyue Shang, Shiqi Wang, Xiaofei Ma, Mu-
+     rali Krishna Ramanathan, and Baishakhi Ray. 2024. Code-Aware Prompting: A
+     Study of Coverage-Guided Test Generation in Regression Setting using LLM.
+     Proc. ACM Softw. Eng. 1, FSE, Article 43 (2024), 21 pages.
+[39] Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank Tip. 2023. Adaptive test
+     generation using a large language model. arXiv preprint arXiv:2302.06527 (2023).
+[40] Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank Tip. 2023. An empirical
+     evaluation of using large language models for automated unit test generation.
+     IEEE Transactions on Software Engineering 50, 1 (2023), 85–105.
+[41] Mohammed Latif Siddiq, Joanna Santos, Ridwanul Hasan Tanvir, Noshin Ulfat,
+     Fahmid Al Rifat, and Vinicius Carvalho Lopes. 2023. Exploring the Effectiveness of
+     Large Language Models in Generating Unit Tests. arXiv preprint arXiv:2305.00418
+     (2023).
+[42] Wei Tao, Yucheng Zhou, Yanlin Wang, Wenqiang Zhang, Hongyu Zhang, and Yu
+     Cheng. 2025. Magis: Llm-based multi-agent framework for github issue resolution.
+     Advances in Neural Information Processing Systems 37 (2025), 51963–51993.
+[43] David A. Tomassi, Naji Dmeiri, Yichen Wang, Antara Bhowmick, Yen-Chuan
+     Liu, Premkumar T. Devanbu, Bogdan Vasilescu, and Cindy Rubio-González. 2019.
+     BugSwarm: mining and continuously growing a dataset of reproducible failures
+     and fixes. In 41st International Conference on Software Engineering (ICSE ’19). IEEE
+     Press, 339–349.
+[44] Priyan Vaithilingam, Tianyi Zhang, and Elena L. Glassman. 2022. Expectation vs.
+     Experience: Evaluating the Usability of Code Generation Tools Powered by Large
+     Language Models. In Extended Abstracts of the 2022 CHI Conference on Human
+     Factors in Computing Systems. ACM, Article 332, 7 pages.
+[45] Junjie Wang, Yuchao Huang, Chunyang Chen, Zhe Liu, Song Wang, and Qing
+     Wang. 2024. Software Testing With Large Language Models: Survey, Landscape,
+     and Vision. IEEE Transactions on Software Engineering 50, 4 (2024), 911–936.
+[46] Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu, Xiangru Tang, Mingchen
+     Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, Hoang H. Tran, Fuqiang
+     Li, Ren Ma, Mingzhang Zheng, Bill Qian, Yanjun Shao, Niklas Muennighoff,
+     Yizhe Zhang, Binyuan Hui, Junyang Lin, Robert Brennan, Hao Peng, Heng Ji,
+     and Graham Neubig. 2025. OpenHands: An Open Platform for AI Software
+     Developers as Generalist Agents. In The Thirteenth International Conference on
+     Learning Representations. https://openreview.net/forum?id=OJd3ayDDoF
+[47] Cody Watson, Michele Tufano, Kevin Moran, Gabriele Bavota, and Denys Poshy-
+     vanyk. 2020. On Learning Meaningful Assert Statements for Unit Test Cases. In
+     42nd International Conference on Software Engineering. ACM, 1398–1409.
+[48] Ratnadira Widyasari, Sheng Qin Sim, Camellia Lok, Haodi Qi, Jack Phan, Qijin
+     Tay, Constance Tan, Fiona Wee, Jodie Ethelda Tan, Yuheng Yieh, Brian Goh,
+     Ferdian Thung, Hong Jin Kang, Thong Hoang, David Lo, and Eng Lieh Ouh.
+     2020. BugsInPy: a database of existing bugs in Python programs to enable
+     controlled testing and debugging studies. In ACM Joint Meeting on European
+     Software Engineering Conference and Symposium on the Foundations of Software
+     Engineering. Association for Computing Machinery, 1556–1560.
+[49] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2025. De-
+     mystifying LLM-Based Software Engineering Agents. Proceedings of the ACM on
+     Software Engineering 2, FSE, Article FSE037 (June 2025), 24 pages.
+

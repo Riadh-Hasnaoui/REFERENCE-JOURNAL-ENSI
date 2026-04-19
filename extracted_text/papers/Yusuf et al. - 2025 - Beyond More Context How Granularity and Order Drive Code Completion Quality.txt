@@ -1,0 +1,286 @@
+                                                                                                                                                                                            2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW)
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW) | 979-8-3315-8503-7/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASEW67777.2025.00075
+
+
+
+
+                                                                                                                                                                                     Beyond More Context: How Granularity and Order
+                                                                                                                                                                                             Drive Code Completion Quality
+                                                                                                                                                                                                   Uswat Yusuf                             Genevieve Caumartin                               Diego Elias Costa
+                                                                                                                                                                                                 REALISE Lab                                   REALISE Lab                                     REALISE Lab
+                                                                                                                                                                                              Concordia University                         Concordia University                             Concordia University
+                                                                                                                                                                                               Montreal, Canada                              Montreal, Canada                                Montreal, Canada
+                                                                                                                                                                                            omosewaeniola@gmail.com                genevieve.caumartin@mail.concordia.ca                  diego.costa@concordia.ca
+
+
+
+                                                                                                                                                                                      Abstract—Context plays an important role in the quality of               of the context to outperform selected JetBrains baselines. The
+                                                                                                                                                                                   code completion, as Large Language Models (LLMs) require                    performance of the context collection strategies were evaluated
+                                                                                                                                                                                   sufficient and relevant information to assist developers in code            across two programming languages: Python and Kotlin [7]. In
+                                                                                                                                                                                   generation tasks. However, composing a relevant context for
+                                                                                                                                                                                   code completion poses challenges in large repositories: First, the          this paper, we describe our approach to the challenge, outlining
+                                                                                                                                                                                   limited context length of LLMs makes it impractical to include              the progression of our strategies from file-level to chunk-level
+                                                                                                                                                                                   all repository files. Second, the quality of generated code is              retrieval and reflecting on the lessons learned on retrieval
+                                                                                                                                                                                   highly sensitive to noisy or irrelevant context. In this paper,             granularity using lexical similarity and static analysis. We
+                                                                                                                                                                                   we present our approach for the ASE 2025 Context Collec-                    provide a replication package [8] to support the reproducibility
+                                                                                                                                                                                   tion Challenge. The challenge entails outperforming JetBrains
+                                                                                                                                                                                   baselines by designing effective retrieval and context collection           of our experiments.
+                                                                                                                                                                                   strategies. We develop and evaluate a series of experiments that
+                                                                                                                                                                                   involve retrieval strategies at both the file and chunk levels.
+                                                                                                                                                                                                                                                                                  II. E XPERIMENT S ETUP
+                                                                                                                                                                                   We focus our initial experiments on examining the impact of                 A. Datasets
+                                                                                                                                                                                   context size and file ordering on LLM performance. Our results
+                                                                                                                                                                                   show that the amount and order of context can significantly                    We conduct our experiments on the datasets released as
+                                                                                                                                                                                   influence the performance of the models. We introduce chunk-                part of the JetBrains Code Completion Competition [9]. The
+                                                                                                                                                                                   based retrieval using static analysis, achieving a 6% improvement           competition provided two categories of data: practice data for
+                                                                                                                                                                                   over our best file-retrieval strategy and 16% over the no-context           the development and debugging of context retrieval strategies
+                                                                                                                                                                                   baseline for Python in the initial phase of the competition. Our            and public data for the main evaluation phase. The Python
+                                                                                                                                                                                   results highlight the importance of retrieval granularity, ordering
+                                                                                                                                                                                   and hybrid strategies in developing effective context collection            portion of the dataset consists of 47 repositories for the
+                                                                                                                                                                                   pipelines for real-world development scenarios.                             practice split and 247 repositories for the public split, while
+                                                                                                                                                                                                                                                               the Kotlin version consists of 30 repositories for the practice
+                                                                                                                                                                                                          I. I NTRODUCTION                                     split and 400 repositories for the public split. These splits vary
+                                                                                                                                                                                      Code completion plays a crucial role in modern software                  in size and structure, with the public split consisting of more
+                                                                                                                                                                                   development by increasing the productivity of engineers [1].                complex repositories and challenging instances [10].
+                                                                                                                                                                                   Studies have shown that developers see significant benefits                    Beyond repository count, we also analyze the distribution
+                                                                                                                                                                                   in code completion as it reduces code iteration time [2],                   of code files in each repository to better understand the
+                                                                                                                                                                                   thus improving their productivity. Recent advances in LLMs                  complexity of the data. The practice datasets are generally
+                                                                                                                                                                                   have accelerated this trend with models like CodeBERT [3],                  smaller and have more uniform characteristics (e.g., repository
+                                                                                                                                                                                   StarCoder [4], CodeLlama [5], which offer highly contextual                 size), while the public data consists of repositories with higher
+                                                                                                                                                                                   code suggestions and generation capabilities. These models are              variation and a large number of files. Table I summarizes key
+                                                                                                                                                                                   trained on large code corpora and often fine-tuned to handle                statistics, including the average and median number of files
+                                                                                                                                                                                   diverse programming tasks across domains.                                   per repository. These characteristics highlight the complexity
+                                                                                                                                                                                      The effectiveness of large language models (LLMs) depends                of the task at hand, as the context-retrieval strategies must
+                                                                                                                                                                                   on the quality and relevance of the input context. In real-world            generalize across languages and also across projects of widely
+                                                                                                                                                                                   development scenarios, including all source code files can                  varying scale.
+                                                                                                                                                                                   exceed the model’s context window. Moreover, overloading
+                                                                                                                                                                                   a model’s context window can lead to noise or affect its                    B. Models
+                                                                                                                                                                                   performance [6]. As such, the design of effective context                      In this study, we evaluate our strategies on the models
+                                                                                                                                                                                   collection strategies has become a critical factor in real-world            provided in the JetBrains Competition, including Mellum:4b,
+                                                                                                                                                                                   deployment of code completion models.                                       Qwen2.5-Coder:7b and Codestral [11]. Mellum:4b is a code-
+                                                                                                                                                                                      The ASE 2025 Context Collection Challenge provided a                     specific model developed by JetBrains that is fine-tuned on
+                                                                                                                                                                                   structured setting to explore this problem. Participants were               real-world code completion scenarios. It supports a range of
+                                                                                                                                                                                   tasked with developing strategies for the retrieval composition             programming languages and has a context window of 8,192
+
+
+                                                                                                                                                                                979-8-3315-8503-7/25/$31.00 ©2025 IEEE                                   371
+                                                                                                                                                                                DOI 10.1109/ASEW67777.2025.00075
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:25:47 UTC from IEEE Xplore. Restriction
+                                             TABLE I                                      these baselines measure the performance of models with no
+                   S UMMARY STATISTICS OF THE J ET B RAINS COMPETITION DATASETS .
+                                                                                          contextual information and when given minimal, randomly
+                     Dataset             #Repos    Files per repository (count)
+                                                                                          selected context as shown in Table II
+                                                  Min   Median     Mean     Max                     III. S EARCHING THE B EST A PPROACH
+                     Python (Practice)       47    11       130    214.3     650          A. The Impact of the Top-K BM25 Files
+                     Kotlin (Practice)       30    35       267    289.4     557
+                     Python (Public)        247     4       137    192.3     940             Our first experiment examines the effect of providing top-
+                     Kotlin (Public)        400     4       254    668.8    7493
+                                                                                          k BM25 ranked source code files as contextual input to the
+                                                                                          models. BM25 (Best Match 25) is a lexical ranking algorithm
+                                                                                          in information retrieval [16] based on matching queries to
+                tokens [12]. Qwen2.5-Coder:7b was introduced by Alibaba                   candidate files. As prior work suggests that increasing the
+                Cloud and the model is part of the Qwen2.5-Coder series. It               context provided to the models can improve accuracy, we
+                is built on the Qwen2.5 architecture and fine-tuned on code-              measure the effect of increasing the number of source code
+                based tasks, achieving strong results across benchmarks [13].             files (k) on the evaluation metric.
+                In the competition setting, the context window was limited
+                to 16,000 tokens. Codestral:22B is a code model developed
+                by Mistral AI designed with fill-in-the-middle capabilities for
+                code completion [14]. Like Qwen2.5-Coder, it has a 16,000
+                token context window in the competition environment.
+                C. Code Completion Task
+                   We evaluate the effectiveness of repository-level code com-
+                pletion across multiple large language models (LLMs). The
+                task involves the models generating the missing code segment
+                in a target file using both the surrounding code and additional
+                code snippets from the repository. The problem is formulated
+                as a Fill-in-the-middle (FIM) task, where the input consists of:                         Fig. 1. Number of files vs chrF score
+                1) Prefix: the code preceding the missing segment, 2) Suffix:
+                the code following the missing segment, and 3) Additional                   Results: As shown in Figure 1 (Descending Order), increas-
+                retrieved context: relevant code snippets from the repository.            ing the number of retrieved files improves performance for
+                   The models’ objective is to generate a suitable fit for the            both Kotlin and Python. Kotlin achieves its best score at k = 2
+                missing code that bridges the prefix and suffix, leveraging both          with a 3% improvement over the baseline, while Python also
+                local and retrieved repository context.                                   peaks at k = 2 with a 9% improvement over the baseline.
+                                                                                          This shows that providing relevant contextual information to
+                D. Evaluation Metrics
+                                                                                          LLMs improves their code completion ability.
+                  JetBrains evaluated the efficiency of the strategy using the
+                average chrF (character n-gram F-score) [11] across the three             B. The Impact of File Ordering
+                models. The chrF score evaluates the overlap between the                     In this experiment, we evaluate the importance of file
+                generated completion and the ground truth sequences based on              ordering on model performance. In our previous experiment,
+                contiguous sequences of characters, rather than whole words               the top-k files were ranked using BM25 similarity to the query
+                [15], which makes it sensitive to crucial differences in code             (prefix and suffix) and arranged in descending order, placing
+                syntax [11].                                                              the most relevant files at the beginning of the prompt. To
+                                                                                          test for ordering bias, we reversed the order, returning code
+                E. Baselines
+                                                                                          files in ascending similarity. This design allowed us to test
+                   To show the need for effective context collection strategies           for potential primacy or recency bias in LLMs [6] and also
+                to improve the performance of models in code completion,                  account for a practical constraint: when the source code files
+                we define a no-context baseline alongside the JetBrains recent            provided as context exceeds the context window of the models,
+                baseline (which was only computed for Python in the Practice              the JetBrains environment truncates from the left, potentially
+                phase) to compare the results of our retrieval strategies.                discarding earlier files [11].
+                   The no-context baseline involves providing the LLMs with                  Results: As shown in Figure 1 (Reversed (asc) Order),
+                only the prefix and suffix surrounding the masked code without            reversing the order of files sometimes yielded small but
+                any additional repository context.                                        measurable gains with the best result when k = 3 which could
+                   The recent baseline involves selecting a single context file           support the primacy/ recency bias and the truncation setting.
+                from a list of recently modified files in the same commit                 For Python, reversing the order yields a 3% improvement over
+                as the missing code that are above ten lines of code; if no               the default descending order, whereas, for Kotlin, there was
+                qualifying files are found, a random file is selected. Together,          no measurable change.
+
+
+
+
+                                                                                    372
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:25:47 UTC from IEEE Xplore. Restriction
+                                                                              TABLE II
+                 P RELIMINARY RESULTS OF ATTEMPTED STRATEGIES (P RACTICE P HASE ). W E HIGHLIGHT IN GRAY THE BEST RESULTS PER EXPERIMENT, AND IN BOLD
+                                                                     THE BEST OVERALL RESULTS .
+
+
+                                                                                  Average                     Mellum                     Codestral                    Qwen
+                      Experiment               Strategy                       Python Kotlin              Python    Kotlin            Python    Kotlin            Python   Kotlin
+                      Baseline                 No-context                          0.57          0.65          0.56          0.64          0.63          0.70          0.51      0.61
+                                               Recent                              0.57             -          0.56             -          0.60             -          0.53         -
+                                               Top 1 file                          0.60          0.65          0.60          0.67          0.65          0.68          0.55      0.61
+                                               Top 2 files                         0.62          0.67          0.62          0.68          0.67          0.72          0.55      0.60
+                      Top-K Files
+                                               Top 3 files                         0.62          0.64          0.61          0.62          0.68          0.70          0.56      0.61
+                                               Top 4 files                         0.62          0.66          0.62          0.60          0.67          0.71          0.56      0.66
+                                               Top 2 files (reversed order)        0.63          0.67          0.63          0.70          0.68          0.69          0.59      0.64
+                      File Ordering            Top 3 files (reversed order)        0.64          0.67          0.68          0.67          0.69          0.67          0.54      0.65
+                                               Top 4 files (reversed order)        0.63          0.66          0.64          0.66          0.69          0.70          0.57      0.64
+                                               Top 3 chunks                        0.65             –          0.68             –          0.67             –          0.61         –
+                                               Top 5 chunks                        0.66          0.67          0.69          0.67          0.69          0.70          0.62      0.64
+                                               Top 10 chunks                       0.63             –          0.62             –          0.69             –          0.58         –
+                      Chunking Files           Top 15 chunks                       0.62             –          0.59             –          0.68             –          0.58         –
+                                               Top 20 chunks                       0.61             –          0.57             –          0.66             –          0.59         –
+                                               Top 5 method-lvl chunks             0.61          0.67          0.63          0.68          0.64          0.69          0.56      0.64
+                                               Top 10 method-lvl chunks            0.62          0.66          0.62          0.64          0.67          0.68          0.56      0.67
+                      Local-Scope Context      Top 5 chunks                        0.65          0.69          0.68          0.68          0.71          0.71          0.59      0.67
+
+
+                                                                                      TABLE III
+                                                             R ESULTS OF THE BEST STRATEGIES (P UBLIC AND P RIVATE P HASE )
+
+                                                                                          Average                     Mellum                     Codestral                    Qwen
+                  Evaluation        Strategy                                          Python   Kotlin            Python    Kotlin            Python    Kotlin            Python   Kotlin
+                  Baseline          Recent                                                0.52          0.64          0.49          0.62          0.56          0.67          0.50      0.62
+                                    Top 1 file                                            0.52          0.65          0.49          0.64          0.56          0.69          0.52      0.62
+                  Public Phase      Top 5 chunks (reversed order)                         0.56          0.65          0.52          0.62          0.60          0.71          0.55      0.63
+                                    Top 5 method-lvl chunks (reversed order)              0.54          0.65          0.51          0.64          0.57          0.69          0.53      0.62
+                                    Top 5 chunks (reversed order)(local-scope)            0.56                        0.52                        0.60                        0.55
+                                    Top 10 method chunks (reversed)(local-scope)                        0.66                        0.63                        0.71                    0.64
+                                    Best Python strategy                                  0.64                        0.61                        0.71                        0.61
+                  Private Phase
+                                    Best Kotlin strategy                                                0.66                        0.65                        0.69                    0.64
+
+
+
+                C. The Impact of Chunking the Files.                                                    than standard chunking for Python but achieves similar results
+                                                                                                        for Kotlin. These findings indicate that finer-grained context
+                   In this experiment, we explore chunking files using the                              improves the model’s prediction.
+                individual Treesitter library for both languages [17], as current
+                research shows that chunks within code syntactic boundaries                             D. Impact of Local Scope Context
+                are better than syntax-agnostic chunks [18]. Our initial ap-                               As part of an ablation study, we evaluate the effect of
+                proach, standard chunking, ignores import statements and                                trimming the prefix and suffix provided to the model for each
+                segments code files into objects, classes, standalone functions,                        code completion instance. For the prefix, we restrict it to the
+                expression statements and docstrings. This design preserves                             nearest enclosing block of code around the missing code.
+                meaningful context in each chunk while reducing noise from                              In Python, this typically corresponded to a class definition,
+                import statements which is often of little benefit to the LLM.                          function definition or decorated function and in Kotlin, to an
+                Our second approach, method-level chunking, further splits                              object declaration, class declaration or function declaration.
+                classes into individual methods, producing smaller segments                             The same logic was applied to the suffix where the trailing
+                and allowing the model to access more context. After gener-                             portion of the nearest enclosing block was preserved. This
+                ating these chunks, we rank them using the BM25 algorithm.                              experiment tests whether limiting context to the local scope
+                   Results: The chunk-level retrieval strategy outperforms the                          improves completion quality.
+                full file-level retrieval strategy. In the Practice Phase, the top-                        Results: Trimming the prefix and suffix improves perfor-
+                5 BM25-ranked chunks yielded the best results for Python                                mance for both Python and Kotlin as shown in Table II. In
+                with a 3% improvement which motivated us to apply this                                  Kotlin, this approach achieves a 3% improvement, while in
+                strategy on Kotlin where it performs comparably to the best                             Python, it reaches an average chrF score of 0.65 comparable
+                file-level approach. Method-level chunking performs worse                               to the best chunk-level retrieval strategy. This shows that
+
+
+
+
+                                                                                                  373
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:25:47 UTC from IEEE Xplore. Restriction
+                implementing this approach can improve code completion                    Kotlin more. Our final solution therefore uses per-language
+                quality.                                                                  settings—method-level chunking for Kotlin and standard
+                                                                                          chunking for Python. Cross-language generalization remains
+                E. Public and Private Phase Evaluations                                   an open challenge.
+                   In the public phase, as shown in Table III, the chunk-
+                based retrieval consistently outperforms the file-based retrieval                                   ACKNOWLEDGMENTS
+                strategy. Our top-5 chunk (reversed order) strategy achieved a              Contributions— Uswat Yusuf: implementation, methodol-
+                chrF score of 0.56 for Python and 0.65 for Kotlin improving               ogy, writing; Genevieve Caumartin: mentoring and solution
+                over the recent baseline by 8% for Python and 3% for Kotlin.              design; Diego Elias Costa: conceptualization, and supervision.
+                This confirms that fine-grained retrieval remains effective                                              R EFERENCES
+                across diverse datasets, as such, it was the basis for our final
+                                                                                           [1] R. A. Husein, H. Aburajouh, and C. Catal, “Large language models for
+                submission.                                                                    code completion: A systematic literature review,” Computer Standards
+                Best Python Strategy Based on public phase performance, we                     & Interfaces, vol. 92, p. 103917, 2025.
+                select a strategy that retrieves the top-5 BM25-ranked chunks              [2] M. Tabachnyk and S. Nikolov, “Ml-enhanced code completion improves
+                                                                                               developer productivity,” https://research.google/blog/ml-enhanced-code-
+                and applies local-scope trimming to the prefix and the suffix.                 completion-improves-developer-productivity/, 2022, google Research
+                In the private phase this approach achieves an average chrF                    Blog.
+                score of 0.64, securing third place overall.                               [3] Z. Feng, D. Guo, D. Tang, N. Duan, and X. F. et al., “Codebert:
+                                                                                               A pre-trained model for programming and natural languages,” 2020.
+                Best Kotlin Strategy For Kotlin, our winning strategy also                     [Online]. Available: https://arxiv.org/abs/2002.08155
+                retrieves the top-5 BM25-ranked chunks, but when the com-                  [4] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, and D. K. et al.,
+                bined token count of these chunks is below 2,000, we include                   “Starcoder: may the source be with you!” 2023. [Online]. Available:
+                                                                                               https://arxiv.org/abs/2305.06161
+                three additional chunks to balance efficiency. We also apply               [5] B. Rozière, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, and X. E. T.
+                local-scope trimming to reduce noise. This achieves an average                 et al., “Code llama: Open foundation models for code,” 2024. [Online].
+                chrF score of 0.66 which also secured a tie in the third-place                 Available: https://arxiv.org/abs/2308.12950
+                                                                                           [6] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, and B. et al., “Lost in
+                in the contest.                                                                the middle: How language models use long contexts,” arXiv preprint
+                   Our results show that chunk-retrieval and local-scope se-                   arXiv:2307.03172, 2023.
+                lection scales across diverse datasets and delivers competitive            [7] D. Ustalov, V. Kovalenko, and E. Bogomolov, “Context collection
+                                                                                               competition by jetbrains and mistral ai,” https://blog.jetbrains.com/a
+                performance across the selected programming languages.                         i/2025/06/context-collection-competition/, jun 2025, accessed: 2025-
+                                                                                               08-26.
+                                        IV. D ISCUSSION                                    [8] U. Yusuf, “ASE 2025 Starter-Kit Practice (paper-ready branch),” 2025,
+                                                                                               gitHub repository; accessed Sept. 1, 2025. [Online]. Available: https:
+                1. Granularity matters: Our final solution’s main framework                    //github.com/Uswatyusuf/ase2025-starter-kit-practice/tree/paper-ready
+                was based on selecting code snippets rather than complete                  [9] JetBrains Research, “Ase 2025 code completion competition starter kit,”
+                files to give room for more relevant contexts to be sent                       https://github.com/JetBrains- Research/ase2025- starter- kit, 2025,
+                                                                                               accessed: 2025-08-18.
+                to the models. After running a number of experiments, we                  [10] (2025) Code completion context composition competition. JetBrains and
+                realized that granularity, when done effectively, can improve                  EvalAI. [Online]. Available: https://eval.ai/web/challenges/challenge-
+                the performance of models in code completion.                                  page/2516/phases
+                                                                                          [11] EvalAI, “Code completion context composition competition,” https://ev
+                2. Ordering Effects Influence LLM Behavior: Reversing                          al.ai/web/challenges/challenge-page/2516/evaluation, 2025, organized
+                the order of the selected code snippets yields a small improve-                by JetBrains; starts May 29, 2025.
+                ment; however, an open problem remains whether there would                [12] A. Semenkin, “Mellum: How we trained a model to excel
+                                                                                               in code completion,” JetBrains AI Blog, Apr. 2025, blog post
+                be a notable impact if the context fits within the model’s token               detailing the three-stage training pipeline (pre-training, fine-tuning,
+                window.                                                                        RLAIF) of the Mellum code-completion model. [Online]. Available:
+                3. Finding a balance between quantity and quality: Choos-                      https://blog.jetbrains.com/ai/2025/04/mellum-how-we-trained-a-model-
+                                                                                               to-excel-in-code-completion/
+                ing the right context budget is nontrivial: more context can              [13] B. Hui, J. Yang, Z. Cui, J. Yang, and D. L. et al., “Qwen2.5-coder
+                help, but too much adds noise. Our fixed number of chunks                      technical report,” 2024. [Online]. Available: https://arxiv.org/abs/2409
+                results in repository-dependent token lengths, which can be                    .12186
+                                                                                          [14] Mistral AI team, “Codestral,” Mistral AI blog post, May 2024,
+                limiting; tailoring context length to the completion type would                “Empowering developers and democratising coding with Mistral AI.”.
+                likely perform better.                                                         [Online]. Available: https://mistral.ai/news/codestral
+                4. Beyond Lexical similarity: Our experiments rely mainly                 [15] D. G. Paul, H. Zhu, and I. Bayley, “Benchmarks and metrics for evalua-
+                                                                                               tions of code generation: A critical review,” in 2024 IEEE International
+                on lexical similarity, which is often effective. Recent embed-                 Conference on Artificial Intelligence Testing (AITest). IEEE, 2024, pp.
+                ding models enable strong semantic retrieval, and prior work                   87–94.
+                shows hybrid lexical–semantic methods can further improve                 [16] Z. Liu, Q. Liao, W. Gu, and C. Gao, “Software vulnerability detection
+                                                                                               with gpt and in-context learning,” in 2023 8th International Conference
+                retrieval quality and model performance. The remaining chal-                   on Data Science in Cyberspace (DSC), 2023, pp. 229–236.
+                lenge is selecting models that integrate well with production             [17] M. Brunsfeld, “Tree-sitter: A parser generator tool and incremental
+                environments.                                                                  parsing library,” https://tree-sitter.github.io/tree-sitter/, 2018, accessed:
+                                                                                               2025-08-29.
+                5. Generalization of strategies: Strategies affected the lan-             [18] Y. Zhang, X. Zhao, Z. Z. Wang, C. Yang, J. Wei, and T. Wu, “cast:
+                guages differently: Kotlin generally outperformed Python,                      Enhancing code retrieval-augmented generation with structural chunking
+                and some methods (e.g., method-level chunking) benefited                       via abstract syntax tree,” arXiv preprint arXiv:2506.15655, 2025.
+
+
+
+
+                                                                                    374
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:25:47 UTC from IEEE Xplore. Restriction
+

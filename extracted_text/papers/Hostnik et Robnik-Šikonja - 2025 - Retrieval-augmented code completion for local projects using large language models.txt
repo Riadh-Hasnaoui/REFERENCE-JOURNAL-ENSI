@@ -1,0 +1,1235 @@
+                                                                  Expert Systems With Applications 292 (2025) 128596
+
+
+                                                                         Contents lists available at ScienceDirect
+
+
+                                                             Expert Systems With Applications
+                                                                journal homepage: www.elsevier.com/locate/eswa
+
+
+
+
+Retrieval-augmented code completion for local projects using large
+language models
+Marko Hostnik                    a,b,∗, Marko Robnik-Šikonja                        a
+
+a
+    Faculty of Computer and Information Science, University of Ljubljana, Večna pot 113, Ljubljana, 1000, Slovenia
+b Faculty of Mathematics and Physics, University of Ljubljana, Jadranska ulica 19, Ljubljana, 1000, Slovenia
+
+
+
+
+a r t i c l e              i n f o                             a b s t r a c t
+2020 MSC:                                                      The use of large language models (LLMs) is becoming increasingly widespread among software developers. How-
+68T50                                                          ever, privacy and computational requirements are problematic with commercial solutions and the use of LLMs. In
+68T07
+                                                               this work, we focus on using relatively small and eﬃcient LLMs with 160M parameters that are suitable for local
+Keywords:                                                      execution and augmentation with retrieval from local projects. We train two open transformer-based models, the
+Large language models                                          generative GPT-2 and the retrieval-adapted RETRO, on open-source Python ﬁles, and empirically compare them,
+Code completion                                                conﬁrming the beneﬁts of embedding-based retrieval. Furthermore, we improve our models’ performance with
+Retrieval-augmented generation                                 In-context retrieval-augmented generation (RAG), which retrieves code snippets using the Jaccard similarity of
+In-context retrieval                                           tokens. We evaluate In-context RAG on larger models and determine that, despite its simplicity, the approach is
+                                                               more suitable than using the RETRO architecture. Experimental results indicate that In-context RAG improves
+                                                               the code completion baseline by over 26 %, while RETRO improves over the similarly sized GPT-2 baseline by
+                                                               12 %. We highlight the key role of proper tokenization in achieving the full potential of LLMs in code completion.
+
+
+
+1. Introduction                                                                                       resources. While existing approaches have focused on improving sugges-
+                                                                                                      tions using larger models augmented with retrieval from large retrieval
+    Programming with the help of large language models (LLMs)                                         datasets (Borgeaud et al., 2022), our approach diﬀers in using small
+and other artiﬁcial intelligence (AI) tools is becoming increasingly                                  models augmented with only locally available project ﬁles.
+widespread (Liang, Yang, & Myers, 2024). Programmers use AI tools                                         By focusing on a single programming language or solving just one
+(e.g., GitHub Copilot1 ) to suggest next lines while writing code (Guo                                speciﬁc programming task, such as line completion, smaller models can
+et al., 2024; Li et al., 2023; Rozière et al., 2024), to write tests and                              achieve useful results. Additionally, smaller models can speed up the
+shorter or longer sections of code (Austin et al., 2021; Lu et al., 2021),                            performance of larger models through speculative decoding, where a
+and to facilitate learning new technologies (Kasneci et al., 2023).                                   larger model is used to correct the errors of a smaller model (Leviathan,
+    As AI tools prove increasingly useful, code editor developers are                                 Kalman, & Matias, 2023). In our work, we focus on the use of LLMs
+rapidly incorporating AI into their products. However, the widespread                                 with fewer parameters to complete lines of Python code. This allows the
+adoption of AI tools raises concerns about code privacy, as code is                                   model to be executed within the code editor on the user’s hardware, even
+transmitted to remote servers for processing by commercial models that                                without a graphics processing unit (GPU) to speed up the execution.
+can contain hundreds of billions of parameters (Brown et al., 2020).                                      LLMs take a string as input and predict its most probable continua-
+These large models require computational resources far beyond what                                    tion. Usually, the input string or context is the content of the current ﬁle
+ordinary consumer hardware provides, which is why a number of solu-                                   being edited. Programming projects are often composed of many ﬁles
+tions that allow LLMs to run eﬃciently on consumer hardware are being                                 that refer to each other, so we want to enrich the context with infor-
+developed.2                                                                                           mation from other ﬁles in the project. However, as the context size of
+    However, the choice of a model size represents an important trade-                                models is limited from a few dozen to a hundred lines of code, we need
+oﬀ, as the model size has a signiﬁcant impact on the quality of sugges-                               to ﬁnd informative data to include in the context. In our work, we aug-
+tions, the inference speed, and the utilization of compute and memory                                 ment the context of LLMs with relevant code snippets from other ﬁles
+
+
+    ∗ Corresponding author.
+
+        E-mail addresses: mh9533@student.uni-lj.si (M. Hostnik), marko.robnik@fri.uni-lj.si (M. Robnik-Šikonja).
+    1 https://github.com/features/copilot
+    2
+        An example is available at https://github.com/ggerganov/llama.cpp.
+
+https://doi.org/10.1016/j.eswa.2025.128596
+Received 8 August 2024; Received in revised form 1 April 2025; Accepted 11 June 2025
+Available online 14 June 2025
+0957-4174/© 2025 The Author(s). Published by Elsevier Ltd. This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/).
+M. Hostnik et al.                                                                                                Expert Systems With Applications 292 (2025) 128596
+
+
+in the project, which we search for based on the similarity of vector              2.2. Retrieval-augmented language models
+embeddings, or alternatively based on the Jaccard similarity of tokens.
+The goal of our work is to experimentally verify the impact of retrieval-              The use of retrieval in LLMs is often motivated by the desire
+augmented LLMs on the success of completing lines of code. We focus                to improve models’ capabilities in open-domain question answering
+on smaller models suitable for inference without a GPU and on retrieval            tasks (Patwardhan, Marrone, & Sansone, 2023). DPR (Karpukhin et al.,
+only from local projects.                                                          2020) and REALM (Guu, Lee, Tung, Pasupat, & Chang, 2020) extract
+    Our proposed approach has widespread use cases in improving the                the answer from the retrieved data using a BERT encoder (Devlin,
+coding experience for developers. Small coding LLMs can be used to                 Chang, Lee, & Toutanova, 2019). DPR ﬁne-tunes the weights of the
+oﬀer intelligent code completion suggestions in various environments,              query encoder to better match its outputs with the frozen document
+such as in local text editors. In our work, we demonstrate how small               encoder embeddings. REALM updates the weights of the knowledge
+LLMs can be improved and made more viable with retrieval-augmented                 retriever encoder during training, which causes computationally de-
+generation (RAG) using a simple Jaccard similarity-based approach that             manding re-indexing of data during training. RAG (Lewis et al., 2020)
+doesn’t require expensive indexing for retrieving relevant code snippets           and FiD (Izacard & Grave, 2021) diﬀer in the processing of the re-
+from developers’ projects. Better code suggestions with smaller LLMs               trieved snippets with additionally ﬁne-tuned encoder-decoder models.
+can not only help developers write code faster, but our approach does              Ram et al. (2023) show that retrieval is beneﬁcial even without addi-
+so while maintaining a focus on privacy without incurring additional               tional training of models; it is suﬃcient to append the found snippets
+costs of commercial LLMs.                                                          to the context of the decoder. 𝑘NN-LM (Khandelwal, Levy, Jurafsky,
+    Our main contributions are as follows:                                         Zettlemoyer, & Lewis, 2020) computes a weighted sum of the predic-
+                                                                                   tions from an LLM and a 𝑘-nearest neighbors classiﬁer when predicting
+ • We train and compare 160 million parameter RETRO (Borgeaud                      each token. RETRO (Borgeaud et al., 2022), described in Section 3.1,
+   et al., 2022) and GPT-2 (Radford et al., 2019) models using two dif-            performs chunk-based retrieval and includes the found chunks in the
+   ferent tokenizers and verify the importance of token healing for code           decoder via cross-attention, which, in combination with a frozen doc-
+   completion.                                                                     ument encoder, enables retrieval throughout the entire training of the
+ • We compare In-context RAG with Jaccard-similarity-based retrieval               model.
+   to RETRO with embedding-based retrieval and to baseline models of
+   diﬀerent sizes.
+ • We examine the impact of copying from code snippets and the impact              2.3. Retrieval-augmented code completion
+   of the retrieved snippets’ similarities to the retrieval query.
+ • We experimentally conﬁrm the viability of augmenting small LLMs                     Approaches for retrieval-augmented code completion are similar to
+   with retrieval from local projects for local use in code editors.               those for natural language based open-domain question answering, with
+                                                                                   diﬀerences in the use of retrieval adapted to code and projects as a
+This paper is organized into six sections. In Section 2, we present related        whole. ReACC (Lu et al., 2022) (and similarly REDCODER (Parvez, Ah-
+work in retrieval-augmented code completion. In Section 3, we present              mad, Chakraborty, Ray, & Chang, 2021)) combines retrieval with a code-
+the main methods used, including an overview of the RETRO architec-                adapted encoder, GraphCodeBERT (Guo et al., 2021), and classic BM-25
+ture (Borgeaud et al., 2022). In Section 4, we describe the setup of our           search (Harman, 1995), incorporating found snippets into the context.
+experiments, including the dataset, model training details, and metrics            Shrivastava, Larochelle, and Tarlow (2023) use a trained classiﬁer to
+used. In Section 5, we present and analyze the results of our trained              select the most relevant code snippet from the project to include into
+models evaluated with retrieval from local projects. We conclude in Sec-           the context. RepoCoder (Zhang et al., 2023b) demonstrates retrieval
+tion 6, where we also present ideas for further work.                              based on the Jaccard similarity of tokens for retrieving line-based snip-
+                                                                                   pets from the project and utilizes the generated code to improve sub-
+                                                                                   sequent retrieval. This approach is the motivation for our approach de-
+2. Related work
+                                                                                   scribed in Section 3.3. RepoFormer (Wu, Ahmad, Zhang, Ramanathan,
+                                                                                   & Ma, 2024) enhances RepoCoder with adaptive retrieval triggered by
+    The ﬁeld of LLMs based on the transformer architecture (Vaswani
+                                                                                   the model with a special token. DRAG (Shapkin et al., 2024) extends the
+et al., 2017) has been rapidly developing in recent years, not only for
+                                                                                   model’s vocabulary with new tokens from entities in the project that the
+natural language processing but also for the processing of programming
+                                                                                   model can use while generating code.
+code. We present an overview of related work, split into four subsec-
+tions: LLMs for code, retrieval-augmented LLMs, retrieval-augmented
+code completion, and project based evaluation of code completion.
+                                                                                   2.4. Project based evaluation of code completion
+
+2.1. Large language models for code                                                    There are several datasets for evaluating code completion. Hu-
+                                                                                   manEval (Chen et al., 2021) involves completing functions from given
+    Code generation is important for tasks such as code completion (Guo            function names and docstrings; CodeXGLUE (Lu et al., 2021) con-
+et al., 2024; Li et al., 2023; Rozière et al., 2024), generating code from         tains many datasets for various tasks, including line completion. These
+natural language instructions (Austin et al., 2021), translating code              datasets only evaluate general code completion abilities within a sin-
+from one programming language to another (Lu et al., 2021), and code               gle ﬁle, whereas real projects contain multiple interrelated ﬁles. Conse-
+searching based on natural language or code-based queries (Wang et al.,            quently, datasets for project-level completion have begun to emerge,
+2023b). Neural models for code completion are mostly based on the de-              often as an addition for evaluating the developed approach (Shap-
+coder part of the transformer architecture and diﬀer mainly in the num-            kin et al., 2024). RepoBench (Liu, Xu, & McAuley, 2024) and Cross-
+ber of parameters, the size of the context and the training data used (e.g.,       CodeEval (Ding et al., 2023) compile evaluation sets by pre-selecting
+the proportion of each programming language and inclusion of natural               useful code snippets from related ﬁles that the model should include
+language) (Guo et al., 2024; Li et al., 2023). When training LLMs with             in the context. On the other hand, RepoEval (Zhang et al., 2023b)
+longer context sizes, concatenating project ﬁles into the input context is         – more in Section 4.3 – contains entire projects in addition to the
+becoming increasingly common (Guo et al., 2024; Rozière et al., 2024).             marked lines that need to be completed, which allows the use of cus-
+This better prepares the model for including related ﬁles into the context         tom implementations of retrieval from the project and consequently any
+during model execution.                                                            model.
+
+                                                                               2
+M. Hostnik et al.                                                                                                     Expert Systems With Applications 292 (2025) 128596
+
+
+3. Code line completion methods                                                        ﬁnds the k most similar snippets by comparing the 𝐿2 distance between
+                                                                                       the embedding of the chunk (𝐶) and the database key (𝑁).
+    In this section, we describe our methodology for code line comple-                     Borgeaud et al. (2022) use the BERT model (Devlin et al., 2019)
+tion based on LLMs. We ﬁrst describe the retrieval-enhanced RETRO                      for , while we use the CodeT5+ encoder (Wang et al., 2023b), as
+approach, followed by our improvements, the ﬁrst concerning the tok-                   explained in Section 4.4. RETRO thus receives as input the input to-
+enization, and the second using context-based retrieval-augmented gen-                 kens x and the k nearest snippets of each input chunk Ret (𝐶𝑢 ) =
+eration.                                                                               ([𝑁 1 , 𝐹 1 ], …, [𝑁 𝑘 , 𝐹 𝑘 ]). When training the model, we ensure that
+                                                                                       Ret (𝐶𝑢 ) does not contain 𝐶𝑢+1 by ﬁltering out chunks [𝑁, 𝐹 ] that orig-
+                                                                                       inate from the same training document as x.
+3.1. The RETRO approach
+                                                                                       The RETRO architecture. The RETRO architecture is based on the
+    RETRO (Retrieval-Enhanced Transformer) is a transformer based                      encoder-decoder transformer architecture (Vaswani et al., 2017). It dif-
+autoregressive language model enhanced with additional snippets re-                    fers from the decoder-only GPT-2 architecture by the addition of a bidi-
+trieved from a database (Borgeaud et al., 2022). The approach splits the               rectional encoder and a chunked cross-attention mechanism, which op-
+input token sequence into contiguous ﬁxed-size chunks and ﬁnds snip-                   erates on chunks and allows the inclusion of retrieved snippets into the
+pets similar to the previous chunk when processing the current chunk.                  decoder. Splitting the input context into ﬁxed-length chunks enables ef-
+Introducing retrieval into the model allows adapting the model to new                  ﬁcient chunk-based retrieval, providing more relevant examples for the
+data without updating its weights, which is particularly useful for pre-               entire context and allowing for the encoder to independently process all
+dicting facts not present in the training set (e.g., names in a local pro-             𝑘 retrieved snippets of chunks. Since the retriever itself is not updated
+gramming project). For our experiments, we make minor modiﬁcations                     during training, it can be updated after the training is complete without
+to the original RETRO architecture. We change the chunk embedding                      modifying the model weights. The RETRO model introduces Retro lay-
+model from BERT (Devlin et al., 2019) to CodeT5+ (Wang et al., 2023b)                  ers, which replace certain regular decoder layers. Following Borgeaud
+and modify the hyperparameters described in Section 4.5. During infer-                 et al. (2022), we place Retro layers at the sixth layer and then at every
+ence, we modify the input context by adding some padding tokens, us-                   subsequent third layer (e.g., at layers 6, 9, 12, if there are 12 layers in
+ing token healing (see Section 3.2) and In-context RAG (see Section 3.3).              total).
+Our RETRO approach is illustrated in Fig. 1. Below, we explain the de-                 Sampling with RETRO. Just as the architecture of RETRO inﬂuences the
+tails of the approach, relevant for our application.                                   construction of the retrieval database and chunked cross-attention, it
+                                                                                       also impacts sampling from the model. When sampling from RETRO, we
+Language modeling with retrieval. We denote the token vocabulary by the
+                                                                                       pad the context to make sure it is a multiple of the chunk size 𝑚 (Wang
+set 𝕍 obtained by a text tokenizer (see Section 4.1). The input token se-
+                                                                                       et al., 2023a). This allows RETRO to retrieve based on the last 𝑚 tokens
+quence 𝑥 = (𝑥1 , …, 𝑥𝑛 ) ∈ 𝕍 𝑛 of length 𝑛 ∈ ℕ is split into 𝑙 ∈ ℕ contiguous
+                                                                                       in the context, as otherwise predicting within the ﬁrst chunk would not
+chunks 𝐶1 = (𝑥1 , …, 𝑥𝑚 ), …, 𝐶𝑙 = (𝑥𝑛−𝑚+1 , …, 𝑥𝑛 ) of length 𝑚 = 64. The
+                                                                                       be improved by retrieval and tokens in the last chunk of the context
+probability of the next token 𝑥𝑖 depends only on previous tokens and
+                                                                                       would not be used for retrieval despite being most relevant to predicting
+snippets retrieved by previous chunks:
+                                                                                       the next token. When generating longer texts, an additional question is
+  (                 (          )   )
+𝑃 𝑥𝑖 ∣ 𝜃, (𝑥𝑗 )𝑗<𝑖 , Ret (𝐶𝑣 ) 𝑣<𝑢 ,                                                  how often to perform retrieval. In our experiments, we limit the task to
+                                  𝑖
+                                                                                       code completion until the end of a line, so retrieval is performed only
+                                                           (          )
+where 𝑢𝑖 = ⌈ 𝑚𝑖 ⌉ is the index of the chunk containing 𝑥𝑖 , Ret (𝐶𝑣 ) 𝑣<1 =           before the ﬁrst step of text generation or whenever the context length
+∅, 𝜃 are the weights of the model, and Ret (𝐶𝑢 ) denotes the 𝑘 retrieved              reaches a multiple of the chunk size.
+snippets for 𝐶𝑢 from the retrieval database .
+Retrieval. The retrieval database is built by splitting the set of input doc-          3.2. Token healing
+uments  into ﬁxed-size chunks of 𝑚 = 64 tokens. The database stores
+key-value pairs, where the key is the embedding of a chunk of tokens N,                     The use of subword tokenization can, in certain cases, lead to unde-
+and the value is a pair [𝑁, 𝐹 ], which contains both the chunk N and the               sirable eﬀects during text generation, especially when completing lines
+next immediate chunk F in the original document. The retriever Ret (𝐶)                of code starting at unnatural word boundaries. Due to the commonly
+                                                                                       used byte pair encoding (BPE) tokenization algorithm (Sennrich, Had-
+                                                                                       dow, & Birch, 2016), some substrings appear in multiple tokens. Conse-
+                                                                                       quently, if the input string 𝑠 ends with a substring that is the beginning
+                                                                                       of some token, the output probability distribution for the next token will
+                                                                                       be biased (Dagan, Synnaeve, & Roziere, 2024). The tokenization of the
+                                                                                       string 𝑠 may end with a token that would be merged with the token we
+                                                                                       are predicting in the BPE algorithm. As a result, tokens that continue
+                                                                                       the tokenized string 𝑠 have a higher probability than tokens that would
+                                                                                       better complete the string 𝑠 truncated by the last token. In addition,
+                                                                                       without a corrective measure, called token healing, 𝑠 may be an out-of-
+                                                                                       distribution example, leading to unpredictable completion results, since
+                                                                                       the model has not encountered such unnatural cut-oﬀ boundaries during
+                                                                                       training.
+                                                                                            We solve this problem by ﬁnding and removing the longest suﬃx 𝑡
+                                                                                       in the input string 𝑠 = 𝑠′ ⋅ 𝑡 that is a preﬁx of some token 𝑥𝑖 ∈ 𝕍 , 𝑥𝑖 =
+                                                                                       𝑡 ⋅ 𝑥′𝑖 (Athiwaratkun et al., 2024; Dagan et al., 2024). During decoding,
+                                                                                       we then constrain the output probability distribution for the next token
+Fig. 1. Illustration of our RETRO approach. The CodeT5+ (Wang et al., 2023b)           only to tokens that match the preﬁx of 𝑡. When we generate 𝑡 in its
+encoder is used for computing chunk embeddings for retrieval based on the 𝐿2           entirety, we no longer constrain the output distribution. We illustrate
+distance. The color coded arrows indicate which tokens attend to which re-             the token healing process in Fig. 2(a) and show its practical impact in
+trieved chunks – refer to Borgeaud et al. (2022) for more details on the chunked       Fig. 2(b). We observe a signiﬁcant impact largely due to the choice of the
+cross-attention (CCA) mechanism. During sampling, the input is padded to be a          evaluation dataset, which begins code completion at a random position
+multiple of the chunk size.                                                            within the line.
+                                                                                   3
+M. Hostnik et al.                                                                                                    Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. 2. Fig. 2(a) shows an example of token healing using a small four token vocabulary. With token healing, the input is rolled back by one token and the output
+distribution is constrained to tokens that start with wo, improving over the prediction without token healing. In Fig. 2(b), we compare code completion results
+(without retrieval) with respect to the use of token healing using three diﬀerent 160 million parameter LLMs that we evaluate in Section 5. The experiments are
+performed on the evaluation set lineR described in Section 4.3. The Preﬁx Similarity (PS) metric is deﬁned in Section 4.7 (higher values are better).
+
+
+3.3. In-context RAG                                                                     As with the RETRO approach, the retriever Ret (𝑞) could operate
+                                                                                    based on the distance between the embedding of the query and chunks
+    A simpler alternative for retrieval-augmented code completion, com-             from the database 𝑟𝑖 ∈ , 𝑑((𝑟𝑖 ), (𝑞)). We decided on a simpler ap-
+pared to RETRO, is to include similar code snippets directly into the               proach that works solely based on the Jaccard similarity of tokens and
+model’s context. This eliminates the additional complexity of the RETRO             not on embeddings. The Jaccard similarity coeﬃcient 𝐽 is used over
+architecture, as the In-context RAG method can be used with any autore-             the set 𝑄 of tokens from the query 𝑞 and the set 𝑅 of tokens from the
+gressive LLM (Lu et al., 2022; Ram et al., 2023; Zhang et al., 2023b).              retrieved snippet 𝑟𝑖 ,
+    Let 𝑥 = (𝑥1 , …, 𝑥𝑛 ) ∈ 𝕍 𝑛 be the input sequence of tokens. From 𝑥, we
+                                                                                                 |𝑄 ∩ 𝑅|
+construct a query 𝑞 from the last 𝑚 ∈ ℕ tokens, 𝑞 = (𝑥𝑛−𝑚+1 , …, 𝑥𝑛 ), and          𝐽 (𝑄, 𝑅) =           .
+                                                                                                 |𝑄 ∪ 𝑅|
+use it to search for the 𝑘 nearest code snippets from the database . The
+tokens of the found snippets Ret (𝑞) = (𝑟1 , …, 𝑟𝑘 ) are concatenated into         The retriever Ret thus ﬁnds code snippets that have the highest sim-
+a sequence of tokens 𝑟 = 𝑟1 ⋅ … ⋅ 𝑟𝑘 . The new context for the model is             ilarity between the query 𝑞 and the chunks in the database . We pre-
+then 𝑥′ = 𝑟 ⋅ 𝑥, which is used to predict the next tokens. The process is           fer this approach because it does not require an additional model to
+illustrated in Fig. 3.                                                              compute embeddings, making it more suitable for eﬃcient execution
+    Individual retrieved snippets 𝑟𝑖 can be further enhanced, for ex-               on limited hardware and with local projects.
+ample by adding metadata about the original ﬁle, such as 𝑟′𝑖 = #
+path/to/file.py\n ⋅𝑟𝑖 . Unlike RETRO, this approach is not limited to               4. Experimental settings
+retrieving ﬁxed size chunks. We can also dynamically adjust the number
+of retrieved snippets 𝑘 based on the remaining size of the input context.              In this section, we present the datasets, evaluation metrics, and
+The retrieval database  and the query 𝑞 need not be constructed based              experimental settings used to verify if retrieval-augmented code com-
+on ﬁxed-length chunks of tokens; instead, the data can be chunked based             pletion can enhance the performance of LLMs when working on local
+on lines or logical code parts, such as functions. In our experiments, to           projects. Since we aim to run models on local hardware, we focus on
+make a fair comparison, we use ﬁxed chunks as in the RETRO approach.                smaller models and eﬃcient retrieval and text generation methods. We
+As with RETRO, the retriever Ret only returns examples that are not                assess the impact of retrieval by comparing GPT-2, RETRO, and the In-
+from the same ﬁle as 𝑥.                                                             context RAG approach that incorporates found snippets into the context
+
+
+
+
+Fig. 3. Our In-context RAG approach based on the Jaccard similarity of chunks of tokens. The retrieved snippet contains continuation tokens and additional metadata
+about the origin ﬁle, while the key for comparing with the query is a ﬁxed length chunk.
+
+                                                                                4
+M. Hostnik et al.                                                                                                  Expert Systems With Applications 292 (2025) 128596
+
+
+                Table 1                                                                      Table 2
+                Tokenizations of the string def foo(): \n                                    Size of the training and test sets composed from the
+                pass. Tokens are comma separated. The StarCoder                              Python part of the StarCoder dataset.
+                tokenization requires fewer tokens due to the merg-
+                                                                                              Split          # Files       # Projects    Total ﬁle size
+                ing of whitespace characters into a single token.
+                                                                                              Training set   11 579 885    1 510 155     56 GiB
+                    Tokenization   Tokens                                                     Test set       1 286 653     168 449       6 GiB
+                    GPT-2          (def, foo, ():, \n, , , , pass)                            Total          12 866 538    1 678 604     62 GiB
+                    StarCoder      (def, foo, ():, \n  , pass)
+
+
+
+of models without modifying the model architecture or training process.           completing function bodies, but we do not use it as it requires complet-
+We split the section into seven parts: tokenization, training and evalu-          ing up to 30 lines and evaluation is performed by executing the projects’
+ation dataset descriptions, retrieval database, model architecture with           unit tests.
+hyperparameters, training of models, and used comparison metrics. The                 In both cases, line and api, the goal is to predict the entire next line
+results are reported in Section 5.                                                or function call. We want to use our models in a code editor even when
+                                                                                  the cursor is in the middle of a line, while the user is typing. Therefore,
+4.1. Tokenization                                                                 we also evaluate the models’ performance on lineR and apiR, where
+                                                                                  we use the model to complete code from a random position within the
+    We compare two subword tokenization methods based on the BPE                  line to the end of the original example. More details on lineR and apiR
+algorithm (Sennrich et al., 2016) with diﬀering vocabularies. The ﬁrst            can be found in Appendix B and an example in Fig. 4.
+version of the vocabulary with 50 257 tokens was trained on a diverse                 When evaluating LLMs, there is often the issue of the evaluation set
+textual dataset obtained from web sources used in the GPT-2 paper (Rad-           being present in the training set, as training sets are frequently obtained
+ford et al., 2019). The second version of the vocabulary with 49 152 to-          by scraping massive amounts of data from the web. Therefore, we check
+kens was trained on a collection of open-source code from various pro-            the overlap between RepoEval and our StarCoder training dataset and
+gramming languages reported in the StarCoder paper (Li et al., 2023).             ﬁnd that three of the eight projects in RepoEval are also present in the
+Since we work on the code completion task, the use of tokenization from           training set (the project with the most overlap is alibaba/FederatedScope,
+the StarCoder paper shall be more appropriate than using a vocabulary             with 48 % of its ﬁles contained in StarCoder). In the resulting line’,
+more suitable for natural language processing.                                    lineR’, api’, and apiR’ datasets, we remove these three projects that
+    The main drawback of using the text-based GPT-2 vocabulary for                overlap with the training set.
+code completion is an ineﬃcient handling of whitespaces. In most cases,               When simulating and evaluating line completion using the RepoE-
+each space in a longer sequence of spaces is represented by its own to-           val dataset, the input context for models without retrieval contains only
+ken, which signiﬁcantly reduces the number of useful tokens available in          the lines before the target line within a single ﬁle. With retrieval, the
+the model’s context during the self-attention computation. An example             retrieval database is built only from individual projects (we do not use
+is in Table 1. In addition to less useful data in the model’s context, the        the entire StarCoder training set). In our experiments, all text is gener-
+ineﬃcient tokenization of consecutive spaces also aﬀects the amount of            ated using greedy decoding to achieve determinism and faster execution
+information in each chunk of the retrieval database, as the database is           when completing short lines of code.
+built with a ﬁxed number of tokens per chunk.
+                                                                                  4.4. Retrieval database
+4.2. The StarCoder dataset
+                                                                                      To train the RETRO approach, we need a database to search for the
+    For training our models, we use the StarCoder dataset3 (Li et al.,            𝑘-nearest chunks of each input chunk of tokens. In line with Borgeaud
+2023). The dataset contains over 300 million open-source ﬁles from                et al. (2022) and Wang et al. (2023a), we use the training dataset as
+more than 80 programming languages, but we use only ﬁles in the                   the retrieval database. This ensures a fair comparison between RETRO,
+Python programming language. We split the dataset into a training and
+test set in ratio 90 %; 10 %. We split the data at the project level and
+not at the ﬁle level, so that all ﬁles belonging to a project are placed in
+the same training or test set. The validation set is constructed from 1 %
+of the test set and is used to monitor metrics during model training to
+detect any potential overﬁtting (which we did not observe). After train-
+ing, we evaluate the models’ performance on both the test set and the
+evaluation sets as described in Section 4.3. Table 2 summarizes the sizes
+of the training and test sets.
+
+4.3. The RepoEval dataset
+
+    For the evaluation of retrieval-augmented line completion on real
+projects, we use the RepoEval dataset (Zhang et al., 2023b), which con-
+tains eight open-source projects from various domains and is divided
+into three evaluation sets: line, api, and function. The line set con-
+tains randomly selected individual lines, while the api set contains lines
+with application programming interface (API) calls to objects deﬁned
+within the project. These calls can be longer than a single line (10 %
+of examples contain at least 5 lines). The function set is intended for           Fig. 4. An example of the In-context RAG approach described in Fig. 3 on our
+                                                                                  lineR subset of RepoEval starting completion from a random position in the tar-
+                                                                                  get line. The example highlights the importance of including chunk continuation
+  3 Available at https://huggingface.co/datasets/bigcode/starcoderdata.           tokens along with the retrieved chunk.
+
+                                                                              5
+M. Hostnik et al.                                                                                                     Expert Systems With Applications 292 (2025) 128596
+
+
+which uses retrieval during training, and GPT-2, which does not. Using                        Table 4
+any other additional dataset, RETRO would have an advantage, as it                            The number of training iterations. Training on eight
+would have access to a larger amount of data during training.                                 A100 40 GB GPUs took 2 hours for the smaller num-
+                                                                                              ber of iterations and 38 hours for the larger number of
+    For building the retrieval database, we use a chunk size of 𝑚 = 64
+                                                                                              iterations.
+tokens and the CodeT5+ (Wang et al., 2023b) encoder for computing
+chunk embeddings. To enable faster retrieval of the 𝑘-nearest chunks,                            Tokenization   Batch size     # Iterations    # Tokens
+we index the stored embeddings with Faiss (Johnson, Douze, & Jégou,                              GPT-2          384            20 312          3.0 × 109
+2021) as described in Appendix D. The pretrained CodeT5+ encoder                                 GPT-2          496            379 032         72.2 × 109
+has 110 million parameters, generates normalized 256-dimensional em-                             StarCoder      384            15 234          2.2 × 109
+                                                                                                 StarCoder      512            367 187         72.2 × 109
+beddings and was trained on various code tasks. We also experimented
+with using the BERT-large encoder with 340 million parameters and
+1024-dimensional vector embeddings, as done by Borgeaud et al. (2022)
+and described in Appendix C. However, we opt for the CodeT5+ en-                  training. For regularization, we use dropout layers with a probability of
+coder since it has fewer parameters, outputs smaller dimensional em-              0.1, and the weight decay factor is 0.01. Table 4 summarizes the num-
+beddings, and is trained for code understanding, making it a better ﬁt            ber of training iterations. For comparing models of all sizes (6, 9, and
+for our use case.                                                                 12 layers), we conduct training on a smaller number of iterations. For
+                                                                                  comparing the ﬁnal models of sizes 6 and 9 layers, we conduct training
+                                                                                  on the larger number of iterations.
+4.5. Model architecture
+                                                                                  Implementation details. Our implementation of RETRO and GPT-2 fol-
+                                                                                  lows the open-source implementation of both models by Wang et al.
+    In accordance with Borgeaud et al. (2022) and Wang et al. (2023a),
+                                                                                  (2023a), which is in turn based on the original work by Borgeaud et al.
+we compare GPT-2 with RETRO, keeping the architecture of both mod-
+                                                                                  (2022). For model training, we use the Megatron-LM framework, which
+els identical except that RETRO includes both an encoder and decoder
+                                                                                  is optimized for training LLMs on multiple GPUs that can be distributed
+compared to GPT-2 which is a decoder only model. Table 3 summa-
+                                                                                  across multiple compute nodes (Narayanan et al., 2021). In our case, all
+rizes the number of parameters in our models as well as the number
+                                                                                  model training and data processing are conducted on a compute node
+of decoder layers. To compare models with roughly equal number of
+                                                                                  with eight A100 40 GB GPUs. Model training and execution on GPUs is
+parameters, we also compare GPT-2 with 9 decoder layers to RETRO
+                                                                                  performed using the bf16 ﬂoating-point format.
+with 6 decoder layers; this comparison shall ensure that any potential
+beneﬁt of RETRO does not arise simply from increasing the number of
+parameters when adding the chunk encoder.                                         4.7. Metrics
+Hyperparameters. We set the hidden dimension 𝑑 to 1024, and the num-
+ber of heads in the multi-headed attention to 16, so that each head pro-              For evaluating LLMs, we use diﬀerent metrics for single-token and
+cesses vectors of dimension 64. The number of decoder layers is shown             multi-token predictions. Single-token metrics are used to monitor model
+in Table 3. Retro layers with the retrieval capability are placed at the          training because they are simple and eﬃcient to compute. To assess
+sixth layer and then at every subsequent third layer (e.g., layers 6, 9, 12       multi-token predictions, we compare the generated output with the tar-
+if there are 12 layers). The encoder in RETRO has two layers. The maxi-           get output.
+mum length of the input context is limited to 384 tokens as in Semenkin,
+Sokolov, and Vu (2024). Instead of ﬁxed absolute positional embed-                4.7.1. Single-token metrics
+dings, we use relative positional embeddings RoPE (Su et al., 2024)                   During model training, we use perplexity (PPL), recall-at-k (Rk ) and
+with a rotational factor of 0.5. For the nonlinear function within fully          mean reciprocal rank (MRR𝑘 ) metrics (Jurafsky & Martin, 2009; Zhang,
+connected feed-forward networks, we use the SwiGLU function, which                Lipton, Li, & Smola, 2023a). While PPL is a widespread metric, we ﬁnd
+has been shown to contribute to better learning outcomes in language              that recall-based metrics provide more intuitive interpretations of re-
+modeling tasks (Shazeer, 2020; Touvron et al., 2023). We use shared               sults compared to PPL.
+weights for the input and output embedding tables to reduce the total                 Let 𝑥 = (𝑥1 , …, 𝑥𝑛 ) ∈ 𝕍 𝑛 be a sequence of tokens. Perplexity PPL ∈
+number of parameters (Press & Wolf, 2017; Vaswani et al., 2017).                  [1, ∞) measures the model’s uncertainty about the data and is deﬁned
+                                                                                  as
+4.6. Model training
+                                                                                                    1∑
+                                                                                                       𝑛
+                                                                                                                (                 )
+                                                                                  PPL(𝑥) = exp{−          log 𝑃𝜃 𝑥𝑡 ∣ 𝑥𝑡−1 , …, 𝑥1 },
+                                                                                                    𝑛 𝑡=1
+   All training hyperparameters are the same for both models, GPT-2
+and RETRO. For optimization, we use the Adam algorithm (Kingma &                                 (               )
+                                                                                  where log 𝑃𝜃 𝑥𝑡 ∣ 𝑥𝑡−1 , …, 𝑥1 is the log-probability for token 𝑥𝑡 , as pre-
+Ba, 2015) with 𝛽1 = 0.9 and 𝛽2 = 0.95. The learning rate is set to 6 × 10−4       dicted by the model with parameters 𝜃. We aim to minimize PPL to its
+and is reduced using a cosine scheduler by a factor of 10 by the end of           optimal value of 1, which is achieved when the model correctly predicts
+                                                                                  each token with a probability of 1.
+              Table 3                                                                 For easier interpretation, we also use recall metrics that summarize
+              The number of parameters of our GPT-2 and RETRO                     the probability that the predicted token is one of the correct tokens.
+              models when using GPT-2 tokenization. The relative                  Let 𝑦̂𝑖 ∈ ℝ|𝕍 | be the output distribution of the next token after 𝑥𝑖 , sorted
+              change in the number of parameters is shown in paren-               by descending probability (i.e., the ﬁrst element of 𝑦̂𝑖 corresponds to the
+              theses. When using the StarCoder tokenization, the                  most probable next token). Then, rank 𝑖 is the index in 𝑦̂𝑖 that corresponds
+              number of parameters for all models decreases by a                  to the next token 𝑥𝑖+1 .
+              constant two million parameters due a smaller vocab-                    The recall-at-𝑘 metric, Rk ∈ [0, 1], equals 1 for 𝑥𝑖 if 𝑥𝑖+1 is among the
+              ulary, which aﬀects the number of parameters in the                 𝑘 most probable suggested tokens. For the entire 𝑥, we take the average
+              transformer’s embedding table.
+                                                                                         1∑ (
+                                                                                            𝑛
+                                                                                                           )
+                    # Decoder layers   GPT-2     RETRO                            Rk =         1 rank 𝑖 ≤ 𝑘 .
+                                                                                         𝑛 𝑖=1
+                    6                  126 M     160 M (+30 %)
+                    9                  164 M     /                                Rk can be interpreted as the probability that the next token is among
+                    12                 201 M     243 M (+21 %)
+                                                                                  the 𝑘 most probable predicted tokens.
+
+                                                                              6
+M. Hostnik et al.                                                                                                           Expert Systems With Applications 292 (2025) 128596
+
+
+    The Mean Reciprocal Rank MRR𝑘 ∈ [0, 1] is deﬁned as                                    5.1. Evaluation on the StarCoder test set
+
+            1∑ 1
+                 𝑛
+MRR𝑘 =                   ,                                                                     In this section, we present the results of our trained models on the test
+            𝑛 𝑖=1 rank 𝑖                                                                   set from Section 4.2. We are interested in the contribution of retrieval
+        1                                                                                  with RETRO compared to the baseline GPT-2 model. We ﬁrst examine
+where rank equals 0 if rank 𝑖 > 𝑘. We aim to maximize Rk and MRR𝑘 to
+             𝑖                                                                             the impact of the retrieval database size, tokenization, and the number
+their optimal value of 1. When comparing single-token metric results,                      of parameters on model performance. We also compare retrieval from
+we must be cautious when comparing results obtained with diﬀerent                          the training and test set simulating diﬀerent numbers of projects in a
+tokenizations, as the size and content of the vocabularies aﬀect the ob-                   local database.
+tained values.                                                                                 First, we examine the results of single-token metrics on the test set.
+                                                                                           When reporting metrics for RETRO, the retrieval database is built from
+4.7.2. Multi-token predictions                                                             the union of the training and test sets, while during training only the
+    For multi-token predictions, we evaluate the quality of code comple-                   training set is used (Borgeaud et al., 2022; Wang et al., 2023a). If re-
+tion, not only based on the prediction of the next token, but on gener-                    trieval from the test set was forbidden, RETRO would not be able to
+ating multiple tokens. We calculate metrics on strings, removing leading                   ﬁnd related code snippets from the same project as the test example,
+and trailing whitespace from the strings (Lu et al., 2022; Zhang et al.,                   due to the project-level split into training and test sets. We also re-
+2023b).                                                                                    port metrics calculated starting from the end of the ﬁrst RETRO chunk
+    Let 𝑠 be the model’s prediction and 𝑡 the target string. Exact Match                   𝑥≥64 = (𝑥64 , …, 𝑥𝑛 ) instead of the entire input sequence 𝑥 = (𝑥1 , …, 𝑥𝑛 ).
+EM(𝑠, 𝑡) ∈ {0, 1} is 1 if the strings 𝑠 and 𝑡 match exactly and 0 otherwise.               For the ﬁrst 𝑚 − 1 = 63 tokens, RETRO does not use retrieval and there-
+Edit Similarity ES(𝑠, 𝑡) ∈ [0, 1] considers how many edits are needed to                   fore functions like the baseline model. The notation GPTgpt        refers to
+                                                                                                                                                          6
+transform 𝑠 into 𝑡:                                                                        the GPT-2 model with 6 layers and GPT-2 tokenization, while GPTSC          6
+                      lev(𝑠, 𝑡)                                                            refers to the using the model with StarCoder tokenization (and similarly
+ES(𝑠, 𝑡) = 1 −                     ,                                                               gpt
+                     max(|𝑠|, |𝑡|)                                                         RETRO6 for RETRO).
+                                                                                               In Fig. 5 we compare our models of all sizes trained on a smaller
+where lev is the Levenshtein distance (Levenshtein et al., 1966). When
+                                                                                           number of iterations and in Table 5 we report the single-token metrics
+combining multiple pairs (𝑠, 𝑡) from a sample of predicted and target re-
+                                                         ∑                                 of our smaller sized models trained over more iterations. In all cases we
+sults  for EM and ES, we calculate the average, EM = 1𝑛 (𝑠,𝑡)∈ EM(𝑠, 𝑡)
+                         1 ∑
+                                                                                           observe that the single-token metrics for RETRO are better than those
+and similarly ES = 𝑛 (𝑠,𝑡)∈ ES(𝑠, 𝑡).                                                     for GPT-2 of comparable size. However, the diﬀerence between the two
+    Preﬁx Similarity PS(𝑠, 𝑡) ∈ [0, 1] measures the preﬁx matching of                      models decreases when comparing models with approximately equal
+characters in the strings 𝑠 and 𝑡. For PS ∈ [0, 1], we take into account                   number of parameters, i.e. RETRO with 6 layers to GPT-2 with 9 layers,
+that lines of code have diﬀerent lengths when combining multiple ex-                       as seen in Table 5. In Table 5 we observe that the diﬀerences between
+amples:                                                                                    RETRO and GPT-2 are higher when calculating metrics from token 64
+      ∑
+         (𝑠,𝑡)∈ |𝜋(𝑠, 𝑡)|
+                                                                                           onwards, suggesting the usefulness of the retrieval mechanism. Increas-
+PS =      ∑                ,                                                               ing the number of layers and thus the number of model parameters also
+             (⋅,𝑡)∈ |𝑡|
+                                                                                           contributes to improvements in metrics, as is evident from Fig. 5. How-
+where 𝜋(𝑠, 𝑡) denotes the longest common preﬁx of 𝑠 and 𝑡. We aim to                       ever, by training smaller models over more iterations, we achieve better
+maximize all three metrics EM, ES, and PS to their optimal value of 1.                     metrics than using larger models trained for fewer iterations. The rel-
+   When reporting multi-token prediction metrics, we calculate 95%                         ative diﬀerences are larger in bigger models, which may be due to the
+conﬁdence intervals obtained using the BCa (Efron, 1987) bootstrap                         use of more Retro layers, as well as the eﬀect of 21 % more parameters
+method with 1000 samples. The notation a𝑐𝑏 means that 𝑎 is the cal-                        in RETROgpt     compared to GPTgpt   .
+                                                                                                       12                    12
+culated metric on the sample, and 𝑏 and 𝑐 are the endpoints of the con-                        We hypothesize that the signiﬁcant diﬀerences in single-token met-
+ﬁdence interval [𝑏, 𝑐].                                                                    rics between GPT-2 and StarCoder tokenization are due to the diﬀerent
+                                                                                           vocabularies making direct comparison of results less meaningful, so we
+5. Results                                                                                 should instead compare relative diﬀerences. Nevertheless, we surmise
+                                                                                           that GPT-2 tokenization achieves better single-token metrics in Fig. 5
+    In this section, we report the results of experiments outlined in Sec-                 and Table 5 due to the whitespace issue from Table 1, as the model
+tion 4. We start by comparing the performance of RETRO and GPT-2                           gets “easy points” by predicting individual spaces. Despite larger abso-
+on the StarCoder dataset, followed by the evaluation on the RepoEval                       lute diﬀerences in individual metrics between GPT-2 and StarCoder tok-
+dataset, which simulates retrieval from local projects. In this setting, we                enization, the relative diﬀerences in Fig. 5 and in Table 5 are of compa-
+also compare the In-context RAG approach. We ﬁnish the section with                        rable magnitude, suggesting a similar contribution of RETRO regardless
+a qualitative analysis of the results.                                                     of the tokenization used.
+
+
+
+                              Table 5
+                              Single-token metrics on the test set with models trained on a larger number of iterations (see Table 4). Reported are
+                              also the relative diﬀerences of metrics compared to the baseline GPT-2 models.
+                                                                                                   Oﬀset 𝑥≥64
+
+                                 Model          PPL          R1           R5          MRR5         PPL          R1           R5           MRR5
+
+                                 GPTgpt
+                                    6
+                                                2.708        79.27        90.25       83.74        2.445        80.97        91.41        85.25
+                                 GPTgpt
+                                    9
+                                                2.602        79.95        90.69       84.33        2.347        81.67        91.85        85.84
+                                                -3.91 %      0.85 %       0.49 %      0.70 %       -4.01 %      0.86 %       0.48 %       0.69 %
+                                 RETROgpt
+                                      6
+                                                2.536        80.40        91.11       84.78        2.257        82.23        92.46        86.50
+                                                -6.35 %      1.43 %       0.95 %      1.24 %       -7.69 %      1.56 %       1.19 %       1.47 %
+                                 GPTSC
+                                    9
+                                                3.946        70.66        86.54       77.07        3.433        73.06        88.18        79.19
+                                 RETROSC
+                                       6
+                                                3.855        70.98        86.98       77.45        3.293        73.65        88.87        79.84
+                                                -2.30 %      0.45 %       0.51 %      0.49 %       -4.08 %      0.81 %       0.78 %       0.82 %
+
+
+                                                                                       7
+M. Hostnik et al.                                                                                                          Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. 5. PPL and MRR5 metrics on the test set with models trained on a smaller number of iterations (see Table 4) with GPT-2 tokenization on the left and StarCoder
+tokenization on the right. For each model, the left bar shows PPL and the right bar shows MRR5 . Reported metrics are calculated on the oﬀset input 𝑥≥64 . The values
+of the left and right results should not be directly compared due to diﬀerent tokenizations. The ﬁgures also show the models’ sizes.
+
+
+                                                                                        Table 6
+                                                                                        Comparison of the relative improvement of single-token metrics between
+                                                                                        RETROgpt
+                                                                                               6
+                                                                                                   in GPTgpt
+                                                                                                          9
+                                                                                                              on 500 projects from the test set with respect to the
+                                                                                        used retrieval database. The metrics are in percentages, contain 95-percent
+                                                                                        conﬁdence intervals and are calculated on the oﬀset input 𝑥≥64 .
+                                                                                          Retrieval database           ΔPPL           ΔR1           ΔR5           ΔMRR5
+
+                                                                                          Project                      0.861.36
+                                                                                                                           0.42
+                                                                                                                                      0.120.23
+                                                                                                                                          0.01
+                                                                                                                                                    0.240.31
+                                                                                                                                                        0.17
+                                                                                                                                                                  0.180.27
+                                                                                                                                                                      0.09
+                                                                                          Training set                 -0.05+0.37
+                                                                                                                             −0.45
+                                                                                                                                      -0.03+0.07
+                                                                                                                                            −0.12
+                                                                                                                                                    0.120.18
+                                                                                                                                                        0.06
+                                                                                                                                                                  0.05+0.13
+                                                                                                                                                                      −0.03
+                                                                                          Training + test set          2.613.04
+                                                                                                                            2.15
+                                                                                                                                      0.530.64
+                                                                                                                                           0.43
+                                                                                                                                                    0.510.58
+                                                                                                                                                         0.44
+                                                                                                                                                                  0.540.63
+                                                                                                                                                                       0.45
+                                                                                          Project (without ﬁltering)   28.5929.39
+                                                                                                                              27.89
+                                                                                                                                      7.197.44
+                                                                                                                                          6.99
+                                                                                                                                                    4.784.97
+                                                                                                                                                        4.64
+                                                                                                                                                                  6.246.45
+                                                                                                                                                                      6.06
+                                                                                          Random chunks                -5.14−4.94
+                                                                                                                             −5.39
+                                                                                                                                      -1.10−1.05
+                                                                                                                                            −1.17
+                                                                                                                                                    -0.61−0.58
+                                                                                                                                                          −0.64
+                                                                                                                                                                  -0.89−0.85
+                                                                                                                                                                        −0.94
+
+
+
+Fig. 6. Distribution of relative improvement in PPL between RETROgpt   6
+                                                                           and
+GPTgpt
+    9
+        on 500 projects from our StarCoder test set based on the used retrieval       observation is that it might be beneﬁcial to train RETRO using a re-
+database.                                                                             trieval database diﬀerent from the training set. The training could also
+                                                                                      include examples of random chunks to help the model better learn to
+                                                                                      skip irrelevant information, and examples of same-document snippets
+Projects in a local database. For practical local use of RETRO, a small               to help the model better learn to copy correct answers.
+number of parameters would not be beneﬁcial if we needed a retrieval
+database with a billion tokens to see beneﬁts. Therefore, we examine                  5.2. Completing code lines from local projects with RepoEval
+the contribution of RETRO using retrieval databases constructed from
+individual projects in the test set by sampling 500 projects, such that the               In this section, we aim to simulate and evaluate completing lines in
+projects are evenly distributed with respect to the number of ﬁles, up to             local projects using the RepoEval dataset, as described in Section 4.3.
+a maximum of 300 ﬁles.                                                                We ﬁrst present the results of RETRO, GPT-2, and In-context RAG in
+    In Fig. 6, we compare the relative improvement of RETROgpt     6
+                                                                       against        this setting, followed by an experiment with larger models, and detailed
+GPTgpt
+     9
+         on projects using diﬀerent retrieval databases. We limit the com-            analysis of our most successful approach, namely In-context RAG. We
+parison to RETRO with 6 layers and GPT-2 with 9 layers to reduce the                  end the section with an analysis of the impact the quality of the retrieved
+impact of the diﬀerence in the model sizes. Retrieving from the entire                snippets has on the code-completion performance.
+StarCoder training set contributes to a greater improvement compared
+to retrieving only from individual projects, which is consistent with the             5.2.1. RETRO and GPT-2 results on local projects
+ﬁndings of Borgeaud et al. (2022), who observe improvements with                          In Fig. 7, we compare our trained models, RETRO and GPT-2, using
+increasing the retrieval database size. We also test retrieval from the               both GPT-2 and StarCoder tokenizations. The metrics conﬁrm the ad-
+project without removing snippets originating from the same ﬁle as the                vantage of StarCoder tokenization, which better handles the whitespace
+input context, which gives an upper bound estimate for RETRO since                    issue mentioned in Section 4.1. Similar to the single-token metrics, with
+the found snippets contain the correct next tokens. As expected, the dif-             multi-token predictions, we observe that the 6-layer RETRO achieves
+ference with GPT-2 is in this case more signiﬁcant, but it does not reach             signiﬁcantly better performance than the 6-layer GPT-2. However, the
+a perfect success rate. A lower bound estimate for RETRO is obtained                  diﬀerence between the 9-layer GPT-2 and the 6-layer RETRO is not as
+when we retrieve random chunks from the entire training set. In this                  pronounced, especially with the StarCoder tokenization.
+case, we observe that the 6-layer RETROgpt     6
+                                                   performs worse than the                Metrics on lineR are higher than on line (similarly for apiR and
+9-layer GPTgpt9
+                 , which is expected,   as it does not beneﬁt from retrieval          api), because in the case of line we predict entire lines, while in lineR
+and consequently behaves as a 6-layer GPT-2 with added noise.                         the model already has some additional context about the content of the
+    From Table 6, we see that the single-token metrics using only                     current line. This is important because predicting the entire line requires
+RETROgpt6
+             with the training set (without the test set) for retrieval are           correctly predicting the start of the line; otherwise, the EM and PS met-
+comparable to those of GPTgpt 9
+                                  . This can be attributed to the fact that re-       rics are immediately zero. Predicting the correct start of a line is not
+trieving from the training set does not provide new information, as both              always straightforward, as multiple beginnings can make sense.
+models have seen the entire training set during training. We therefore                    In Fig. 7, we also report the metrics for the In-context RAG approach
+conclude that retrieval is only meaningful on new, previously unseen                  (more in Section 5.2.3). Despite its simplicity, the contribution of the
+data for the model. When retrieving from projects, the data is new,                   In-context RAG is more signiﬁcant than the use of RETRO. When com-
+as the projects are sampled from the test set. An implication of this                 bining In-context RAG with RETRO, we observe smaller improvements
+
+                                                                                  8
+M. Hostnik et al.                                                                                                   Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. 7. Comparison of our models using GPT-2 and StarCoder tokenization on the RepoEval line-level (left) and API-level (right) datasets without overlap with the
+training set. The bar plots contain 95-percent conﬁdence intervals of the preﬁx similarity metric.
+
+
+compared to enhancing GPT-2 with In-context RAG. A possible expla-                   incorporating useful information from the project into the context ben-
+nation is that including retrieved snippets into the input context “con-             eﬁts the completions of larger models as well.
+fuses” RETRO’s chunk based retrieval, which now ﬁnds neighbors of the                    Results on api are lower than on line due to completing function
+already retrieved snippets for part of the context. Additionally, snippets           calls from projects and also due to the longer length of examples, which
+included in the context receive the same treatment as other input to-                can contain more than a single line. Consequently, the model must cor-
+kens through processing in the transformer, while RETRO incorporates                 rectly predict more tokens, increasing the likelihood of error. For longer
+the retrieved chunks using cross-attention only in the sparsely dispersed            examples the diﬀerences are even greater due to the use of greedy decod-
+Retro layers.                                                                        ing and the propagation of errors, which are more frequent in smaller
+                                                                                     models.
+5.2.2. Comparison with larger models
+    Using small models is beneﬁcial for local model execution, but one
+of the advantages of LLMs is their ability to scale by increasing the num-           5.2.3. In-context RAG
+ber of parameters (Kaplan et al., 2020). In Fig. 8 and Table 7, we ex-                   Since the found snippets are included directly in the model’s context,
+amine the contribution of larger models compared to our smaller mod-                 it is important that the model supports a suﬃciently large context to
+els. The open-source models StarCoder164𝑀 (with 164 × 106 parameters)                append the retrieved data in addition to the input context. When using
+and StarCoder15.5𝐵 (with 15.5 × 109 parameters) are trained on the en-               our models with a context size of 384 tokens, we often need to trun-
+tire StarCoder dataset and further ﬁne-tuned on Python (Li et al., 2023).            cate the input sequence to leave enough space to include the retrieved
+StarCoder164𝑀 serves as a good comparison to our models due to its                   snippets at the beginning of the context. For our models, GPT-2 and
+comparable number of parameters and for assessing the contribution of                RETRO, we include only one retrieved snippet due to the small context
+training on a larger dataset with a larger context size (8192 compared               size of the model. For models with larger context sizes, we include two
+to our size of 384).                                                                 retrieved snippets. In Table 7 and in Figs. 7 and 8, we report multi-token
+    Increasing the number of parameters in some cases more than                      prediction metrics both with and without retrieval as described in Sec-
+doubles the performance compared to smaller models, as seen in                       tion 3.3. The results indicate that using In-context RAG leads to improve-
+Table 7. However, with the use of In-context RAG, even smaller mod-                  ments in multi-token predictions compared to the baseline models in all
+els can achieve results comparable to larger models (without retrieval).             cases.
+The positive impact of retrieval is not limited to smaller models, as                Copying. In Section 5.1, we estimate the upper bound of single-token
+                                                                                     metrics for RETRO by not removing chunks retrieved from the same ﬁle
+                                                                                     as the input context. Similarly, we want to determine the upper bound of
+                                                                                     model performance when using In-context RAG if the retrieved snippets
+                                                                                     can contain the continuation of the current ﬁle we are completing. This
+                                                                                     means that the context includes the line we want to complete, allowing
+                                                                                     the model to simply copy it from the context. In Fig. 9, we see that
+                                                                                     copying from retrieved snippets is very eﬀective, while copying with
+                                                                                     RETRO without In-context RAG performs similarly to using RETRO with
+                                                                                     In-context RAG without copying.
+                                                                                         In addition to the explanations in Section 5.1, we also note that be-
+                                                                                     cause the ﬁrst Retro layer is the sixth layer (which is also the last and
+                                                                                     only Retro layer for RETROSC    6
+                                                                                                                       ), certain information from the input to-
+                                                                                     kens may get diluted, preventing direct copying of tokens from the en-
+                                                                                     coded chunks with chunked cross-attention. We hypothesize that adding
+                                                                                     copying examples to the training would improve the model’s ability to
+                                                                                     copy, and Retro layers could be included closer to the beginning of pro-
+                                                                                     cessing instead of only in the sixth layer. Accurate copying is important
+                                                                                     because when completing code, we want to extract not only the seman-
+Fig. 8. Comparison of our models with larger models on the line-level and API-       tic meaning from the found snippets but also exact facts (e.g., the exact
+level RepoEval datasets starting completion from random positions. The bar           name of an existing function and not a hallucinated but semantically
+plots contain 95-percent conﬁdence intervals of the preﬁx similarity metric.         similar name).
+
+                                                                                 9
+M. Hostnik et al.                                                                                                              Expert Systems With Applications 292 (2025) 128596
+
+
+                                     Table 7
+                                     Results of comparing smaller and larger models on RepoEval. The results for code-davinci-
+                                     002 are from Zhang et al. (2023b).
+                                                                                                      In-context RAG
+
+                                       Model              Data    EM          ES           PS         EM           ES          PS
+
+                                       GPTSC
+                                          9
+                                                          line    18.019.9
+                                                                       16.1
+                                                                              47.048.4
+                                                                                  45.3
+                                                                                           23.225.0
+                                                                                               21.4
+                                                                                                      33.936.0
+                                                                                                          31.6
+                                                                                                                   58.460.2
+                                                                                                                       56.7
+                                                                                                                               40.943.6
+                                                                                                                                   38.4
+                                                          api     8.810.1
+                                                                     7.3
+                                                                              39.340.6
+                                                                                  37.8
+                                                                                           15.016.3
+                                                                                               13.5
+                                                                                                      21.123.2
+                                                                                                          19.1
+                                                                                                                   51.753.3
+                                                                                                                       50.0
+                                                                                                                               26.929.0
+                                                                                                                                   24.9
+                                       RETROSC
+                                            6
+                                                          line    19.621.8
+                                                                       17.7
+                                                                              50.151.8
+                                                                                  48.6
+                                                                                           26.428.1
+                                                                                               24.5
+                                                                                                      31.633.8
+                                                                                                          29.2
+                                                                                                                   57.258.9
+                                                                                                                       55.6
+                                                                                                                               39.542.2
+                                                                                                                                   37.3
+                                                          api     9.611.0
+                                                                     8.1
+                                                                              42.744.1
+                                                                                  41.3
+                                                                                           16.818.2
+                                                                                               15.4
+                                                                                                      20.121.9
+                                                                                                          18.1
+                                                                                                                   50.551.9
+                                                                                                                       48.6
+                                                                                                                               26.328.3
+                                                                                                                                   24.4
+                                       StarCoder164𝑀      line    25.127.0
+                                                                       22.9
+                                                                              53.154.7
+                                                                                  51.4
+                                                                                           31.934.2
+                                                                                               29.9
+                                                                                                      41.644.0
+                                                                                                          39.1
+                                                                                                                   64.666.3
+                                                                                                                       62.6
+                                                                                                                               48.150.9
+                                                                                                                                   45.2
+                                                          api     23.225.1
+                                                                       21.0
+                                                                              52.654.1
+                                                                                  50.9
+                                                                                           32.434.6
+                                                                                               30.2
+                                                                                                      34.536.8
+                                                                                                          32.2
+                                                                                                                   63.064.6
+                                                                                                                       61.4
+                                                                                                                               43.646.0
+                                                                                                                                   41.4
+                                       StarCoder15.5𝐵     line    39.441.8
+                                                                       37.1
+                                                                              64.466.2
+                                                                                  62.7
+                                                                                           44.847.5
+                                                                                               42.3
+                                                                                                      51.053.4
+                                                                                                          48.8
+                                                                                                                   72.273.7
+                                                                                                                       70.6
+                                                                                                                               56.559.2
+                                                                                                                                   53.8
+                                                          api     32.134.2
+                                                                       29.8
+                                                                              61.262.9
+                                                                                  59.4
+                                                                                           41.343.8
+                                                                                               39.0
+                                                                                                      44.146.4
+                                                                                                          41.5
+                                                                                                                   71.472.9
+                                                                                                                       69.8
+                                                                                                                               53.656.1
+                                                                                                                                   51.2
+                                       code-davinci-002   line    38.69       62.58        /          55.94        74.34       /
+                                                          api     32.50       61.52        /          47.75        73.30       /
+
+
+
+                                                                                           Table 8
+                                                                                           Proportions of improved and worsened examples based on preﬁx similarity
+                                                                                           when comparing the baseline model (rows) with the model with retrieval
+                                                                                           (columns) on the lineR dataset. The ﬁrst column of the ﬁrst row tells us that
+                                                                                           RETROSC6
+                                                                                                     completes the line better than GPTSC
+                                                                                                                                        9
+                                                                                                                                          in 12.3 % of cases, worse in
+                                                                                           7.9 % of cases, and in the remaining cases, the predictions of both models
+                                                                                           are the same.
+                                                                                                                                In-context RAG
+
+                                                                                                                 RETROSC
+                                                                                                                      6
+                                                                                                                                RETROSC
+                                                                                                                                     6
+                                                                                                                                                 GPTSC
+                                                                                                                                                    9
+                                                                                                                                                               StarCoder164𝑀
+
+                                                                                             GPTSC
+                                                                                                9
+                                                                                                                 12.3 / 7.9     20.3 / 9.3       17.4 / 6.2    26.2 / 6.3
+                                                                                             RETROSC
+                                                                                                   6
+                                                                                                                 /              14.5 / 6.0       17.2 / 8.8    24.4 / 6.6
+                                                                                             StarCoder164𝑀       11.4 / 15.6    17.5 / 14.6      17.2 / 14.1   15.8 / 3.8
+
+
+
+                                                                                         the input context are found. The beneﬁts of retrieval are thus project-
+Fig. 9. Comparison of copying abilities using In-context RAG on lineR’. With             dependent, with greater beneﬁts in projects with repetitive code, as a
+copying, retrieved snippets can be from the same ﬁle as the input context, which
+                                                                                         high Jaccard similarity indicates token overlap between ﬁles.
+means including the correct continuation of the current line in the model’s con-
+                                                                                             Using RETRO or In-context RAG generally improves multi-token pre-
+text. RETRO copying shows the use of RETRO without ﬁltering out the current
+ﬁle from retrieval but without additional In-context RAG (see also Section 5.1).         dictions. However, there are cases where the model without retrieval
+The bars show 95 % conﬁdence intervals for the preﬁx similarity metric PS.               correctly completes a line, while the model with retrieval does not, as
+                                                                                         summarized in Table 8. Most examples remain unchanged regardless of
+                                                                                         retrieval use, suggesting that retrieval is beneﬁcial only in speciﬁc cases.
+5.2.4. Impact of retrieval similarity                                                    While positive examples dominate, the proportion of worsened results
+    Intuitively, we expect the beneﬁt of retrieval-augmented line com-                   is not negligible and we want to reduce it.
+pletion to depend on the quality of the retrieved snippets. Therefore, we                    Now we focus only on the examples highlighted in Table 8, where
+ﬁrst examine the impact of the retrieved snippets’ similarities on the ex-               we detect worsening or an improvement in metrics. From Fig. 11, we
+act match metric EM with the results shown in Fig. 10. As expected, the                  ﬁnd that the impact of retrieval is negative mainly at low similarities
+metric increases with higher matching according to the Jaccard similar-                  to the query, while the positive impact is more present at higher simi-
+ity coeﬃcient. We also ﬁnd that most of the metric improvement comes                     larities. To mitigate the consequences of poor retrieval, we examine the
+from projects where snippets with high similarity to the query from                      idea of whether it makes sense to limit retrieval to found snippets with
+
+
+
+
+Fig. 10. Impact of the Jaccard similarity coeﬃcient evaluated on lineR and apiR using the StarCoder164𝑀 model and In-context RAG. The left side shows EM
+increasing as the Jaccard similarity increases, and the distribution of similarities, which is slightly higher on apiR than on lineR. The right side shows the average
+Jaccard similarity for each of the eight projects in lineR and apiR and the diﬀerence in EM for each project individually compared to the baseline model without
+retrieval. Projects with gray names and an asterisk are those removed in lineR’ and apiR’ due to a non-empty overlap with the training set.
+
+                                                                                   10
+M. Hostnik et al.                                                                                                        Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. 11. The left side shows the proportion of cases that are better or worse with In-context RAG compared to the baseline model without retrieval. The model used
+is GPTSC
+       9
+         on lineR with PS being compared. Retrieval is beneﬁcial mainly when there is a high similarity of the retrieved snippets. The right side shows the diﬀerence
+in the PS metric to the baseline model when limiting retrieval to cases above a certain similarity threshold.
+
+similarities higher than some threshold value. Unfortunately, the right                   veriﬁed with static code analysis tools to discard suggestions contain-
+side of Fig. 11 does not show a signiﬁcant beneﬁt from limiting to suf-                   ing errors (e.g., calling a non-existent function or using an incorrect
+ﬁciently similar snippets.                                                                number of arguments). However, static analysis cannot resolve seman-
+                                                                                          tic errors, such as incorrect conditions in loops or the improper order of
+                                                                                          operations. Therefore, careful attention and understanding of the code
+5.3. Qualitative analysis
+                                                                                          are necessary when using code completion tools.
+                                                                                          Advantages and disadvantages of retrieval. As discussed in Section 5.2.4,
+    In Section 5.2, we found that retrieval generally beneﬁts model pre-
+                                                                                          the advantage of retrieval-augmented completion becomes apparent
+dictions, but there are still cases where retrieval degrades the accuracy
+                                                                                          when highly similar examples to the input context are found in the
+of predictions. In this section, we conduct a qualitative review of suc-
+                                                                                          project. An example of repetitive code occurs when writing tests, which
+cessful and less successful line completion examples, using our GPTSC  9                  also involves the use of objects deﬁned within the project. In most cases,
+and RETROSC  6
+                models.
+                                                                                          the model can focus on the relevant information in the context and
+Common errors. Our small models (with or without retrieval) mostly
+                                                                                          successfully skip over unhelpful retrieved snippets. However, when the
+make semantic errors; syntactic errors are rare. Semantic errors require
+                                                                                          model performs worse with retrieval, it is often due to misleading snip-
+a higher level of code understanding, which might exceed the capabili-
+                                                                                          pets that conﬂict with the information of the current ﬁle. For example,
+ties of our small models. Diﬃculties often arise when completing natural
+                                                                                          the model might use a function call as found in a related ﬁle instead of
+language strings (e.g., comments and documentation within the code),
+                                                                                          how it should be used according to the current ﬁle, as seen in Fig. 13.
+at the beginning of ﬁles in import statements, and when using boolean
+                                                                                          Evaluation limitations. Evaluating the quality of code completion us-
+or numerical constants. Degradation is also present in longer predictions
+                                                                                          ing metrics is challenging (Evtikhiev, Bogomolov, Sokolov, & Bryksin,
+due to greedy decoding and error propagation. For completing import
+                                                                                          2023). In many cases, a line can be completed in multiple ways, but eval-
+statements, the model would need information about the upcoming lines
+                                                                                          uation datasets typically contain only one correct answer. This problem
+of the ﬁle to infer which modules to import into the program. In complet-
+                                                                                          could be mitigated by sampling multiple generated solutions, thereby
+ing documentation, we have a similar problem if we are documenting
+                                                                                          increasing the likelihood of a correct match. A better solution would be
+code that has not yet been written and follows in the subsequent lines.
+                                                                                          to execute the generated code using unit tests deﬁned in the project.
+Additionally, our string matching based evaluation does not distinguish
+                                                                                          However, besides the complexity of running code (e.g., setting up a de-
+between semantically equivalent ways of expressing messages causing
+                                                                                          velopment environment for each project), this is not the most suitable
+examples like in Fig. 12 to achieve low metrics. Nevertheless, retrieval
+                                                                                          quality measure in our case since we are completing individual lines
+can oﬀer an advantage in such cases by providing the model with an
+                                                                                          rather than entire functions. Instead of string based metrics, LLMs could
+example of the existing documentation style.
+                                                                                          be used to evaluate quality, as they have a higher correlation with hu-
+Hallucinations. Handling hallucinations in code completion is more man-
+                                                                                          man judgements (Liu et al., 2023). Ultimately, it is the developer who
+ageable compared to natural language, as the proposed code can be
+                                                                                          decides whether to accept the suggested line, so for evaluation, it would
+                                                                                          be necessary to ask users for feedback or conduct A/B tests of the ﬁnal
+                                                                                          product integrated into a code editor.
+
+                                                                                          6. Conclusion and future work
+
+                                                                                             In this work, we examined the impact of retrieval from local projects
+                                                                                          on the success of completing lines of code using LLMs. We compared the
+                                                                                          GPT-2 and RETRO models, which we trained on a dataset of Python ﬁles
+                                                                                          from the StarCoder dataset. We compared two diﬀerent tokenization
+                                                                                          approaches and highlighted the importance of token healing and the
+                                                                                          proper tokenization of whitespace when completing code, as it aﬀects
+                                                                                          the amount of information in the context and the storage size of tok-
+Fig. 12. An example of completing documentation where retrieval guides the                enized data. We limited GPT-2 and RETRO to a smaller size of around
+model to copy from a highly similar found snippet. The code is shortened for              160 million parameters and reduced the impact of the diﬀering num-
+clarity. This example also shows the diﬃculty of evaluating natural language              ber of parameters when comparing the two models. We conﬁrmed that
+using string similarity based metrics, as the model’s prediction without retrieval        RETRO with retrieval from the local project improves metrics compared
+is very reasonable.                                                                       to both the 6-layer and 9-layer GPT-2 on all considered benchmarks.
+
+                                                                                     11
+M. Hostnik et al.                                                                                                       Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. 13. On the left is an example of misleading retrieval where the model incorrectly uses a function as it appears in the retrieved snippet instead of how it is used
+in the current ﬁle. On the right is an example of completing a test function in a project where a model with a longer context could correctly complete the lines, as the
+name ProbClassifier would have been encountered at the beginning of the ﬁle in the import statements. However, with a context size of 384, the beginning of the
+ﬁle is lost, but retrieval ﬁnds a similar example in other tests in the project, enabling successful completion compared to the baseline model. The code is shortened
+for clarity in both cases.
+
+However, the diﬀerence between the 9-layer GPT-2 and the 6-layer                           By training on more data, using appropriate tokenization, and im-
+RETRO is not pronounced, indicating the importance of considering the                  proving the information present in the context with retrieval and ﬁll-
+number of model parameters when comparing small models. We further                     in-the-middle, alongside approaches such as weight quantization, we
+examined the impact of retrieval using In-context RAG, which includes                  believe that code completion models have great potential for local use
+snippets found using the Jaccard similarity of tokens into the context.                in programming tools.
+Using In-context RAG to retrieve from projects in RepoEval improved re-
+sults of both small and larger models, but the improvements depended                   CRediT authorship contribution statement
+on the quality of retrieval and the projects’ characteristics. We found
+that the similarity of the retrieved snippets and the ability to copy from                 Marko Hostnik: Conceptualization, Methodology, Software, Valida-
+them have a signiﬁcant impact on the results, but the copying capabil-                 tion, Formal analysis, Investigation, Writing – original draft, Writing –
+ities of the 6-layered RETRO were found to be lacking. Based on our                    review and editing. Marko Robnik-Šikonja: Conceptualization, Writ-
+results, we deem that using small language models with In-context RAG                  ing – original draft, Writing – review and editing, Supervision, Project
+is more sensible than using RETRO for the task of completing lines of                  administration.
+code with retrieval from local projects due to the simplicity and broader
+                                                                                       Funding sources
+applicability of In-context RAG.
+    In summary, users looking to apply our work would do well to con-
+                                                                                           This research was funded by the Slovenian Research and Innovation
+sider picking the largest model size that ﬁts within their constraints and
+                                                                                       Agency (ARIS) core research programme P6-0411 and project GC-0002.
+then apply retrieval from local projects.
+                                                                                       The work was also supported by the EU through ERA Chair under Grant
+Future work. RETRO has proven useful for code completion, but several
+                                                                                       101186647 (AI4DH) and coﬁnancing for research innovation projects
+potential improvements would require retraining the model. Training
+                                                                                       in support of green transition and digitalisation (project PoVeJMo, no.
+could include examples that would improve the ability to copy from re-
+                                                                                       C3.K8.IB) (Marko Robnik-Šikonja).
+trieved snippets and to ignore irrelevant information. For code comple-
+tion, it would be beneﬁcial to experiment training RETRO with the ﬁll-
+                                                                                       Data availability
+in-the-middle technique (Donahue, Lee, & Liang, 2020), which reshapes
+the context to include code after the cursor position. Training RETRO
+                                                                                           The StarCoder dataset (Li et al., 2023) and the RepoEval (Zhang
+with a longer context could also be enhanced by training on projects
+                                                                                       et al., 2023b) dataset are publicly available.
+instead of individual ﬁles. For better integration with In-context RAG,
+the retrieved snippets could be appended to the input context during                   Declaration of competing interest
+training (Wang et al., 2023a). Additionally, it would be worthwhile to
+explore training and using RETRO with diﬀerent retrieval methods, such                     The authors declare the following ﬁnancial interests/personal rela-
+as sparse BM-25 search instead of methods based on dense embeddings.                   tionships which may be considered as potential competing interests:
+    A major advantage of In-context RAG is that it does not require up-                Marko Hostnik reports a relationship with JetBrains sro that includes:
+dating the model weights, but doing so could still be beneﬁcial for im-                employment. If there are other authors, they declare that they have no
+proving performance either by ﬁne-tuning the model with included re-                   known competing ﬁnancial interests or personal relationships that could
+trieved snippets or by ﬁne-tuning the retriever (Izacard & Grave, 2021;                have appeared to inﬂuence the work reported in this paper.
+Karpukhin et al., 2020). Instead of retrieving snippets based on the Jac-
+card similarity of tokens, a future area to investigate is incorporating               Acknowledgements
+sparse search with the beneﬁts of dense semantic search and check
+whether hybrid generative and retrieval-based models could further im-                    We thank JetBrains for motivating the problem and providing the
+prove performance. For more eﬃcient execution in code editors, mod-                    computing power for conducting our experiments.
+els could be ﬁne-tuned to append to the end of the context instead of
+the beginning, which would improve the caching of keys and values                      Appendix A. StarCoder dataset analysis
+in self-attention during frequent code editing. A next step would also
+be to explore the impact of combining In-context RAG with the ﬁll-in-                     In this paper, we examine the beneﬁt of including retrieved similar
+the-middle technique, which is becoming increasingly widespread (Wu                    code snippets from the project into the code completion process. We hy-
+et al., 2024).                                                                         pothesize that ﬁnding similar examples can be useful when predicting
+
+
+                                                                                  12
+M. Hostnik et al.                                                                                                        Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. A.1. Comparison of references to functions deﬁned within projects in the StarCoder dataset. Non-local function calls refer to references to functions not deﬁned
+within the project (e.g., calls to functions from the standard library). In the right ﬁgure, due to varying ﬁle lengths, we calculate the average number of calls per
+4000 characters. The number of calls increases with project size (left graph), and calls are more frequent when considering the project as a whole compared to
+individual ﬁles (right distribution). In the right distribution, the number of calls within ﬁles stands out near zero, which we attribute to calls to functions deﬁned in
+other project ﬁles. Within individual ﬁles, such calls are counted as non-local.
+
+
+symbols (e.g., function names, variables, classes) deﬁned within the lo-                Appendix D. Indexing chunk embeddings
+cal project, as such names are not present in the training set. Therefore,
+we sample 50,000 random projects with at least three ﬁles from the                          Due to the large number of chunks in the database, exhaustive
+StarCoder dataset and count the frequency of calls to functions deﬁned                  searching for the exact 𝑘-nearest chunks is not feasible, so we resort to
+within the project by traversing the abstract syntax tree. In Fig. A.1, we              approximate searching instead. As a consequence of approximate search,
+compare the number of calls within individual ﬁles to the number of                     we seek a compromise between the search accuracy, search speed, in-
+calls within the project as a whole. The number of calls increases with                 dex building speed, and index memory usage. In our implementation,
+the size of the project or ﬁles, and the number of calls within the project             we use the Faiss library (Johnson et al., 2021) to index the chunk embed-
+is greater than the number of calls within individual ﬁles. Consequently,               dings.4 The search is sped up using IVF indexing (Johnson et al., 2021)
+we expect that cross-ﬁle code retrieval can improve the quality of code                 in combination with the HNSW (Malkov & Yashunin, 2020) algorithm.
+completion, especially for larger projects.                                             Additionally, the vectors are compressed with the PQ (Jegou, Douze,
+                                                                                        & Schmid, 2008) vector codec and the OPQ (Ge, He, Ke, & Sun, 2013)
+                                                                                        transformation. Table D.1 summarizes the space requirements for stor-
+Appendix B. RepoEval modiﬁcation details                                                ing the database and retrieval index based on the tokenization method
+                                                                                        used.
+   The line and api datasets from RepoEval (Zhang et al., 2023b) each
+contain 1600 examples. Every example in line is composed of a prompt                      Table D.1
+                                                                                          Comparison of the retrieval database sizes using two diﬀerent vocabular-
+input string and a ground_truth output string. Our modiﬁed dataset
+                                                                                          ies for tokenization. The total size of all ﬁles before tokenization is 62
+lineR is constructed from line by expanding each original example’s
+                                                                                          GiB.
+prompt with a random number of characters from ground_truth and
+shrinking ground_truth accordingly. We are careful that at least one                        Tokenization    # Chunks     # Tokens    Tokenized ﬁle size    Index size
+non-whitespace character from ground_truth is included into the new                         GPT-2           4.5 × 108    27 × 109    53 GiB                18 GiB
+prompt to avoid expanding prompt only by the leading indentation                            StarCoder       2.8 × 108    18 × 109    33 GiB                12 GiB
+whitespace. The construction of apiR from api is similar to that of lineR
+from line.
+                                                                                        Indexing eﬀectiveness. To evaluate the eﬀectiveness of approximate near-
+                                                                                        est chunk retrieval using the index constructed with Faiss, we compare
+                                                                                        the 𝐿2 distance between the embedding of a chunk and the embedding of
+Appendix C. Chunk embeddings with BERT
+                                                                                        the nearest chunk from the retrieval database returned by the index. For
+                                                                                        comparison, we observe the distributions of 𝐿2 distances between the
+    We test the impact of using the BERT encoder versus CodeT5+
+                                                                                        embeddings of retrieved chunks and chunks from the database, train-
+on a smaller dataset (6.7 % of the total training set) and ﬁnd that us-
+                                                                                        ing set, test set, and chunks composed of random tokens. All chunks
+ing the larger BERT encoder for chunk embeddings does not result in
+                                                                                        contain 64 tokens, and we sample 10 0000 chunks from each set. The
+signiﬁcant changes in test metrics – see Table C.1. The comparison
+                                                                                        distribution results are shown in Fig. D.1. The right side of the ﬁgure
+is not exhaustive due to the smaller training set and shorter training
+                                                                                        shows approximate distances as returned by Faiss, which are not exact
+duration.
+                                                                                        due to the compression and transformation of embeddings by the in-
+                                                                                        dexing. As expected, retrieving chunks from the database itself is nearly
+            Table C.1                                                                   error-free (98 % accuracy), while searching with random chunks returns
+            Comparison of model training on a smaller training dataset                  the largest distances. Retrieving chunks from the training set results in
+            using BERT and CodeT5+ for computing chunk embed-                           smaller distances compared to retrieving chunks from the test set, as the
+            dings. GPT-2 tokenization is used.                                          database is constructed by partitioning the training set into consecutive
+               Model      Encoder      PPL     R1      R5      MRR5                     non-overlapping chunks.
+
+               GPTgpt
+                  6
+                          /            2.96    77.9    89.4    82.6
+               RETROgpt
+                      6
+                          BERT         2.95    78.0    89.5    82.7                      4 In Faiss, the used index can be compactly described by the string
+               RETROgpt
+                      6
+                          CodeT5+      2.95    78.0    89.4    82.7
+                                                                                        OPQ32_128,IVF1048576_HNSW32,PQ32.
+
+                                                                                   13
+M. Hostnik et al.                                                                                                                            Expert Systems With Applications 292 (2025) 128596
+
+
+
+
+Fig. D.1. Distribution of 𝐿2 distances between chunk embeddings and their retrieved neighbors. The left ﬁgure shows exact distances, while the right ﬁgure shows
+approximate distances as returned by the Faiss index.
+
+References                                                                                            Jegou, H., Douze, M., & Schmid, C. (2008). Hamming embedding and weak geometric
+                                                                                                          consistency for large scale image search. In Computer vision – ECCV (pp. 304–317).
+Athiwaratkun, B., Wang, S., Shang, M., Tian, Y., Wang, Z., Gonugondla, S., Gouda, S. K.,                  https://doi.org/10.1007/978-3-540-88682-2_24
+    Kwiatkowski, R., Nallapati, R., & Xiang, B. (2024). Token alignment via character                 Johnson, J., Douze, M., & Jégou, H. (2021). Billion-scale similarity search with GPUs.
+    matching for subword completion. In ACL Findings 2024.                                                IEEE Transactions on Big Data, 7(3), 535–547. https://doi.org/10.1109/TBDATA.2019.
+Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang, E., Cai, C.,                2921572
+    Terry, M., Le, Q., & Sutton, C. (2021). Program synthesis with large language models.             Jurafsky, D., & Martin, J.H. (2009). Speech and language processing (2nd Edition). Upper
+    arXiv:2108.07732                                                                                      Saddle River, NJ, USA: Prentice-Hall, Inc.
+Borgeaud, S., Mensch, A., Hoﬀmann, J., Cai, T., Rutherford, E., Millican, K., Van                     Kaplan, J., McCandlish, S., Henighan, T., Brown, T.B., Chess, B., Child, R., Gray, S.,
+    Den Driessche, G.B., Lespiau, J.B., Damoc, B., Clark, A., De Las Casas, D., Guy, A.,                  Radford, A., Wu, J., & Amodei, D. (2020). Scaling laws for neural language models.
+    Menick, J., Ring, R., Hennigan, T., Huang, S., Maggiore, L., Jones, C., Cassirer, A. …                arXiv:2001.08361
+    Sifre, L. (2022). Improving language models by retrieving from trillions of tokens. In            Karpukhin, V., Oguz, B., Min, S., Lewis, P., Wu, L., Edunov, S., Chen, D., & Yih, W.t.
+    Proceedings of the 39th international conference on machine learning (pp. 2206–2240).                 (2020). Dense passage retrieval for open-domain question answering. In Proceedings
+    (vol. 162). Proceedings of Machine Learning Research.                                                 of the 2020 conference on empirical methods in natural language processing (EMNLP) (pp.
+Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J.D., Dhariwal, P., Neelakantan, A.,                 6769–6781). https://doi.org/10.18653/v1/2020.emnlp-main.550
+    Shyam, P., Sastry, G., Askell, A., Agarwal, S., Herbert-Voss, A., Krueger, G., Henighan,          Kasneci, E., Sessler, K., Küchemann, S., Bannert, M., Dementieva, D., Fischer, F.,
+    T., Child, R., Ramesh, A., Ziegler, D., Wu, J., Winter, C. … Amodei, D. (2020). Lan-                  Gasser, U., Groh, G., Günnemann, S., Hüllermeier, E., Krusche, S., Kutyniok, G.,
+    guage models are few-shot learners. In Advances in neural information processing systems              Michaeli, T., Nerdel, C., Pfeﬀer, J., Poquet, O., Sailer, M., Schmidt, A., Seidel, T. …
+    (pp. 1877–1901). (vol. 33).                                                                           Kasneci, G. (2023). ChatGPT for good? On opportunities and challenges of large lan-
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto, H.P., Kaplan, J., Edwards, H.,                guage models for education. Learning and Individual Diﬀerences, 103, 102274. https:
+    Burda, Y., Joseph, N., Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov, M., Khlaaf,              //doi.org/10.1016/j.lindif.2023.102274
+    H., Sastry, G., Mishkin, P., Chan, B., Gray, S. … Zaremba, W. (2021). Evaluating large            Khandelwal, U., Levy, O., Jurafsky, D., Zettlemoyer, L., & Lewis, M. (2020). Generalization
+    language models trained on code. arXiv:2107.03374                                                     through memorization: Nearest neighbor language models. In International conference
+Dagan, G., Synnaeve, G., & Roziere, B. (2024). Getting the most out of your tokenizer for                 on learning representations.
+    pre-training and domain adaptation. In Forty-ﬁrst international conference on machine             Kingma, D.P., & Ba, J. (2015). Adam: A method for stochastic optimization. In 3rd Inter-
+    learning.                                                                                             national conference on learning representations.
+Devlin, J., Chang, M.W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of Deep                  Levenshtein, V.I. et al. (1966). Binary codes capable of correcting deletions, insertions,
+    Bidirectional Transformers for Language Understanding. In Proceedings of the 2019                     and reversals. In Soviet physics doklady (pp. 707–710). Soviet Union (vol. 10).
+    conference of the north American chapter of the association for computational linguistics:        Leviathan, Y., Kalman, M., & Matias, Y. (2023). Fast inference from transformers via spec-
+    Human language technologies, volume 1 (long and short papers) (pp. 4171–4186). https:                 ulative decoding. In Proceedings of the 40th international conference on machine learning
+    //doi.org/10.18653/v1/N19-1423                                                                        (pp. 19274–19286).
+Ding, Y., Wang, Z., Ahmad, W., Ding, H., Tan, M., Jain, N., Ramanathan, M.K., Nallapati,              Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis,
+    R., Bhatia, P., Roth, D., & Xiang, B. (2023). CrossCodeEval: A Diverse and Multilingual               M., Yih, W.t., Rocktäschel, T., Riedel, S., & Kiela, D. (2020). Retrieval-augmented gen-
+    Benchmark for Cross-File Code Completion. In Advances in neural information processing                eration for knowledge-intensive NLP tasks. In Advances in neural information processing
+    systems (pp. 46701–46723). (vol. 36).                                                                 systems (pp. 9459–9474). (vol. 33).
+Donahue, C., Lee, M., & Liang, P. (2020). Enabling language models to ﬁll in the blanks.              Li, R., allal, L.B., Zi, Y., Muennighoﬀ, N., Kocetkov, D., Mou, C., Marone, M., Akiki, C.,
+    In Proceedings of the 58th annual meeting of the association for computational linguistics            Jia, L.I., Chim, J., Liu, Q., Zheltonozhskii, E., Zhuo, T.Y., Wang, T., Dehaene, O., Lamy-
+    (pp. 2492–2501). https://doi.org/10.18653/v1/2020.acl-main.225                                        Poirier, J., Monteiro, J., Gontier, N., Yee, M.H. … de Vries, H. (2023). StarCoder: May
+Efron, B. (1987). Better bootstrap conﬁdence intervals. Journal of the American Statistical               the source be with you!. Transactions on Machine Learning Research.
+    Association, 82(397), 171–185. https://doi.org/10.1080/01621459.1987.10478410                     Liang, J.T., Yang, C., & Myers, B.A. (2024). A large-scale survey on the usability of AI
+Evtikhiev, M., Bogomolov, E., Sokolov, Y., & Bryksin, T. (2023). Out of the BLEU: How                     programming assistants: Successes and challenges. In Proceedings of the IEEE/ACM
+    should we assess quality of the Code Generation models? Journal of Systems and Soft-                  46th international conference on software engineering ICSE ’24. https://doi.org/10.1145/
+    ware, 203, 111741. https://doi.org/10.1016/j.jss.2023.111741                                          3597503.3608128
+Ge, T., He, K., Ke, Q., & Sun, J. (2013). Optimized product quantization for approximate              Liu, T., Xu, C., & McAuley, J. (2024). RepoBench: Benchmarking repository-level code
+    nearest neighbor search. In Proceedings of the 2013 IEEE conference on computer vi-                   auto-completion systems. In The twelfth international conference on learning representa-
+    sion and pattern recognition CVPR ’13 (p. 2946–2953). https://doi.org/10.1109/CVPR.                   tions.
+    2013.379                                                                                          Liu, Y., Iter, D., Xu, Y., Wang, S., Xu, R., & Zhu, C. (2023). G-Eval: NLG Evaluation using
+Guo, D., Ren, S., Lu, S., Feng, Z., Tang, D., LIU, S., Zhou, L., Duan, N., Svyatkovskiy, A.,              GPT-4 with better human alignment. In Proceedings of the 2023 conference on empirical
+    Fu, S., Tufano, M., Deng, S.K., Clement, C., Drain, D., Sundaresan, N., Yin, J., Jiang,               methods in natural language processing (pp. 2511–2522). https://doi.org/10.18653/v1/
+    D., & Zhou, M. (2021). GraphCodeBERT: Pre-training Code Representations with Data                     2023.emnlp-main.153
+    Flow. In International conference on learning representations.                                    Lu, S., Duan, N., Han, H., Guo, D., Hwang, S.w., & Svyatkovskiy, A. (2022). ReACC:
+Guo, D., Zhu, Q., Yang, D., Xie, Z., Dong, K., Zhang, W., Chen, G., Bi, X., Wu, Y., Li,                   A retrieval-augmented code completion framework. In Proceedings of the 60th an-
+    Y.K., Luo, F., Xiong, Y., & Liang, W. (2024). DeepSeek-coder: When the large language                 nual meeting of the association for computational linguistics (volume 1: Long papers) (pp.
+    model meets programming–The rise of code intelligence. arXiv:2401.14196                               6227–6240). https://doi.org/10.18653/v1/2022.acl-long.431
+Guu, K., Lee, K., Tung, Z., Pasupat, P., & Chang, M. (2020). Retrieval augmented lan-                 Lu, S., Guo, D., Ren, S., Huang, J., Svyatkovskiy, A., Blanco, A., Clement, C., Drain, D.,
+    guage model pre-training. In Proceedings of the 37th international conference on machine              Jiang, D., Tang, D., Li, G., Zhou, L., Shou, L., Zhou, L., Tufano, M., Gong, M., Zhou, M.,
+    learning (pp. 3929–3938).                                                                             Duan, N., Sundaresan, N. … Liu, S. (2021). CodeXGLUE: A machine learning bench-
+Harman, D.K. (1995). Overview of the third text retrieval conference (TREC-3). 500. DI-                   mark dataset for code understanding and generation. In Thirty-ﬁfth conference on neural
+    ANE Publishing.                                                                                       information processing systems datasets and benchmarks track.
+Izacard, G., & Grave, E. (2021). Leveraging passage retrieval with generative models for              Malkov, Y.A., & Yashunin, D.A. (2020). Eﬃcient and robust approximate nearest neighbor
+    open domain question answering. In EACL 2021 - 16th Conference of the European                        search using hierarchical navigable small world graphs. IEEE Transactions on Pattern
+    chapter of the association for computational linguistics (pp. 874–880). https://doi.org/              Analysis and Machine Intelligence, 42(4), 824–836. https://doi.org/10.1109/TPAMI.
+    10.18653/v1/2021.eacl-main.74                                                                         2018.2889473
+
+
+
+
+                                                                                                 14
+M. Hostnik et al.                                                                                                                                  Expert Systems With Applications 292 (2025) 128596
+
+
+Narayanan, D., Shoeybi, M., Casper, J., LeGresley, P., Patwary, M., Korthikanti, V., Vain-                  Shazeer, N. (2020). GLU variants improve transformer. arXiv:2002.05202
+   brand, D., Kashinkunti, P., Bernauer, J., Catanzaro, B., Phanishayee, A., & Zaharia, M.                  Shrivastava, D., Larochelle, H., & Tarlow, D. (2023). Repository-level prompt generation
+   (2021). Eﬃcient large-scale language model training on GPU clusters using Megatron-                          for large language models of code. In Proceedings of the 40th international conference on
+   LM. In Proceedings of the international conference for high performance computing, net-                      machine learning (pp. 31693–31715).
+   working, storage and analysis. https://doi.org/10.1145/3458817.3476209                                   Su, J., Ahmed, M., Lu, Y., Pan, S., Bo, W., & Liu, Y. (2024). RoFormer: Enhanced trans-
+Parvez, M.R., Ahmad, W., Chakraborty, S., Ray, B., & Chang, K.W. (2021). Retrieval aug-                         former with rotary position embedding. Neurocomputing, 568, 127063. https://doi.
+   mented code generation and summarization. In Findings of the association for com-                            org/10.1016/j.neucom.2023.127063
+   putational linguistics: EMNLP (pp. 2719–2734). https://doi.org/10.18653/v1/2021.                         Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux, M.A., Lacroix, T., Rozière, B.,
+   ﬁndings-emnlp.232                                                                                            Goyal, N., Hambro, E., Azhar, F., Rodriguez, A., Joulin, A., Grave, E., & Lample, G.
+Patwardhan, N., Marrone, S., & Sansone, C. (2023). Transformers in the real world: A sur-                       (2023). LLaMA: Open and eﬃcient foundation language models. arXiv:2302.13971
+   vey on NLP applications. Information, 14(4). https://doi.org/10.3390/info14040242                        Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N.,
+Press, O., & Wolf, L. (2017). Using the output embedding to improve language models. In                         Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. In Proceedings of
+   Proceedings of the 15th conference of the European chapter of the association for computa-                   the 31st international conference on neural information processing systems NIPS’17
+   tional linguistics: Volume 2, short papers (pp. 157–163).                                                    (p. 6000–6010).
+Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., & Sutskever, I. (2019). Language                      Wang, B., Ping, W., Xu, P., McAfee, L., Liu, Z., Shoeybi, M., Dong, Y., Kuchaiev, O., Li, B.,
+   models are unsupervised multitask learners. OpenAI Blog, 1(8), 9.                                            Xiao, C., Anandkumar, A., & Catanzaro, B. (2023a). Shall we pretrain autoregressive
+Ram, O., Levine, Y., Dalmedigos, I., Muhlgay, D., Shashua, A., Leyton-Brown, K., &                              language models with retrieval? A comprehensive study. In Proceedings of the 2023
+   Shoham, Y. (2023). In-context retrieval-augmented language models. Transactions of                           conference on empirical methods in natural language processing (pp. 7763–7786). https:
+   the Association for Computational Linguistics, 11, 1316–1331. https://doi.org/10.1162/                       //doi.org/10.18653/v1/2023.emnlp-main.482
+   tacl_a_00605                                                                                             Wang, Y., Le, H., Gotmare, A., Bui, N., Li, J., & Hoi, S. (2023b). CodeT5+: Open code
+Rozière, B., Gehring, J., Gloeckle, F., Sootla, S., Gat, I., Tan, X.E., Adi, Y., Liu, J., Sauvestre,            large language models for code understanding and generation. In Proceedings of the
+   R., Remez, T., Rapin, J., Kozhevnikov, A., Evtimov, I., Bitton, J., Bhatt, M., Ferrer, C.C.,                 2023 conference on empirical methods in natural language processing (pp. 1069–1088).
+   Grattaﬁori, A., Xiong, W., Défossez, A., … Synnaeve, G. (2024). Code Llama: Open                             https://doi.org/10.18653/v1/2023.emnlp-main.68
+   foundation models for code. arXiv:2308.12950                                                             Wu, D., Ahmad, W., Zhang, D., Ramanathan, M.K., & Ma, X. (2024). REPOFORMER: Se-
+Semenkin, A., Sokolov, Y., & Vu, E. (2024). Context composing for full line code comple-                        lective retrieval for repository-level code completion. In ICML 2024.
+   tion. In The IDE workshop at the 46th international conference on software engineering.                  Zhang, A., Lipton, Z.C., Li, M., & Smola, A.J. (2023a). Dive into deep learning. Cambridge
+Sennrich, R., Haddow, B., & Birch, A. (2016). Neural machine translation of rare words                          University Press.
+   with subword units. In Proceedings of the 54th annual meeting of the association for compu-              Zhang, F., Chen, B., Zhang, Y., Keung, J., Liu, J., Zan, D., Mao, Y., Lou, J.G., &
+   tational linguistics (volume 1: Long papers) (pp. 1715–1725). https://doi.org/10.18653/                      Chen, W. (2023b). RepoCoder: Repository-level code completion through iterative
+   v1/P16-1162                                                                                                  retrieval and generation. In Proceedings of the 2023 conference on empirical methods
+Shapkin, A., Litvinov, D., Zharov, Y., Bogomolov, E., Galimzyanov, T., & Bryksin, T.                            in natural language processing (pp. 2471–2484). https://doi.org/10.18653/v1/2023.
+   (2024). Dynamic retrieval-augmented generation. arXiv:2312.08976                                             emnlp-main.151
+
+
+
+
+                                                                                                       15
+

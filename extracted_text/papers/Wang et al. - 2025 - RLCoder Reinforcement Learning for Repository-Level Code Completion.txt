@@ -1,0 +1,1350 @@
+                                                                                                                                                                                         2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE)
+
+
+
+                                                                                                                                                                                 RLCoder: Reinforcement Learning for
+                                                                                                                                                                                  Repository-Level Code Completion
+                                                                                                                                                                      Yanlin Wang1 , Yanli Wang1 , Daya Guo1 , Jiachi Chen1∗ , Ruikai Zhang2 , Yuchi Ma2 , Zibin Zheng1
+                                                                                                                                                                                                            1
+                                                                                                                                                                                                           Sun Yat-sen University, Zhuhai, China
+                                                                                                                                                                               {wangylin36, chenjch86, zhzibin}@mail.sysu.edu.cn, {wangyli58, guody5}@mail2.sysu.edu.cn,
+                                                                                                                                                                                          2
+                                                                                                                                                                                             Huawei Cloud Computing Technologies Co., Ltd., Shenzhen, China
+                                                                                                                                                                                                         {zhangruikai1, mayuchi1}@huawei.com
+   2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) | 979-8-3315-0569-1/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSE55347.2025.00014
+
+
+
+
+                                                                                                                                                                Abstract—Repository-level code completion aims to generate           concatenated with the unfinished code before being fed into
+                                                                                                                                                             code for unfinished code snippets within the context of a               code LLMs. To retrieve relevant code snippets from other files,
+                                                                                                                                                             specified repository. Existing approaches mainly rely on retrieval-     various retrievers are adopted. RepoFuse [15] uses lexical-
+                                                                                                                                                             augmented generation strategies due to limitations in input
+                                                                                                                                                             sequence length. However, traditional lexical-based retrieval           based method BM25 [18] as the retriever to retrieve code
+                                                                                                                                                             methods like BM25 struggle to capture code semantics, while             snippets that are textually similar with the unfinished code.
+                                                                                                                                                             model-based retrieval methods face challenges due to the lack           RepoCoder [13] and RepoHyper [19] use the model-based
+                                                                                                                                                             of labeled data for training. Therefore, we propose RLCoder, a          approach that encodes code candidates and unfinished code
+                                                                                                                                                             novel reinforcement learning framework, which can enable the            into vectors and employs dense retrieval to find similar codes.
+                                                                                                                                                             retriever to learn to retrieve useful content for code completion
+                                                                                                                                                             without the need for labeled data. Specifically, we iteratively eval-   Although these efforts have shown promising performance
+                                                                                                                                                             uate the usefulness of retrieved content based on the perplexity        in repository-level code generation, we have identified the
+                                                                                                                                                             of the target code when provided with the retrieved content as          following problems in retrieval.
+                                                                                                                                                             additional context, and provide feedback to update the retriever
+                                                                                                                                                             parameters. This iterative process enables the retriever to learn          P1 Labeled Data Dependency. Lexical-based methods such
+                                                                                                                                                             from its successes and failures, gradually improving its ability to           as BM25 [18] cannot capture code semantics, while
+                                                                                                                                                             retrieve relevant and high-quality content. Considering that not              model-based methods [12], [19], [20] are capable of
+                                                                                                                                                             all situations require information beyond code files and not all              understanding code semantics but are hampered by the
+                                                                                                                                                             retrieved context is helpful for generation, we also introduce a
+                                                                                                                                                             stop signal mechanism, allowing the retriever to decide when to               lack of ground-truth candidate data for training. This
+                                                                                                                                                             retrieve and which candidates to retain autonomously. Extensive               labeled data is hard to obtain, as it requires significant
+                                                                                                                                                             experimental results demonstrate that RLCoder consistently                    effort in data parsing and expert labeling, limiting its
+                                                                                                                                                             outperforms state-of-the-art methods on CrossCodeEval and                     generalizability.
+                                                                                                                                                             RepoEval, achieving 12.2% EM improvement over previous                     P2 Candidate Construction Issue. Previous methods of
+                                                                                                                                                             methods. Moreover, experiments show that our framework can
+                                                                                                                                                             generalize across different programming languages and further                 code candidate construction mainly employ the fixed
+                                                                                                                                                             improve previous methods like RepoCoder. We provide the code                  window strategy [13] or dependency parsing [12], [21].
+                                                                                                                                                             and data at https://github.com/DeepSoftwareAnalytics/RLCoder.                 However, the fixed window strategy may disrupt the con-
+                                                                                                                                                                                                                                           tinuity of the code. Methods based on dependency parsing
+                                                                                                                                                               Index Terms—Repository-Level Code Completion, Reinforce-                    can only focus on limited context in the dependency
+                                                                                                                                                             ment Learning, Perplexity, Stop Signal Mechanism
+                                                                                                                                                                                                                                           graph and can not be applied to complex scenarios.
+                                                                                                                                                                                                                                        P3 Non-Selective Retrieval. Previous studies typically di-
+                                                                                                                                                                                      I. I NTRODUCTION
+                                                                                                                                                                                                                                           rectly retrieve several candidates to serve as the context
+                                                                                                                                                                With the advancement of large language models for code                     for generation, neglecting when to retrieve and which
+                                                                                                                                                             (code LLMs) [1]–[5], code completion has emerged as one of                    candidates to retain. Unnecessary candidates can detract
+                                                                                                                                                             the most important features in integrated development environ-                from the performance in completion scenarios that do not
+                                                                                                                                                             ments (IDEs) [6]–[11]. However, due to the vast size of code                  require repository context.
+                                                                                                                                                             repositories and the limitations of context length in models,
+                                                                                                                                                             repository-level code completion, which involves generating                In this paper, we propose RLC ODER, a reinforcement learn-
+                                                                                                                                                             code suggestions within the context of an entire repository,            ing framework for repository-level code completion to address
+                                                                                                                                                             cannot practically leverage the entire repository directly as           the aforementioned problems. Firstly, we propose a code-
+                                                                                                                                                             context [12]. Therefore, previous works [12]–[17] typically             base construction pipeline with a simple yet effective Split-
+                                                                                                                                                             employ a retrieval-augmented-generation (RAG) strategy. In              Aggregate strategy. This approach allows better code continu-
+                                                                                                                                                             this approach, the unfinished code in the current file serves           ity of the candidates, which we refer to as natural candidates
+                                                                                                                                                             as a query to retrieve code candidates from the entire repos-           (addressing P2). Secondly, during the training stage, we di-
+                                                                                                                                                             itory, providing cross-file context. These candidates are then          verge from supervised learning methods that depend on labeled
+                                                                                                                                                                                                                                     data. Instead, we train a retriever named RLRetriever that
+                                                                                                                                                               * Jiachi Chen is the corresponding author.                            learns what to retrieve based on feedback from a specifically
+
+
+                                                                                                                                                             1558-1225/25/$31.00 ©2025 IEEE                                      1140
+                                                                                                                                                             DOI 10.1109/ICSE55347.2025.00014
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+             designed evaluator, without needing labeled data (addressing              external knowledge bases. This method includes three key
+             P1). Specifically, we iteratively evaluate the usefulness of              components [24]: retriever, generator, and augmentation tech-
+             retrieved content based on the perplexity of the target code              niques. The retriever is used to find relevant information from
+             when provided with the retrieved content as additional context,           a large-scale dataset or knowledge base, including pertinent
+             and provide feedback to update the retriever parameters,                  documents, facts, or text snippets that are relevant to the
+             which enables the retriever to learn from its successes and               input query or prompt. The retrieved information is fed into
+             failures, gradually improving its ability to retrieve relevant            the generator, which integrates this external knowledge into
+             and high-quality content. Moreover, to mitigate hallucinations            the generation stage. Augmentation techniques focus on how
+             often observed in repository-level code completions, typically            retrieved information is integrated into the generation process.
+             due to incorrect identifier or API usage [16], we design a                To formalize the RAG process, consider a scenario where we
+             weighted perplexity (PPL) mechanism that allocates higher                 want to generate code based on a query q and a set of retrieved
+             weights to certain important tokens in perplexity calculation.            candidates {c1 , c2 , ..., cn }. The process can be described by the
+             Furthermore, considering that not all candidates retrieved are            following formula:
+             useful for generation, we introduce a stop signal mechanism
+             to evaluate the usefulness of candidates, allowing the retriever                    Code = Generate (q, Retrieve(q, {c1 , c2 , ..., cn }))                  (1)
+             to decide when to retrieve and which candidates to retain                 where the Retrieve(·) function selects the most relevant
+             autonomously (addressing P3). Finally, in the inference stage,            candidates based on the query q from the candidate set
+             given an unfinished code as input, RLCoder retrieves natural              {c1 , c2 , ..., cn }, and the Generate(·) function then takes the
+             candidates from the codebase, retains the useful candidates,              query and the retrieved candidates to generate the target code.
+             and then feeds them along with the unfinished code into the                  In recent years, researchers have conducted a substantial
+             generator (a backbone LLM) for target code generation.                    amount of research related to RAG, highlighting its promising
+                We evaluate RLCoder with extensive experiments with                    potential for future applications [23], [25]–[28]. Many studies
+             several LLMs on CrossCodeEval [22] and RepoEval [13].                     have utilized RAG for code-related research [29]–[42]. In
+             Experimental results show that our framework achieves 12.2%               repository-level code completion, due to the massive amount
+             improvement of Exact Match compared with previous meth-                   of code in the repository and limited context of generator [12],
+             ods. Furthermore, RLCoder demonstrates high generalizabil-                it is impractical to use the entire repository as the context for
+             ity, showing effectiveness across various LLMs and program-               generation. Therefore, most current methods employ the RAG
+             ming languages. Additionally, experiments show that RLCoder               method to retrieve suitable candidates from the repository for
+             can be integrated into previous methods such as RepoCoder                 generation [12], [13], [16], [17].
+             to enhance code completion performance further.
+                Our main contributions are:                                               class Converter(object):                                             Candidate 1
+                                                                                              """
+                • We propose RLCoder, a reinforcement learning frame-                         The :class:`.Converter` class is the base class for implementing the
+                                                                                              conversion from one in-style parameter to another out-style parameter.
+                   work for repository-level code completion. To our knowl-                   """
+                   edge, we are the first to train the retriever without labeled              def __init__(
+                   data for repository-level code completion. Besides, we                         self,
+                                                                                                  escape_char: Optional[str],
+                   design a mechanism that uses the weighted perplexity                           expand_tuples: bool,
+                                                                                                  in_regex: Pattern[str],                                    Candidate 2
+                   of the target code as the reward to further enhance                            in_style: _styles.Style,
+                                                                                                  out_style: _styles.Style,
+                   performance.                                                               ) -> None:
+                                                                                                                                     Code Continuity is Disrupted!
+                                                                                                  """
+                • We introduce a simple yet effective Split-Aggregate                             Initializes the :class:`.Converter` instance.
+                   candidate construction strategy based on human pro-                            """
+
+                   gramming habits. This method avoids the disruption of                          self._escape_start = len(escape_char) if escape_char is not None else 0
+                                                                                                  """
+                   code continuity and outperforms fixed window candidates                        *_escape_start* (:class:`int`) is the offset used to         Candidate 3
+                                                                                                   skip the escape character.
+                   indicated by the experimental results.                                         """
+                • We propose a stop signal mechanism to evaluate the                              self._expand_tuples: bool = expand_tuples
+                   usefulness of candidates and discard useless candidates                        """
+                                                                                                  *_expand_tuples* (:class:`bool`) is whether to convert tuples into a
+                   for more effective code completion.                                            sequence of parameters.
+                                                                                                  """
+                • We perform an extensive evaluation of RLCoder. Experi-
+                   mental results show that RLCoder outperforms the state-             Fig. 1. Using fixed window candidates may disrupt the continuity of code
+                   of-the-art methods and demonstrates generalizability and            semantics, resulting in the definition of functions being split across different
+                   applicability.                                                      code snippets.
+
+
+                                      II. BACKGROUND
+                                                                                       B. Repository-Level Code Completion
+             A. Retrieval-Augmented Generation                                           Traditional code completion [1], [43] usually focused on
+                Retrieval-augmented generation (RAG) [23] is an approach               generating code with in-file context. With the development
+             that enhances the quality of generation by retrieving from                of LLMs [3]–[5], [44], repository-level code completion is
+
+
+                                                                                   1141
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+              # neo4j-python-driver/src/neo4j/_data.py
+              ...
+              def keys(self) -> t.List[str]:                                                                   Target Code
+                  """ Return the keys of the record.
+                  :returns: list of key names
+                  """                                                                             GitHub
+                  return list(self.__keys)                                                        Repos       Unfinished Code                               ...
+              def values(self, *keys: _K) -> t.List[t.Any]:
+                                                                                                                                                    Retrived Codes
+                  """ Return the values of the record, optionally filtering to                                     </>                                                     Evaluator
+                                                                                                                                RLRetriever
+                  include only certain values by index or key.                                     Training                                    𝒇(𝒙) Weighted Perplexity Reward
+                                                                                                                Codebase
+                  :param keys: indexes or keys of the items to include; if none
+                                  are provided, all values will be included
+                  :returns: list of values
+                  """                                       Query (Unfinished Code)               Inference
+
+              # neo4j-python-driver/src/neo4j/_sync/work/result.py                                            Unfinished Code                               ...
+              ...
+              def values(                                                                         Current                                           Retrived Codes
+                                                                                                                   </>
+                                                                                                                                 RLRetriever                               Generator
+                  self, *keys: _TResultKey                                                        Repo
+              ) -> t.List[t.List[t.Any]]:                                                                      Codebase
+                  """Return the remainder of the result as a list of values lists.
+                  :param keys: fields to return for each remaining record.
+                   Optionally filtering to include only certain values by index or key.
+                  :returns: list of values lists                                                                         Fig. 3. Overview of RLCoder.
+                  :raises ResultConsumedError: if the transaction from which this result
+                      was obtained has been closed or the Result has been explicitly
+                      consumed.
+                                                                    Retrieved Context
+                                    Attribute Does Not Exist!
+                                                                                              Limitations: There are still some issues that need to be ad-
+                  if not keys:                                                                dressed for current repository-level code completion methods.
+                      return list(self.__values)
+                  return [self[key] for key in keys]       Generation with Retrieval
+                                                                                              First, the lack of labeled data limits the generalizability of
+                                                                                              many learning-based approaches. For example, CoCoMIC [12]
+                  if keys:                                                                    can only be used in trained repositories and struggles to expand
+                      return [self[key] for key in keys]
+                  else:                                                                       to other languages and repositories. RepoHyper [19] uses a
+                      return list(self)                  Generation without Retrieval
+                                                                                              subset of the benchmark as training data and sets the gold
+                                                                                              candidate as the label. Second, previous works mostly adopted
+             Fig. 2. Due to the limitations of LLMs, inappropriate retrieval can mislead
+             generation, resulting in attempts to call an non-existent attribute.
+                                                                                              fixed window candidates [13] or candidates based on depen-
+                                                                                              dency parsing [12]. Methods based on dependency parsing
+                                                                                              only consider the nodes in the dependency parse graph, ne-
+             gradually gaining attention as it better reflects real-world                     glecting other code in the repository. This can lead to omitting
+             scenarios [12], [13], [22], [45]. To formalize repository-level                  many potentially useful code pieces during retrieval. Methods
+             code completion, we conceptualize the process as selecting the                   using fixed window candidates, as shown in Figure 1, may split
+             most relevant snippets (candidates) from a code repository and                   the signature of the “__init__” function into two different
+             generating code based on the query. This can be encapsulated                     candidates. This situation may lead to the retriever fetching the
+             in a formula as follows:                                                         required code snippet without capturing the full parameter list.
+                                                                                              As a result, this partial information could confuse the generator
+                        Code = Generate(q, Retrieve(q, codebase))                    (2)      leading to incorrect function calls. Third, current work lacks
+             where q represents the query or the prompt for code com-                         an evaluation of the necessity for candidates. As illustrated in
+             pletion. Codebase symbolizes code snippets from the code                         Figure 2, the task can be correctly completed using only the
+             repository. Retrieve(q, codebase) is the function that selects the               in-file preceding context. However, if the context retrieved is
+             most relevant code snippets (candidates) from the repository                     blindly used, it may mislead the generation due to LLM’s
+             based on the query q. Generate(q, candidates) is the generation                  own capability limitation. In this case, there is a function
+             function that generates the target code based on the query q                     definition for “keys” in the unfinished code, which calls the
+             and the selected candidates.                                                     “__keys” attribute. The code snippet retrieved happens to
+                                                                                              have a function definition for “values”, leading the model
+                Previous work highlights the importance of integrating both
+                                                                                              to mistakenly believe there is a corresponding “__values”
+             the in-file and cross-file context in repository-level code com-
+                                                                                              attribute defined, thus calling a non-existent “__values”
+             pletion [12]. This implies that the model needs to understand
+                                                                                              attribute during code generation.
+             not only the local context but also third-party libraries and
+             global modules [21]. Fusing analogy context and rationale                                                       III. M ETHODOLOGY
+             context can greatly ensure the integrity of the retrieval code-
+             base [15]. Iterative retrieval and generation method [13],                       A. Overview
+             [16] involves concatenating the results generated from the                          In this section, we introduce RLCoder, a reinforcement
+             previous iteration with the prior context to form a query. This                  learning framework for repository-level code completion. The
+             query is then used for the subsequent round of retrieval and                     overview of RLCoder is shown in Figure 3, comprising
+             generation. Additionally, agents [17], [46]–[48] that assist in                  two stages: training and inference. In the training stage, the
+             code completion through invoking tools or collaborating with                     major objective is to train the retriever RLRetriever, the key
+             each other is also a remarkable approach.                                        component of our framework. First, to train RLRetriever, we
+
+
+                                                                                           1142
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                                                                          Algorithm 1 Dependency Analysis and Clustering.
+                                         Dependency                    Target Code       Require: Set of code files F
+                        Filter             Analysis
+                                                                                          Ensure: Clusters of interdependent code files Clusters
+                             Code Repositories         Code Clusters
+                                                                                            G ← ConstructDependencyGraph(F )
+                                                                          Candidates
+                                                                                            Clusters ← IdentifyClusters(G)
+                                                                                            for all cluster in Clusters do
+                                  Fig. 4. Data construction pipeline.                         if Size(cluster) == 1 then
+                                                                                                 Clusters ← Clusters − {cluster}
+             construct data from repositories collected from GitHub and                       else
+             obtain unfinished code, target code, and candidate codebase.                        SortedCluster ← TopologicalSort(cluster)
+             Then, RLRetriever will retrieve from the candidate codebase                         Update cluster in Clusters with SortedCluster
+             using unfinished code as the query. Finally, the retrieved code                  end if
+             candidates will be evaluated by the evaluator and obtain the                   end for
+             weight perplexity reward to update the parameters of RLRe-                     return Clusters
+             triever. Through repeated iterations, RLRetriever enhances its
+             retrieval capability via continuous feedback and learning. In
+             the inference stage, given unfinished code and the current                   the first file, each file in the cluster will contain code segments
+             repository context, we first construct codebase from current                 that depend on one or more of other files.
+             repository. Then, we use the RLRetriever trained in the training                3) Target Code Selection: Within the clusters of interde-
+             stage to retrieve from the codebase using the unfinished code.               pendent code files, we designate files other than the first file
+             Finally, we use the retrieved codes as context to concatenate                as the ones to be completed. We select a random position
+             with the unfinished code and feed them into the generator for                within these files, excluding the beginning and end to ensure
+             target code generation.                                                      ample context for the code to be completed. This position
+                                                                                          serves as the starting point for the target code segment that
+             B. Data Construction                                                         needs completion. To formalize this process, we define the
+                Repository-level code completion tasks typically refer to                 target code segment to be masked and completed as Ctarget ,
+             generating partial code within the given repository code                     starting from position pstart with length l, where pstart is
+             context, generally including a line, an API, or a part of a                  chosen randomly within the constraints mentioned above. The
+             function body [13]. To ensure the retriever we train meets                   selection of pstart can be expressed as:
+             the requirements of repository-level code retrieval, we need to
+                                                                                                          pstart = Random(pmin , pmax )                   (3)
+             simulate such scenarios. Figure 4 shows the pipeline of our
+             data construction process, which includes the following steps:               where pmin and pmax define the permissible range within
+             repository filtering, dependency analysis, target code selection,            the file, excluding the very beginning and ending segments
+             and candidate construction.                                                  to ensure sufficient context. The length l of the target code
+                1) Repository Selection: We randomly select 10,000 large-                 Ctarget is also determined randomly, with the constraint that
+             scale Python and Java repositories from GitHub that were cre-                the entire segment Ctarget must lie within the boundary of the
+             ated before March 2023 and meet the following requirements:                  code file:
+             (1) have cross-file dependencies for constructing our training                               Ctarget = C[pstart : pstart + l]           (4)
+             dataset; and (2) not included in well-known benchmarks such
+             as CrossCodeEval [22] and RepoEval [13], which are used in                   After identifying Ctarget , we mask this segment within the file
+             our evaluation. This filtering process aims at preventing po-                to simulate an unfinished code scenario that needs completion.
+             tential data leakage, ensuring the reliability of the evaluation.            Upon masking Ctarget , the segment designated for completion,
+                2) Dependency Analysis: To ensure our training data con-                  we intentionally exclude the file containing the masked code
+             tains a substantial quantity of cross-file context dependencies,             when assembling candidates. To formalize this concept, we
+             we implement a dependency analysis for each repository. The                  define a binary selection function for candidate files as S(fi ),
+             methodology is outlined in Algorithm 1. Specifically, to get                 where fi represents a candidate file:
+                                                                                                                    (
+             the code files that are related to each other, we analyze                                                0 if Ctarget ∈ fi ,
+             the import statements within code files and construct a                                      S(fi ) =                                     (5)
+                                                                                                                      1 otherwise
+             dependency graph that represents the relationships between
+             these files. Based on whether dependencies exist between                        4) Candidate Construction: Unlike previous works that uti-
+             code files, we categorize them into clusters of interdependent               lized fixed window candidates [13], [16] or candidates parsed
+             code files. Through this process, we obtain 27,919 Python                    from dependencies [12], we propose a simple yet effective
+             file clusters and 41,647 Java file clusters. We eliminate any                Split-Aggregate candidate construction strategy inspired by
+             cluster that contains only a single file. For clusters comprising            human programming habits. We term these candidates as natu-
+             multiple files, we employ a topological sorting based on the                 ral candidates. Specifically, programmers often write code with
+             in-degree and out-degree of files. This means that, aside from               continuous semantic information together, using blank lines as
+
+
+                                                                                       1143
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+             separators to facilitate readability. As shown in the left part of        It is evident that this maximization is equivalent to minimizing
+             Figure 5, code and its corresponding comments are usually not             the negative log-likelihood:
+             separated by blank lines. In fact, blank lines are usually used to
+             separate code snippets with different semantics and usage. This                                   min − log P (y|x, c)                                (7)
+                                                                                                                 c
+             practice naturally forms continuous code segments. The Split-
+             Aggregate strategy is outlined in Algorithm 2. Specifically,              Perplexity (PPL), a standard measure for evaluating the pre-
+             we divide the code in a file into several mini-blocks based               dictive performance of probabilistic models, is defined as the
+             on blank lines and then aggregate these mini-blocks into                  exponential of the average negative log-likelihood (NLL) over
+             candidates by a certain length. During aggregation, the mini-             a sequence. Minimizing NLL thereby directly corresponds to
+             blocks are concatenated to form candidates in such a way that             minimizing the perplexity of the target code sequence y:
+             the length of any candidate does not exceed a preset threshold                                                     1
+                                                                                                                                    PN
+                                                                                                min P P L(y|x, c) = e− N              i=1 log P (yi |x,c,y<i )     (8)
+             value T .                                                                            c
+
+                                                                                       where yi represents the i-th token in the target code sequence
+             Algorithm 2 Split-Aggregate Strategy                                      y.
+             Require: Code File F , Threshold T                                           In the domain of code completion, the first few tokens
+             Ensure: Candidate set C                                                   generated play a pivotal role in shaping the entire output.
+               Blocks ← SplitIntoBlocks(F )                                            Considering this, we give more attention to the first few tokens.
+               C←∅                                                                     Besides, errors in repository-level code completion often occur
+               for all block in Blocks do                                              due to hallucinations caused by a lack of understanding of the
+                 if LineCount(block) < T then                                          entire repository, such as generating incorrect or non-existent
+                    Aggregate ← block                                                  APIs. Therefore, we assign a higher focus on the identifier
+                    while LineCount(Aggregate) < T and block ̸=                        tokens. To further refine the model’s focus, we introduce a
+                    Last(Blocks) do                                                    weighted variant P P Lw :
+                       block ← Next(block)                                                                                      PN
+                                                                                                                  − PN 1            i=1 wi ·log P (yi |x,c,y<i )
+                       Aggregate ← Aggregate + block                                        P P Lw (y|x, c) = e      i=1
+                                                                                                                           wi
+                                                                                                                                                                   (9)
+                    end while
+                    C ← C ∪ {CreateCandidate(Aggregate)}                               The weight wi for each token of the target code is determined
+                 else                                                                  by a function that considers the token’s position in the se-
+                    C ← C ∪ SplitBlock(block, T )                                      quence and whether it is an identifier, which can be represented
+                 end if                                                                as:                  
+               end for                                                                                      wf irst if i ≤ k,
+                                                                                                            
+               return C                                                                               wi = wapi          if yi ∈ APIs,             (10)
+                                                                                                            
+                                                                                                               1         otherwise
+                                                                                                            
+
+                                                                                       where the first k tokens are assigned by a weight wf irst to
+             C. Reinforcement Learning-based RLRetriever Training                      reflect their significant impact on the overall quality of the
+                                                                                       generated code. If the i-th token is part of an API or an
+                1) Design of Reward: For reinforcement learning, reward
+                                                                                       identifier, it is assigned a weight wapi to acknowledge the
+             is feedback from the external environment that assists a model
+                                                                                       importance of accurate and contextually appropriate identifiers
+             in learning specific capabilities based on the feedback. In the
+                                                                                       in code completion.
+             scenario of repository-level code completion, the most intuitive
+                                                                                          We define the reward for choosing a particular candidate ci ,
+             indicator of reward is whether the generated code can be
+                                                                                       cj from the set of all candidates C as follows:
+             executed to obtain the expected results. However, obtaining
+             feedback through actual execution is difficult. On the one
+                                                                                                    (
+                                                                                                      1 if P P Lw (ci ) ≤ P P Lw (cj ), ∀cj ∈ C,
+             hand, it’s challenging to set up the execution environment                    r(ci ) =                                              (11)
+             for repository code. Even if the execution environment is                                0 otherwise
+             established, execution can be time-consuming, and there may               where P P Lw (ci ) denotes the weighted perplexity of the
+             be a lack of corresponding test cases to evaluate the accuracy            target code given candidate ci , serving as an abbreviation for
+             of the execution results.                                                 P P Lw (y|x, ci ). The reward r(ci ), equivalently referred to as
+                In the context of repository-level code completion, our                reward(ci , x, C) in the formulations, is assigned a value of
+             primary aim is to identify the optimal candidate c from a                 1 if the candidate ci exhibits a PPL that is equal to or lower
+             set of possibilities that maximizes the likelihood of accurately          than that of any other candidate in the set C. Conversely, a
+             generating the target code sequence y given the contextual                reward of 0 is allocated to ci if it fails to meet this criterion.
+             information x. This objective can be formally articulated as:                Building on the concept of this reward mechanism, we
+                                                                                       further define our objective function, L, as an aggregation
+                                        max P (y|x, c)                           (6)   of the logarithmic probabilities of choosing each candidate,
+                                           c
+
+
+
+                                                                                   1144
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                     Raw Code                                                          Mini Blocks                                                          Candidates
+              class Converter(object):                                          class Converter(object):                                               class Converter(object):
+                  """                                                               """                                                                    """
+                  The :class:`.Converter` class is the base class for               The :class:`.Converter` class is the base class for                    The :class:`.Converter` class is the base class for
+                  implementing the conversion from one in-style                     implementing the conversion from one in-style                          implementing the conversion from one in-style
+                  parameter to another out-style parameter.                         parameter to another out-style parameter.                              parameter to another out-style parameter.
+                  """                                                               """                                                                    """
+
+                 def __init__(                                                        def __init__(
+                     self,                                                                                                                                 def __init__(
+                     escape_char: Optional[str],                                          self,                                                                self,
+                                                                                          escape_char: Optional[str],                                          escape_char: Optional[str],
+                     expand_tuples: bool,                                                 expand_tuples: bool,
+                     in_regex: Pattern[str],                                                                                                                   expand_tuples: bool,
+
+
+
+
+                                                                                                                                           Aggregate
+                     in_style: _styles.Style,                                             in_regex: Pattern[str],                                              in_regex: Pattern[str],
+                                                                                          in_style: _styles.Style,                                             in_style: _styles.Style,
+                     out_style: _styles.Style,
+
+
+
+
+                                                                        Split
+                                                                                          out_style: _styles.Style,                                            out_style: _styles.Style,
+                 ) -> None:
+                     """                                                              ) -> None:                                                           ) -> None:
+                                                                                          """                                                                  """
+                     Initializes the :class:`.Converter` instance.                        Initializes the :class:`.Converter` instance.
+                     """                                                                                                                                       Initializes the :class:`.Converter` instance.
+                                                                                          """                                                                  """
+                     self._escape_start = len(escape_char)                                self._escape_start = len(escape_char)                                self._escape_start = len(escape_char)
+                     if escape_char is not None else 0                                    if escape_char is not None else 0                                    if escape_char is not None else 0
+                     """                                                                  """                                                                  """
+                     *_escape_start* (:class:`int`) is the offse                          *_escape_start* (:class:`int`) is the offse                          *_escape_start* (:class:`int`) is the offse
+                     used to skip the escape character.                                   used to skip the escape character.                                   used to skip the escape character.
+                     """                                                                  """                                                                  """
+                     self._expand_tuples: bool = expand_tuples                            self._expand_tuples: bool = expand_tuples                            self._expand_tuples: bool = expand_tuples
+                     """                                                                  """                                                                  """
+                     *_expand_tuples* (:class:`bool`) is whether to                       *_expand_tuples* (:class:`bool`) is whether to                       *_expand_tuples* (:class:`bool`) is whether to
+                     convert tuples into a sequence of parameters.                        convert tuples into a sequence of parameters.                        convert tuples into a sequence of parameters.
+                     """                                                                  """                                                                  """
+
+
+
+                                                                                      Fig. 5. Candidate construction strategy.
+
+
+
+             weighted by the corresponding reward. This is mathematically                                      fore, discerning which candidates to retain is crucial for code
+             represented as:                                                                                   completion performance.
+                                 n
+                                                                                                                   The core of the stop signal mechanism is the empty can-
+                         L=
+                                 X
+                                       (reward(ci , x, C) × log p(ci |x, C))                         (12)      didate. In the retrieval phase, the empty candidate serves as
+                                 i=1
+                                                                                                               a stop signal and is sent to the retriever together with other
+                                                                                                               ordinary candidates. During training, the evaluator gives each
+             where n is the total number of candidates in set C, and                                           candidate a weighted PPL score to measure the degree of
+             p(ci |x, C) denotes the probability of selecting candidate ci                                     helping generate target code. For candidates ranked below the
+             given the context x and the set of candidates C.                                                  stop signal, we consider them to be useless or harmful and
+                                                                                                               should not be used; if the stop signal ranked 1st, it means
+                                                                                                               that the generation doesn’t require retrieval. During inference,
+                            Stop Signal     Retained Candidate        Disgarded Candidate                      we recall the candidates one by one until encountering the
+                                                                                                               stop signal or reach the maximum context limit. As shown
+                                                                                …
+                                                       …
+
+
+
+
+                                                                                                               in Figure 6, the stop signal is outside the maximum context
+                                …
+
+
+
+
+                                                 8th candidate           8th candidate
+                                                                                                               in example-(a). The stop signal is ranked 4th in example-
+                          8th candidate
+                                                 7th candidate           7th candidate
+                                                                                                               (b), which means that only the first three candidates will be
+                          7th candidate
+                                                 6th candidate           6th candidate
+                                                                                                               retained. The stop signal is ranked 1st in example-(c), which
+                          6th candidate
+                                                 5th candidate           5th candidate
+                                                                                                               means that all candidates will be disgarded.
+                          5th candidate
+                          4th candidate          4th candidate           4th candidate                             3) Learning from Reward: As depicted in Figure 3, RLRe-
+                          3rd candidate          3rd candidate           3rd candidate                         triever is fine-tuned through a dynamic learning process where
+                          2nd candidate          2nd candidate           2nd candidate                         it receives rewards from the evaluator to update its parameters.
+                          1st candidate          1st candidate            1st candidate                        This iterative learning process enables RLRetriever to progres-
+                        Unfinished Code         Unfinished Code         Unfinished Code                        sively improve its retrieval results, leading to the selection of
+                                                                                                               code candidates with progressively higher quality.
+                               (a)                     (b)                      (c)
+
+                                 Fig. 6. Stop signal mechanism examples.
+                                                                                                               D. Code Completion with RLCoder
+                2) Stop Signal Mechanism for Candidates Selection:                                                As shown in the lower half of Figure 3, during the inference
+             Previous works often overlook when to retrieve and which                                          stage, given unfinished code and the current repository context,
+             candidates to retain after retrieval. Specifically, after obtaining                               we first construct the candidate codebase from the current
+             the top k candidates, traditional methods simply truncate this                                    repository using the Split-Aggregate method. Then, we retrieve
+             list to the top i candidates, determined by a predefined context                                  code candidates using the unfinished code with the trained
+             length. However, this method overlooks the fact that not every                                    RLRetriever. Inherently, the stop signal strategy mentioned
+             retrieved candidate contributes positively to the generation                                      in Section III-C2 is embedded in the retrieved results to
+             process, and some may even have a negative impact. There-                                         retain only the useful candidates. Finally, the unfinished code,
+
+
+                                                                                                          1145
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                            TABLE I                                         latest repositories that cover the line-level, API-level, and
+                                     B ENCHMARK STATISTICS .                                function-level completion tasks. We use the line-level and
+                 Benchmark       Category       #Samples Avg. #Lines Avg. #Tokens           API-level tasks among it for evaluation.
+                                   Python         2665       1.00        14.45            Table I shows the statistics of the benchmarks. #Samples
+                CrossCodeEval
+                                    Java          2139       1.09        16.76         stands for the number of samples in a benchmark, Avg.
+                  RepoEval
+                                Python (Line)     1600       1.00        15.03         #Lines and Avg. #Tokens stands for the average num-
+                                Python (API)      1600       2.48        34.91         bers of lines and tokens of the target code snippets in the
+                                                                                       benchmark, respectively. Tokens are tokenized by the tokenizer
+                                                                                       of DeepSeekCoder-1B.
+             together with these selected candidates, is provided as input
+             to the generator for code completion.                                     C. Evaluation Metrics
+                                 IV. E XPERIMENTAL S ETUP                                 We measure the performance of our approach using the
+                                                                                       widely used metrics Exact Match (EM) and Edit Similarity
+             A. Baselines
+                                                                                       (ES) [50]. These metrics are widely used in previous code
+                                                                                       completion studies [12], [13], [16], [22]. EM assesses the
+                1) For RLCoder: To evaluate the effectiveness of RLCoder,              precision of code completion by checking if the generated code
+             we compare it with the RawRAG method and RepoCoder                        matches the expected code exactly. It treats the entire code
+             framework. Besides, we use a popular dense retriever UniX-                snippet as a single unit. ES measures the similarity between the
+             coder [49] in these experiments.                                          generated code and the expected code by calculating the edit
+                • RawRAG refers to the standard retrieval and generation               distance. It reflects the number of edits needed to transform
+                   approach in the repository-level code completion task. For          the generated code into the expected code.
+                   the unfinished code to generate, RawRAG uses the left
+                   context of unfinished code as the query to find the relevant        D. Experimental Details
+                   code in the repository to build prompts for generation.                All experiments are conducted on a machine with two
+                • RepoCoder [13] is the state-of-the-art framework for                 Tesla A100 GPUs, each with 80 GB memory. In the training
+                   repository-level code completion. It uses an iterative              stage, we use the parameters of UniXcoder [49] to initialize
+                   retrieval and generation approach to generate target code.          RLRetriever and use DeepSeekCoder-1B as the evaluator. The
+                2) For RLRetriever: To evaluate the effectiveness of RL-               batch size is 16 and the learning rate is 5e−5 . We train the
+             Retriever, we compare it with the following commonly used                 model for 20 epochs with 2000 samples per epoch and perform
+             retrieval methods in RAG:                                                 early stopping. In the inference and evaluation stage, we use
+                • NoRetrieval stands for direct generation with unfinished             five different backbone models as the generators.
+                   code, without retrieval.
+                                                                                                           V. E VALUATION R ESULTS
+                • BM25 [18] calculates scores for code candidates based
+                   on the frequency of query terms in each candidate. It                  In this section, we report and analyze the experimental
+                   adjusts for candidate length and the average candidate              results to answer the following research questions (RQs):
+                   length across the entire database to prevent bias towards              • RQ1: How effective is RLCoder in repository-level code
+                   longer candidates.                                                       completion?
+                • UniXcoder [49] is a dense retriever that encodes both                   • RQ2: How effective is RLRetriever compared to other
+                   the query and the code snippets into dense vector spaces.                retrieval methods?
+                   This encoding facilitates the identification and retrieval of          • RQ3: Does each component of RLCoder contribute to its
+                   semantically relevant code snippets from a large corpus                  performance?
+                   based on the similarity of vector representations.                     • RQ4: How is the generalizability of RLCoder?
+                • UniXcoder-SFT is a retriever that we trained using
+                                                                                       A. RQ1: Effectiveness of RLCoder
+                   supervised fine-tuning of UniXcoder. Due to the lack
+                   of labeled data, we use the candidate with the lowest                 To evaluate the effectiveness of RLCoder, we com-
+                   perplexity of target code as the label to fine-tune the             pare it with the RawRAG framework [35] and Re-
+                   retriever.                                                          poCoder [13] with five backbone LLMs, i.e., CodeLlama-
+                                                                                       7B [3], StartCoder-7B [4], StarCoder2-7B, DeepSeekCoder-
+             B. Benchmarks                                                             1B [5], and DeepSeekCoder-7B. We evalaute the performance
+               We evaluate RLCoder on widely used benchmarks for code                  on CrossCodeEval [22] and RepoEval [13] benchmarks.
+             completion: CrossCodeEval and RepoEval.                                     From the experimental results shown in Table II, we can find
+               • CrossCodeEval [22] is a diverse and multilingual code                 that the proposed RLCoder demonstrates effectiveness on all
+                 completion benchmark, and we use the Python and Java                  backbone language models across the four evaluated datasets,
+                 parts of it.                                                          except for RLCoder DeepSeekCoder-7B evaluated on RepoEval
+               • RepoEval [13] is a benchmark proposed simultaneously                  API, where its performance is on par with its corresponding
+                 with RepoCoder [13]. The benchmark consists of the                    best baseline RepoCoder DeepSeekCoder-7B . We can also observe
+
+
+                                                                                    1146
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                                                             TABLE II
+                    P ERFORMANCE OF DIFFERENT MODELS . T HE SUPERSCRIPTS IN PERCENTAGE DENOTE THE IMPROVEMENT RATIOS OF RLC ODER OVER THE
+                                                                 CORRESPONDING BEST BASELINE .
+
+
+                                                       CrossCodeEval (Python)         CrossCodeEval (Java)                  RepoEval (Line)             RepoEval (API)
+                Model
+                                                       EM             ES            EM                   ES            EM            ES            EM            ES
+                RawRAG CodeLlama-7B                    21.76          69.09         23.42                66.13         42.31         64.35         34.38         61.45
+                RepoCoder CodeLlama-7B                 23.34          70.84         24.17                66.56         43.94         65.81         37.00         63.51
+                RLCoder CodeLlama-7B                   26.60 ↑14.0%   72.27 ↑2.0%   26.23 ↑8.5%          67.61 ↑1.6%   46.63 ↑6.1%   67.92 ↑3.2%   37.94 ↑2.5%   64.31 ↑1.3%
+                RawRAG StarCoder-7B                    22.33          69.60         22.16                67.80         43.81         64.83         31.94         56.00
+                RepoCoder StarCoder-7B                 23.15          70.71         22.53                68.22         45.69         66.90         33.44         57.81
+                RLCoder StarCoder-7B                   25.82 ↑11.5%   72.11 ↑2.0%   24.73 ↑9.8%          69.08 ↑1.3%   47.38 ↑3.7%   68.46 ↑2.3%   34.88 ↑4.3%   58.11 ↑0.5%
+                RawRAG StarCoder2-7B                   22.89          70.66         23.42                69.13         44.44         65.95         34.50         58.78
+                RepoCoder StarCoder2-7B                24.35          71.71         23.75                69.59         45.81         67.37         36.44         59.92
+                RLCoder StarCoder2-7B                  27.17 ↑11.6%   73.24 ↑2.1%   26.23 ↑10.4%         70.51 ↑1.3%   48.25 ↑5.3%   68.61 ↑1.8%   38.00 ↑4.3%   61.21 ↑2.2%
+                RawRAG DeepSeekCoder-1B                19.74          67.68         18.89                62.47         39.31         62.04         33.00         60.41
+                RepoCoder DeepSeekCoder-1B             20.23          68.78         19.59                62.35         40.88         63.56         35.13         61.92
+                RLCoder DeepSeekCoder-1B               23.98 ↑18.5%   70.44 ↑2.4%   20.80 ↑6.2%          63.39 ↑1.7%   44.19 ↑8.1%   66.48 ↑4.6%   36.06 ↑2.6%   62.72 ↑1.3%
+                RawRAG DeepSeekCoder-7B                23.30          70.84         22.49                66.78         45.69         66.67         38.00         65.66
+                RepoCoder DeepSeekCoder-7B             26.98          72.96         24.96                66.52         46.38         67.51         39.31         66.29
+                RLCoder DeepSeekCoder-7B               30.28 ↑12.2%   74.42 ↑2.0%   26.09 ↑4.5%          67.31 ↑1.2%   48.75 ↑5.1%   69.43 ↑2.8%   39.88 ↑1.5%   66.22 ↑-0.1%
+
+
+
+                             22                                                                      RLCoder equipped with different retrieval methods described
+                                      Language
+                                          Python                                                     in Section IV-A, including NoRetrieval, BM25 [18], UniX-
+                             20           Java                                                       coder [49], and our enhanced model UniXcoder-SFT. Table III
+                                                                                                     shows the experimental results on the CrossCodeEval and Re-
+                             18                                                                      poEval benchmarks. The results yield the following findings:
+                        EM
+
+
+
+
+                                                                                                        • Our proposed RLRetriever consistently outperforms com-
+                             16
+                                                                                                          parative baseline methods under all metrics in both bench-
+                                                                                                          marks, underscoring its superior performance.
+                             14
+                                                                                                        • All retrieval-based methods (i.e., BM25, UniXCoder,
+
+                             12                                                                           UniXcoder-SFT, and RLRetriever) perform better than
+                                  0   2    4       6   8 10 12 14 16 18 20                                NoRetrieval, showing the inherent value of the retrieval
+                                                          Epoch
+                   Fig. 7. Performance trajectory curve during the training process.
+                                                                                                          process itself.
+                                                                                                        • Both UniXcoder-SFT and RLRetriever show better per-
+                                                                                                          formance than UniXcoder, indicating that retrieval train-
+             that among all models, RLCoder DeepSeekCoder-7B achieves the                                 ing can enhance the performance. Notably, our rein-
+             best performance with EM score of 30.28, improving its cor-                                  forcement learning-based training method exhibits better
+             responding best baseline RepoCoder DeepSeekCoder-7B by 12.2%                                 performance over supervised fine-tuning.
+             on CrossCodeEval Python and 5.1% on RepoEval Line.                                        We proposed the perplexity-based feedback, because it’s
+                Furthermore, to investigate the efficacy of our training                             both lightweight and can simulate the finetuning objectives of
+             process, we plot the performance trajectory curve across the                            code completion. As shown in Figure 8, we have plotted the
+             training epochs on CrossCodeEval, as illustrated in Figure 7.                           scores of EM, ES, and Perplexity (PPL) for DeepSeekCoder-
+             The result shows that the EM score gradually increases with                             7B on two datasets. It can be observed that lower PPL
+             each epoch until stabilizing, indicating the effectiveness of our                       generally corresponds to higher EM and ES metrics.
+             training process.
+                                                                                                         RQ2 Summary: RLRetriever consistently outperforms
+               RQ1 Summary: Our approach significantly outperforms                                       other retrieval methods. Furthermore, the results affirms
+               current state-of-the-art methods for all backbone LLMs,                                   the significance of the retrieval and training processes,
+               improving the CrossCodeEval benchmark by 12.2% and                                        particularly highlighting the advantages of our reinforcement
+               RepoEval 5.1%. The performance trajectory further demon-                                  learning-based training approach.
+               strates the efficacy of our training process.
+
+                                                                                                     C. RQ3: Contributions of Each Component
+             B. RQ2: Effectiveness of RLRetriever                                                       To understand the contributions of each component to
+               To assess the effectiveness of RLRetriever, the key module                            RLCoder, we conduct an ablation study on RLCoder. Specif-
+             of RLCoder, we conduct a comparative study. We evaluate                                 ically, we remove each component of RLCoder each time
+
+
+                                                                                                  1147
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                                                         TABLE III
+              E XPERIMENTAL RESULTS OF RLC ODER EQUIPPED WITH DIFFERENT RETRIEVAL METHODS . T HE BACKBONE LLM USED IS D EEP S EEK C ODER -7B. T HE
+                 SUPERSCRIPTS IN PERCENTAGE DENOTE THE IMPROVEMENT RATIOS OF OUR RETRIEVAL MODEL RLR ETRIEVER OVER THE CORRESPONDING BEST
+                                                                    BASELINE RETRIEVER .
+
+
+                                                           CrossCodeEval (Python)                       CrossCodeEval (Java)                     RepoEval (Line)                       RepoEval (API)
+                         Retrieval Method
+                                                           EM                 ES                   EM                      ES               EM                 ES                 EM               ES
+                         NoRetrieval                       9.46               62.79                11.41                   63.81            39.63              61.95              30.44            59.40
+                         BM25                              18.31              68.38                17.48                   65.23            45.94              66.67              38.25            65.04
+                         UniXcoder                         23.30              70.84                22.49                   66.78            45.69              66.67              38.00            65.66
+                         UniXcoder-SFT                     27.28              72.90                25.11                   66.39            46.75              67.28              37.69            65.00
+                         RLRetreiver                       30.28 ↑11.0%       74.42 ↑2.1%          26.09 ↑3.9%             67.31 ↑1.4%      48.75 ↑4.3%        69.43 ↑3.2%        39.88 ↑5.8%      66.22 ↑1.9%
+
+
+                                                                                                  TABLE IV
+                                                                          A BLATION STUDY RESULTS ON C ROSS C ODE E VAL AND R EPO E VAL .
+
+                                                CrossCodeEval (Python)                        CrossCodeEval (Java)                          RepoEval (Line)                         RepoEval (API)
+                         Model
+                                               EM                  ES                    EM                        ES                  EM                 ES                 EM                 ES
+                         RLCoder               30.28               74.42                 26.09                     67.31               48.75              69.43              39.88              66.22
+                          w/o RL               23.30 ↓23.1%        70.84 ↓4.8%           22.49 ↓13.8%              66.78 ↓0.8%         45.69 ↓6.3%        66.67 ↓4.0%        38.00 ↓4.7%        65.66 ↓0.8%
+                          w/o WP               27.35 ↓9.7%         72.82 ↓2.1%           25.67 ↓1.6%               67.43 ↑0.2%         47.44 ↓2.7%        67.83 ↓2.3%        38.81 ↓2.7%        65.25 ↓1.5%
+                          w/o NC               29.31 ↓3.2%         73.91 ↓0.7%           24.03 ↓7.9%               66.49 ↓1.2%         47.13 ↓3.3%        68.11 ↓1.9%        38.63 ↓3.1%        65.56 ↓1.0%
+                          w/o SS               29.57 ↓2.34%        74.49 ↑0.09%          25.57 ↓1.99%              67.42 ↑0.16%        47.31 ↓2.95%       68.23 ↓1.73%       39.63 ↓0.63%       65.87 ↓0.53%
+
+
+
+                               cceval_python                       70              cceval_java                                                             TABLE V
+                                                                PPL                                                  PPL
+                                                                EM 60                                                EM           A DDITIONAL ABLATION STUDY FOR THE STOP SIGNAL MECHANISM .
+              60                                                ES                                                   ES
+                                                                   50                                                                N OTE THAT, CONTRARY TO EM AND ES, LOWER PPL SCORES
+              40                                                   40                                                                         CORRESPOND TO BETTER PERFORMANCE .
+                                                                   30
+              20
+                                                                   20                                                             Model                             EM               ES                 PPL
+                                                                   10
+                                                                                                                                  RawRAG CodeLlama-7B               10.3             65.2               2.1389
+                   ine
+
+
+                          25
+
+
+
+                                     r
+
+
+
+
+                                                           er
+
+
+
+
+                                                                        ine
+
+
+                                                                              25
+
+
+
+
+                                                                                                              er
+                                                  FT
+
+
+
+
+                                                                                         r
+
+
+                                                                                                     FT
+                                      e
+
+
+
+
+                                                                                          e
+                                   od
+
+
+
+
+                                                         iev
+
+
+
+
+                                                                                       od
+
+
+
+
+                                                                                                            iev
+                                               r-S
+
+
+
+
+                                                                                                  r-S
+                         BM
+
+
+
+
+                                                                              BM
+               sel
+
+
+
+
+                                                                    sel
+
+
+
+
+                                                                                                                                  RLCoder CodeLlama-7B              11.1             66.4               2.0835
+                                  ixc
+
+
+
+
+                                                                                     ixc
+                                                          tr
+
+
+
+
+                                                                                                             tr
+                                              e
+
+
+
+
+                                                                                                    e
+              Ba
+
+
+
+
+                                                                   Ba
+                                           od
+
+
+
+
+                                                                                                 od
+                                                       Re
+
+
+
+
+                                                                                                          Re
+                                Un
+
+
+
+
+                                                                                   Un
+                                          ixc
+
+
+
+
+                                                                                             ixc
+                                                   RL
+
+
+
+
+                                                                                                        RL
+
+
+
+
+                                                                                                                                   w/o Stop Signal                  9.9 ↓10.81%      66.1 ↓0.45%        2.1152 ↑1.52%
+                                        Un
+
+
+
+
+                                                                                           Un
+
+
+
+
+                               repoeval_line                                       repoeval_api
+              70                                                PPL                                                  PPL          RawRAG StarCoder-7B               8.9              59.2               2.7400
+              60                                                EM 60                                                EM
+                                                                ES 50                                                ES           RLCoder StarCoder-7B              10.1             61.3               2.6695
+              50
+                                                                   40                                                              w/o Stop Signal                  9.1 ↓9.90%       60.1 ↓1.96%        2.7100 ↑1.52%
+              40                                                   30
+              30                                                   20                                                             RawRAG StarCoder2-7B              9.1              60.5               2.6422
+              20                                                   10                                                             RLCoder StarCoder2-7B             10.3             60.2               2.5716
+                                                                                                                                   w/o Stop Signal                  9.3 ↓9.71%       60.5 ↑0.50%        2.6115 ↑1.55%
+                   ine
+
+
+                          25
+
+
+
+                                     r
+
+
+
+
+                                                           er
+
+
+
+
+                                                                        ine
+
+
+                                                                              25
+                                                  FT
+
+
+
+
+                                                                                         r
+
+
+
+
+                                                                                                              er
+                                                                                                     FT
+                                      e
+
+
+
+
+                                                                                          e
+                                   od
+
+
+
+
+                                                         iev
+
+
+
+
+                                                                                       od
+
+
+
+
+                                                                                                            iev
+                                               r-S
+
+
+
+
+                                                                                                  r-S
+                         BM
+
+
+
+
+                                                                              BM
+               sel
+
+
+
+
+                                                                    sel
+                                  ixc
+
+
+
+
+                                                                                     ixc
+
+
+
+
+                                                                                                                                  RawRAG DeepSeekCoder-1B           9.6              64.9               2.4370
+                                                          tr
+
+
+
+
+                                                                                                             tr
+                                              e
+
+
+
+
+                                                                                                    e
+              Ba
+
+
+
+
+                                                                   Ba
+                                           od
+
+
+
+
+                                                                                                 od
+                                                       Re
+
+
+
+
+                                                                                                          Re
+                                Un
+
+
+
+
+                                                                                   Un
+                                          ixc
+
+
+
+
+                                                                                             ixc
+                                                   RL
+
+
+
+
+                                                                                                        RL
+
+
+
+
+                                                                                                                                  RLCoder DeepSeekCoder-1B          10.5             66.7               2.3764
+                                        Un
+
+
+
+
+                                                                                           Un
+
+
+
+
+                                                                                                                                   w/o Stop Signal                  10.0 ↓4.76%      65.9 ↓1.20%        2.4138 ↑1.57%
+             Fig. 8. The relationship between PPL and EM, ES: lower PPL corresponds                                               RawRAG DeepSeekCoder-7B           11.5             66.6               2.3334
+             to higher EM and ES.                                                                                                 RLCoder DeepSeekCoder-7B          12.2             68.6               2.2824
+                                                                                                                                   w/o Stop Signal                  11.8 ↓3.28%      67.9 ↓1.02%        2.3157 ↑1.46%
+
+             and study the performance of the ablated model. The ex-
+             perimental results are shown in Table IV. “w/o RL” means
+             using retriever without reinforcement learning. “w/o WP”                                                           beneficial to ES performance in some cases, but still harm
+             means utilizing unweighted perplexity of the target code as                                                        EM performance. In fact, ES mainly considers the similarity
+             the reward. “w/o NC” means using fixed window candidates                                                           between two pieces of code. The introduction of the stop
+             instead of our natural candidates, “w/o SS” means using                                                            signal and weighted perplexity can both affect code similarity.
+             retriever without the stop signal mechanism. From Table IV,                                                        The stop signal reduces useless but similar candidates, while
+             we can see that the performance of the model drops after                                                           weighted perplexity emphasizes API tokens more rather than
+             removing any one component, indicating that each component                                                         all tokens. This can potentially reduce the similarity between
+             contributes to the effectiveness of RLCoder. Especially, the                                                       generated and target code. Although these strategies weaken
+             performance drops the most significantly for “RLCoder w/o                                                          similarity, they improve code correctness. So removing the
+             RL”, indicating that the reinforcement learning mechanism                                                          stop signal and weighted perplexity decreases in EM across
+             is the most important component in RLCoder. We observe                                                             all benchmarks.
+             that unweighted perplexity and no stop mechanism can be                                                               Since CrossCodeEval and RepoEval are specifically curated
+
+
+                                                                                                                           1148
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+             to evaluate code completion ability in scenarios requiring                candidate, despite sharing several tokens with the query (as
+             cross-file context, the improvement brought by the stop signal            highlighted in the figure), does not contribute meaningfully to
+             is expected to be minor. To further evaluate the practical                the correct code completion. In contrast to RepoCoder, which
+             effectiveness of the stop signal mechanism, we construct a                iteratively uses generated code for retrieval and generation but
+             new dataset GitHubEval that construct code completion targets             still depends heavily on query-candidate similarity, RLCoder
+             at random positions within repositories, thus incorporating               leverages the perplexity of generating target code from a
+             instances that may not necessitate cross-file context. Following          given candidate. This approach enables RLRetriever to bypass
+             the same construction procedure as the training dataset, we               candidates that are seemingly useful but actually useless,
+             obtain 1000 samples for evaluation. The results shown in                  focusing instead on those more likely to aid in accurate code
+             Table V indicate that the stop signal is an important component           generation. This strategic prioritization explains RLCoder’s
+             in RLCoder, without which, the EM scores drop significantly               success in both retrieving the gold candidate and generating
+             by an average of 7.69%.                                                   the correct target code.
+
+               RQ3 Summary: Reinforcement learning mechanism is the                                           VI. R ELATED W ORK
+               most important component in RLCoder. Other components
+               of RLCoder also contributes to its superior performance,                A. Code Completion
+               with the stop signal mechanism showing further enhance-
+               ments in scenarios involving target code completion that                   Code completion, recognized as one of the most crucial
+               both require and do not require cross-file context.                     tasks in modern integrated development environments (IDEs),
+                                                                                       has garnered significant attention from researchers [51]–[55].
+                                                                                       Traditional approaches to code completion typically rely on
+                                                                                       rule-based methods or leverage code examples to predict
+             D. RQ4: Generalizability of RLCoder                                       the next sequence of code [56]–[58]. While these methods
+                To explore the generalizability of RLCoder, we conduct                 have shown some effectiveness, they often struggle to adapt
+             an evaluation with a setting different from the training stage.           to the complexities and nuances of real-world programming
+             Specifically, we train a new retriever by fusing RLCoder and              scenarios. In recent years, deep learning-based methods [9],
+             RepoCoder. Then, we evaluate the performance of the fused                 [10], [54], [59]–[71] have been explored to improve the
+             model. As shown in Table VI, we find that RepoCoder trained               performance of code completion. Recent studies found that
+             using the framework of RLCoder significantly outperforms                  code search can enhance code completion performance [72].
+             the original RepoCoder method. Specifically, the improvement              With the development of large language models [73]–[82],
+             rates in EM for Python and Java are 12.4% and 8.1% on                     many researchers have introduced LLMs into code comple-
+             CrossCodeEval, respectively. This result indicates that our               tion [83]–[87]. Equipped with LLMs, many studies have
+             training framework can be integrated into other models to                 employed RAG for code completion/generation [32], [34]–
+             further improve their performance. Note that when comparing               [37], [40]. For example, RedCoder [35] enhances code gen-
+             “RepoCoder w/ RLCoder” to RLCoder, they have comparable                   eration and summarization by integrating relevant past work
+             performance (with “RepoCoder w/ RLCoder” slightly better).                using dense retrieval techniques. To enhance private library
+             However, considering that RepoCoder requires multiple itera-              code generation, APICoder [37] was proposed to employ
+             tions of retrieval and generation, we opt for RLCoder, which              API documentation to train models to better generate these
+             accomplishes code completion in a single round, as the default            libraries. DocPrompting [36] introduces a method to enhance
+             setting in this work.                                                     code generation by using code documentation to address
+                                                                                       the challenge of generating code for unseen functions and
+                                                                                       libraries. AceCoder [34] improves code generation by inte-
+               RQ4 Summary: The training pipeline of RLCoder shows
+                                                                                       grating example retrieval and guided generation. ReCode [40]
+               generalizability on all datasets in applying to other frame-
+                                                                                       improves neural code generation by incorporating subtree
+               works.
+                                                                                       retrieval from existing code examples. kNN-TRANX [32]
+                                                                                       improves code generation from natural language by using
+                                                                                       syntax-aware retrieval, reducing noise and computational time.
+             E. Case Study
+                We illustrate the effectiveness of RLCoder through a case
+             study presented in Figure 9. The left-hand side shows the                 B. Repository-Level Code Completion
+             incomplete code, groundtruth code, and the gold candidate                    Repository-level code completion, which leverages the
+             we labelled for this case. We can see that RLCoder ranks the              broader context of an entire code repository, has become a fo-
+             gold candidate as the first candidate and generates the correct           cal point for research in the field of code completion and many
+             code. A possible reason that other methods fail to retrieve               studies have attempted to improve repository-level code com-
+             the correct code is that these methods rely on the surface-               pletion performance [12]–[17], [19], [21], [48]. CoCoMIC [12]
+             level similarity between the query and the candidate. The bad             and RepoHyper [19] enhance code completion capabilities
+
+
+                                                                                   1149
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                                                                        TABLE VI
+                                                             E XPERIMENTAL RESULTS OF R EPO C ODER INTEGRATED WITH RLC ODER .
+
+
+                                             CrossCodeEval (Python)                   CrossCodeEval (Java)                       RepoEval (Line)                        RepoEval (API)
+                    Method
+                                            EM                  ES                 EM                 ES                  EM                  ES                  EM                 ES
+                    RawRAG                  23.30               70.84              22.49              66.78               45.69               66.67               38.00              65.66
+                    RLCoder                 30.28               74.42              26.09              67.31               48.75               69.43               39.88              66.22
+                    RepoCoder               26.98               72.96              24.96              66.52               46.38               67.51               39.31              66.29
+                      w/ RLCoder            30.32 ↑12.4%        74.79 ↑2.5%        26.98 ↑8.1%        67.81 ↑1.9%         49.44 ↑6.6%         69.76 ↑3.3%         41.25 ↑4.9%        67.08 ↑1.2%
+
+
+                 Query (Incomplete Code)
+                 # similarity_filter.py                                                                                       Bad Candidate
+                 from typing import List
+                 from common.constants import Constants                                                           # diff_outlier_detector.py
+                 from common.utils import Utils                                                                   class DiffOutlierDetector:
+                 RATE = 2                                                                                             def __init__(self, detect_data: List[float], algorithm_type: str):
+                 class SimilarityFilter:                                                                                  self.algorithm_type = algorithm_type
+                     def __init__(self, detect_data: List[float],                                                         self.detect_data = self.minus_data(detect_data)
+                                  algorithm_type: str, anomaly_duration: int):                                            self.default_point = 4
+                         self.algorithm_type = algorithm_type                                                             self.alarm_last_time = 15
+                         self.detect_data = self.minus_data(detect_data)                                                  self.tk_delta = 2.0
+                         self.anomaly_duration = anomaly_duration                                                         self.default_duration = 1
+                     def run(self):                                                                                       # output
+                         """                                                                                              self.real_duration = 0
+
+
+
+
+                                                                                                                                                                                                       Not
+                         Check if the current data is similar to the historical data.                                 def run(self):
+                                                                                                                          """
+
+
+
+
+                                                                                                                                                                                                           Foun
+                         :return: True if the current data is similar to the historical data.
+                         """                                                                                              Detect an anomaly using the previous difference.
+
+
+
+
+                                                                                                                                                                                                               d
+                         agg_list = Utils. Code To Generate
+                                                                                                                                                                  1st Candidate
+                  Groundtruth      agg_diff_fe_calc(self.detect_data, self.anomaly_duration)
+
+                                                                                                                     RawRAG UniXcoder      aggregate_data(self.detect_data, self.anomaly_duration)
+                 Gold Candidate
+                                                                                                           nd
+                 # utils.py                                                                             Fou
+                                                                                                    Not             RawRAG UniXcoder-SFT   agg_diff_fe_calc(self.detect_data, Constants.AGG_LENGTH)
+                 @staticmethod
+                 def agg_diff_fe_calc(input_data: List[float], agg_length: int) -> list:                    ate
+                     ...                                                                          3rd Candid
+                     diff_func: Callable[[Any, Any], None] = lambda a, b: np.sum(a) - np.sum(b)                         RepoCoder           get_agg_list(self.detect_data, self.anomaly_duration)
+                     diff = []                                                                      Not Found
+                     for i in range(len(input_data) - 2 * agg_length + 1):
+                         post = input_data[i + agg_length:i + 2 * agg_length]                     1st
+                         pre = input_data[i:i + agg_length]                                           Can
+                                                                                                         did
+                         diff.append(diff_func(post, pre))                                                  ate          RLCoder           agg_diff_fe_calc(self.detect_data, self.anomaly_duration)
+                     return diff
+
+
+
+
+             Fig. 9. Case study. An example sources from CrossCodeEval with the task id being project cc python/210. The highlight token represents the identical
+             tokens exists in both the query and the bad candidate.
+
+
+
+             through dependency analysis and learning-based methods but                                                                       VII. C ONCLUSION
+             they encounter the problem of difficulty in obtaining training                                    In this paper, we propose RLCoder, a novel reinforcement
+             data and poor generalizability. CodePlan [14], RepoFuse [15]                                   learning framework for repository-level code completion. We
+             and A3 -CodeGen [21] employ static code analysis to obtain                                     enable the retriever to learn iteratively by obtaining feedback
+             relevant candidates. RepoCoder [13] and De-Hallucinator [16]                                   from the evaluator. Besides, unlike using fixed window candi-
+             adopt an approach through iterative retrieval and generation.                                  dates or candidates parsing from dependency, we introduce
+             CodeAgent [17] and ToolGen [48] explore tool invocation to                                     a simple yet effective Split-Aggregate candidate construc-
+             help code completion.                                                                          tion method based on human programming habits. Moreover,
+                Although these efforts show promising performance, there                                    we propose the stop signal to avoid using useless cross-
+             are still many areas for improvement. Existing methods often                                   file context. Experimental results indicate that RLCoder is
+             overlook the importance of retriever, leading to the retrieved                                 capable of ignoring those seemingly useful but actually useless
+             candidates not being needed for generation. Additionally,                                      candidates, capturing ones that are beneficial for accurate code
+             the lack of training data makes it difficult to fine-tune the                                  generation. This feature lets RLCoder achieve state-of-the-
+             retriever. RLCoder differs from them in that it does not require                               art performance on repository-level code completion. Besides,
+             labeled data for training. Instead, it obtains feedback from                                   RLCoder demonstrates good generalizability and applicability
+             the generator as a reward for training. Besides, to evaluate                                   to further enhancing existing methods.
+             the usefulness of candidates, RLCoder uses a novel stop
+             signal mechanism to determine when to retrieve and which                                                                      ACKNOWLEDGEMENTS
+             candidates to retain. Furthermore, we propose a new candidate                                    The work described in this paper is supported by CCF-
+             construction strategy for repository code.                                                     Huawei Populus Grove Fund CCF-HuaweiSE202301.
+
+
+
+                                                                                                       1150
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                                           R EFERENCES                                              A diverse and multilingual benchmark for cross-file code completion,”
+                                                                                                    Advances in Neural Information Processing Systems, vol. 36, 2024.
+              [1] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. d. O. Pinto, J. Kaplan,           [23] Y. Gao, Y. Xiong, X. Gao, K. Jia, J. Pan, Y. Bi, Y. Dai, J. Sun, and
+                  H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large            H. Wang, “Retrieval-augmented generation for large language models:
+                  language models trained on code,” arXiv preprint arXiv:2107.03374,                A survey,” arXiv preprint arXiv:2312.10997, 2023.
+                  2021.                                                                        [24] P. Zhao, H. Zhang, Q. Yu, Z. Wang, Y. Geng, F. Fu, L. Yang, W. Zhang,
+              [2] E. Nijkamp, B. Pang, H. Hayashi, L. Tu, H. Wang, Y. Zhou, S. Savarese,            and B. Cui, “Retrieval-augmented generation for ai-generated content:
+                  and C. Xiong, “Codegen: An open large language model for code with                A survey,” arXiv preprint arXiv:2402.19473, 2024.
+                  multi-turn program synthesis,” arXiv preprint arXiv:2203.13474, 2022.        [25] B. Cao, D. Cai, L. Cui, X. Cheng, W. Bi, Y. Zou, and S. Shi, “Retrieval
+              [3] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi,        is accurate generation,” arXiv preprint arXiv:2402.17532, 2024.
+                  J. Liu, T. Remez, J. Rapin et al., “Code llama: Open foundation models       [26] Z. He, Z. Zhong, T. Cai, J. D. Lee, and D. He, “Rest: Retrieval-based
+                  for code,” arXiv preprint arXiv:2308.12950, 2023.                                 speculative decoding,” arXiv preprint arXiv:2311.08252, 2023.
+              [4] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,              [27] N. Nashid, M. Sintaha, and A. Mesbah, “Retrieval-based prompt se-
+                  M. Marone, C. Akiki, J. Li, J. Chim et al., “Starcoder: may the source            lection for code-related few-shot learning,” in 2023 IEEE/ACM 45th
+                  be with you!” arXiv preprint arXiv:2305.06161, 2023.                              International Conference on Software Engineering (ICSE). IEEE, 2023,
+              [5] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen,                      pp. 2450–2462.
+                  X. Bi, Y. Wu, Y. Li et al., “Deepseek-coder: When the large language         [28] Y. Liu, S. Yavuz, R. Meng, D. Radev, C. Xiong, and Y. Zhou, “Uni-
+                  model meets programming–the rise of code intelligence,” arXiv preprint            parser: Unified semantic parser for question answering on knowledge
+                  arXiv:2401.14196, 2024.                                                           base and database,” arXiv preprint arXiv:2211.05165, 2022.
+              [6] F. Liu, Z. Fu, G. Li, Z. Jin, H. Liu, Y. Hao, and L. Zhang, “Non-            [29] S. Lu, N. Duan, H. Han, D. Guo, S.-w. Hwang, and A. Svyatkovskiy,
+                  autoregressive line-level code completion,” ACM Transactions on Soft-             “Reacc: A retrieval-augmented code completion framework,” arXiv
+                  ware Engineering and Methodology, 2024.                                           preprint arXiv:2203.07722, 2022.
+              [7] C. Wang, J. Hu, C. Gao, Y. Jin, T. Xie, H. Huang, Z. Lei, and Y. Deng,       [30] C. Yu, G. Yang, X. Chen, K. Liu, and Y. Zhou, “Bashexplainer:
+                  “How practitioners expect code completion?” in Proceedings of the 31st            Retrieval-augmented bash code comment generation based on fine-
+                  ACM Joint European Software Engineering Conference and Symposium                  tuned codebert,” in 2022 IEEE International Conference on Software
+                  on the Foundations of Software Engineering, 2023, pp. 1294–1306.                  Maintenance and Evolution (ICSME). IEEE, 2022, pp. 82–93.
+                                                                                               [31] J. A. Li, Y. Li, G. Li, X. Hu, X. Xia, and Z. Jin, “Editsum: A
+              [8] V. J. Hellendoorn, S. Proksch, H. C. Gall, and A. Bacchelli, “When
+                                                                                                    retrieve-and-edit framework for source code summarization,” in 2021
+                  code completion fails: A case study on real-world completions,” in
+                                                                                                    36th IEEE/ACM International Conference on Automated Software En-
+                  2019 IEEE/ACM 41st International Conference on Software Engineering
+                                                                                                    gineering (ASE). IEEE, 2021, pp. 155–166.
+                  (ICSE). IEEE, 2019, pp. 960–970.
+                                                                                               [32] X. Zhang, Y. Zhou, G. Yang, and T. Chen, “Syntax-aware retrieval
+              [9] M. Izadi, R. Gismondi, and G. Gousios, “Codefill: Multi-token code
+                                                                                                    augmented code generation,” in The 2023 Conference on Empirical
+                  completion by jointly learning from structure and naming sequences,”
+                                                                                                    Methods in Natural Language Processing, 2023.
+                  in Proceedings of the 44th International Conference on Software Engi-
+                                                                                               [33] J. Zhang, X. Wang, H. Zhang, H. Sun, and X. Liu, “Retrieval-based
+                  neering, 2022, pp. 401–412.
+                                                                                                    neural source code summarization,” in Proceedings of the ACM/IEEE
+             [10] W. Zhou, S. Kim, V. Murali, and G. A. Aye, “Improving code autocom-
+                                                                                                    42nd International Conference on Software Engineering, 2020, pp.
+                  pletion with transfer learning,” in Proceedings of the 44th International
+                                                                                                    1385–1397.
+                  Conference on Software Engineering: Software Engineering in Practice,
+                                                                                               [34] J. Li, Y. Zhao, Y. Li, G. Li, and Z. Jin, “Acecoder: Utilizing existing code
+                  2022, pp. 161–162.
+                                                                                                    to enhance code generation,” arXiv preprint arXiv:2303.17780, 2023.
+             [11] M. Izadi, J. Katzy, T. van Dam, M. Otten, R. M. Popescu, and                 [35] M. R. Parvez, W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W.
+                  A. van Deursen, “Language models for code completion: A practical                 Chang, “Retrieval augmented code generation and summarization,”
+                  evaluation,” arXiv preprint arXiv:2402.16197, 2024.                               arXiv preprint arXiv:2108.11601, 2021.
+             [12] Y. Ding, Z. Wang, W. U. Ahmad, M. K. Ramanathan, R. Nallapati,               [36] S. Zhou, U. Alon, F. F. Xu, Z. Wang, Z. Jiang, and G. Neubig,
+                  P. Bhatia, D. Roth, and B. Xiang, “Cocomic: Code completion by jointly            “Docprompting: Generating code by retrieving the docs,” arXiv preprint
+                  modeling in-file and cross-file context,” 2023.                                   arXiv:2207.05987, 2022.
+             [13] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan, Y. Mao, J.-           [37] D. Zan, B. Chen, Z. Lin, B. Guan, Y. Wang, and J.-G. Lou, “When
+                  G. Lou, and W. Chen, “Repocoder: Repository-level code completion                 language model meets private library,” arXiv preprint arXiv:2210.17236,
+                  through iterative retrieval and generation,” 2023.                                2022.
+             [14] R. Bairi, A. Sonwane, A. Kanade, A. Iyer, S. Parthasarathy, S. Rajamani,     [38] A. Madaan, S. Zhou, U. Alon, Y. Yang, and G. Neubig, “Language
+                  B. Ashok, S. Shet et al., “Codeplan: Repository-level coding using llms           models of code are few-shot commonsense learners,” arXiv preprint
+                  and planning,” arXiv preprint arXiv:2309.12499, 2023.                             arXiv:2210.07128, 2022.
+             [15] M. Liang, X. Xie, G. Zhang, X. Zheng, P. Di, H. Chen, C. Wang,               [39] Y. Wang, H. Le, A. D. Gotmare, N. D. Bui, J. Li, and S. C. Hoi,
+                  G. Fan et al., “Repofuse: Repository-level code completion with fused             “Codet5+: Open code large language models for code understanding
+                  dual context,” arXiv preprint arXiv:2402.14323, 2024.                             and generation,” arXiv preprint arXiv:2305.07922, 2023.
+             [16] A. Eghbali and M. Pradel, “De-hallucinator: Iterative grounding for llm-     [40] S. A. Hayati, R. Olivier, P. Avvaru, P. Yin, A. Tomasic, and
+                  based code completion,” arXiv preprint arXiv:2401.01701, 2024.                    G. Neubig, “Retrieval-based neural code generation,” arXiv preprint
+             [17] K. Zhang, J. Li, G. Li, X. Shi, and Z. Jin, “Codeagent: Enhancing code            arXiv:1808.10025, 2018.
+                  generation with tool-integrated agent systems for real-world repo-level      [41] N. Beau and B. Crabbé, “The impact of lexical and grammatical
+                  coding challenges,” arXiv preprint arXiv:2401.07339, 2024.                        processing on generating code from natural language,” arXiv preprint
+             [18] S. Robertson, H. Zaragoza et al., “The probabilistic relevance frame-             arXiv:2202.13972, 2022.
+                  work: Bm25 and beyond,” Foundations and Trends® in Information               [42] T. Ahmed, K. S. Pai, P. Devanbu, and E. T. Barr, “Automatic semantic
+                  Retrieval, vol. 3, no. 4, pp. 333–389, 2009.                                      augmentation of language model prompts (for code summarization),” in
+             [19] H. N. Phan, H. N. Phan, T. N. Nguyen, and N. D. Bui, “Repohyper:                  2024 IEEE/ACM 46th International Conference on Software Engineer-
+                  Better context retrieval is all you need for repository-level code com-           ing (ICSE). IEEE Computer Society, 2024, pp. 1004–1004.
+                  pletion,” arXiv preprint arXiv:2403.06095, 2024.                             [43] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan,
+             [20] D. Wu, W. U. Ahmad, D. Zhang, M. K. Ramanathan, and X. Ma,                        E. Jiang, C. Cai, M. Terry, Q. Le et al., “Program synthesis with large
+                  “Repoformer: Selective retrieval for repository-level code completion,”           language models,” arXiv preprint arXiv:2108.07732, 2021.
+                  arXiv preprint arXiv:2403.10059, 2024.                                       [44] S. Bubeck, V. Chandrasekaran, R. Eldan, J. Gehrke, E. Horvitz, E. Ka-
+             [21] D. Liao, S. Pan, Q. Huang, X. Ren, Z. Xing, H. Jin, and Q. Li, “Context-          mar, P. Lee, Y. T. Lee, Y. Li, S. Lundberg et al., “Sparks of artificial
+                  aware code generation framework for code repositories: Local, global,             general intelligence: Early experiments with gpt-4,” arXiv preprint
+                  and third-party library awareness,” arXiv preprint arXiv:2312.05772,              arXiv:2303.12712, 2023.
+                  2023.                                                                        [45] H. Yu, B. Shen, D. Ran, J. Zhang, Q. Zhang, Y. Ma, G. Liang, Y. Li,
+             [22] Y. Ding, Z. Wang, W. Ahmad, H. Ding, M. Tan, N. Jain, M. K.                       Q. Wang, and T. Xie, “Codereval: A benchmark of pragmatic code
+                  Ramanathan, R. Nallapati, P. Bhatia, D. Roth et al., “Crosscodeeval:              generation with generative pre-trained models,” in Proceedings of the
+
+
+
+                                                                                           1151
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+                  46th IEEE/ACM International Conference on Software Engineering,             [67] J. Li, Y. Wang, M. R. Lyu, and I. King, “Code completion with neural
+                  2024, pp. 1–12.                                                                  attention and pointer networks,” arXiv preprint arXiv:1711.09573, 2017.
+             [46] S. Hong, X. Zheng, J. Chen, Y. Cheng, J. Wang, C. Zhang, Z. Wang,           [68] S. Nguyen, T. Nguyen, Y. Li, and S. Wang, “Combining program anal-
+                  S. K. S. Yau, Z. Lin, L. Zhou et al., “Metagpt: Meta programming for             ysis and statistical language model for code statement completion,” in
+                  multi-agent collaborative framework,” arXiv preprint arXiv:2308.00352,           2019 34th IEEE/ACM International Conference on Automated Software
+                  2023.                                                                            Engineering (ASE). IEEE, 2019, pp. 710–721.
+             [47] D. Huang, Q. Bu, J. M. Zhang, M. Luck, and H. Cui, “Agentcoder:             [69] A. Svyatkovskiy, S. K. Deng, S. Fu, and N. Sundaresan, “Intellicode
+                  Multi-agent-based code generation with iterative testing and optimisa-           compose: Code generation using transformer,” in Proceedings of the
+                  tion,” arXiv preprint arXiv:2312.13010, 2023.                                    28th ACM joint meeting on European software engineering conference
+             [48] C. Wang, J. Zhang, Y. Feng, T. Li, W. Sun, Y. Liu, and X. Peng,                  and symposium on the foundations of software engineering, 2020, pp.
+                  “Teaching code llms to use autocompletion tools in repository-level code         1433–1443.
+                  generation,” arXiv preprint arXiv:2401.06391, 2024.                         [70] F. Wen, E. Aghajani, C. Nagy, M. Lanza, and G. Bavota, “Siri, write
+             [49] D. Guo, S. Lu, N. Duan, Y. Wang, M. Zhou, and J. Yin, “Unixcoder:                the next method,” in 2021 IEEE/ACM 43rd International Conference on
+                  Unified cross-modal pre-training for code representation,” arXiv preprint        Software Engineering (ICSE). IEEE, 2021, pp. 138–149.
+                  arXiv:2203.03850, 2022.                                                     [71] Y. Yang, Y. Jiang, M. Gu, J. Sun, J. Gao, and H. Liu, “A language model
+             [50] V. I. Levenshtein et al., “Binary codes capable of correcting deletions,         for statements of software code,” in 2017 32nd IEEE/ACM International
+                  insertions, and reversals,” in Soviet physics doklady, vol. 10, no. 8.           Conference on Automated Software Engineering (ASE). IEEE, 2017,
+                  Soviet Union, 1966, pp. 707–710.                                                 pp. 682–687.
+             [51] C. Liu, X. Xia, D. Lo, C. Gao, X. Yang, and J. Grundy, “Opportunities       [72] J. Chen, X. Hu, Z. Li, C. Gao, X. Xia, and D. Lo, “Code search is all
+                  and challenges in code search tools,” ACM Computing Surveys (CSUR),              you need? improving code suggestions with code search,” Proceedings of
+                  vol. 54, no. 9, pp. 1–40, 2021.                                                  the 46th IEEE/ACM International Conference on Software Engineering,
+             [52] J. Chen, C. Chen, J. Hu, J. Grundy, Y. Wang, T. Chen, and Z. Zheng,              2024.
+                  “Identifying smart contract security issues in code snippets from stack     [73] J. Lu, W. Zhong, Y. Wang, Z. Guo, Q. Zhu, W. Huang, Y. Wang, F. Mi,
+                  overflow,” arXiv preprint arXiv:2407.13271, 2024.                                B. Wang, Y. Wang et al., “Yoda: Teacher-student progressive learning
+             [53] Y. Wang, T. Jiang, M. Liu, J. Chen, and Z. Zheng, “Beyond functional             for language models,” arXiv preprint arXiv:2401.15670, 2024.
+                  correctness: Investigating coding style inconsistencies in large language   [74] F. Hu, Y. Wang, L. Du, H. Zhang, S. Han, D. Zhang, and X. Li,
+                  models,” arXiv preprint arXiv:2407.00456, 2024.                                  “Split, encode and aggregate for long code search,” arXiv preprint
+             [54] Y. Wang and H. Li, “Code completion by modeling flattened abstract               arXiv:2208.11271, 2022.
+                  syntax trees as graphs,” in Proceedings of the AAAI conference on           [75] Y. Liu, J. Chen, T. Bi, J. Grundy, Y. Wang, T. Chen, Y. Tang,
+                  artificial intelligence, vol. 35, no. 16, 2021, pp. 14 015–14 023.               and Z. Zheng, “An empirical study on low code programming us-
+             [55] W. Tao, Y. Zhou, Y. Wang, H. Zhang, H. Wang, and W. Zhang, “Kadel:               ing traditional vs large language model support,” arXiv preprint
+                  Knowledge-aware denoising learning for commit message generation,”               arXiv:2402.01156, 2024.
+                  ACM Transactions on Software Engineering and Methodology, 2024.             [76] Y. Wang, Y. Huang, D. Guo, H. Zhang, and Z. Zheng, “Sparsecoder:
+             [56] M. Bruch, M. Monperrus, and M. Mezini, “Learning from examples                   Identifier-aware sparse transformer for file-level code summarization,”
+                  to improve code completion systems,” in Proceedings of the 7th joint             arXiv preprint arXiv:2401.14727, 2024.
+                  meeting of the European software engineering conference and the ACM         [77] J. Zhou, W. Zhong, Y. Wang, and J. Wang, “Adaptive-solver framework
+                  SIGSOFT symposium on the foundations of software engineering, 2009,              for dynamic strategy selection in large language model reasoning,” arXiv
+                  pp. 213–222.                                                                     preprint arXiv:2310.01446, 2023.
+             [57] D. Hou and D. M. Pletcher, “Towards a better code completion system         [78] E. Shi, F. Zhang, Y. Wang, B. Chen, L. Du, H. Zhang, S. Han, D. Zhang,
+                  by api grouping, filtering, and popularity-based ranking,” in Proceedings        and H. Sun, “Sotana: The open-source software development assistant,”
+                  of the 2nd International Workshop on Recommendation Systems for                  arXiv preprint arXiv:2308.13416, 2023.
+                  Software Engineering, 2010, pp. 26–30.                                      [79] Z. Zheng, K. Ning, Y. Wang, J. Zhang, D. Zheng, M. Ye, and J. Chen,
+             [58] R. Robbes and M. Lanza, “How program history can improve code                    “A survey of large language models for code: Evolution, benchmarking,
+                  completion,” in 2008 23rd IEEE/ACM International Conference on                   and future trends,” arXiv preprint arXiv:2311.10372, 2023.
+                  Automated Software Engineering. IEEE, 2008, pp. 317–326.                    [80] Z. Zheng, K. Ning, J. Chen, Y. Wang, W. Chen, L. Guo, and W. Wang,
+             [59] Y. Chen, C. Gao, X. Ren, Y. Peng, X. Xia, and M. R. Lyu, “Api usage              “Towards an understanding of large language models in software engi-
+                  recommendation via multi-view heterogeneous graph representation                 neering tasks,” arXiv preprint arXiv:2308.11396, 2023.
+                  learning,” IEEE Transactions on Software Engineering, 2023.                 [81] C. Chen, J. Su, J. Chen, Y. Wang, T. Bi, Y. Wang, X. Lin, T. Chen, and
+             [60] C. Wang, X. Peng, M. Liu, Z. Xing, X. Bai, B. Xie, and T. Wang, “A               Z. Zheng, “When chatgpt meets smart contract vulnerability detection:
+                  learning-based approach for automatic construction of domain glossary            How far are we?” arXiv preprint arXiv:2309.05520, 2023.
+                  from source code and documentation,” in Proceedings of the 2019 27th        [82] W. Zhong, R. Cui, Y. Guo, Y. Liang, S. Lu, Y. Wang, A. Saied, W. Chen,
+                  ACM joint meeting on european software engineering conference and                and N. Duan, “Agieval: A human-centric benchmark for evaluating
+                  symposium on the foundations of software engineering, 2019, pp. 97–              foundation models,” arXiv preprint arXiv:2304.06364, 2023.
+                  108.                                                                        [83] M. Liu, Y. Yang, Y. Lou, X. Peng, Z. Zhou, X. Du, and T. Yang,
+             [61] M. Liu, X. Peng, A. Marcus, Z. Xing, W. Xie, S. Xing, and Y. Liu,                “Recommending analogical apis via knowledge graph embedding,” in
+                  “Generating query-specific class api summaries,” in Proceedings of               Proceedings of the 31st ACM Joint European Software Engineering
+                  the 2019 27th ACM joint meeting on European software engineering                 Conference and Symposium on the Foundations of Software Engineering,
+                  conference and symposium on the foundations of software engineering,             2023, pp. 1496–1508.
+                  2019, pp. 120–130.                                                          [84] X. Jiang, Y. Dong, Z. Jin, and G. Li, “Seed: Customize large language
+             [62] X. Wang, Y. Wang, Y. Wan, F. Mi, Y. Li, P. Zhou, J. Liu, H. Wu,                  models with sample-efficient adaptation for code generation,” arXiv
+                  X. Jiang, and Q. Liu, “Compilable neural code generation with compiler           preprint arXiv:2403.00046, 2024.
+                  feedback,” arXiv preprint arXiv:2203.05132, 2022.                           [85] B. Li, Z. Sun, T. Huang, H. Zhang, Y. Wan, G. Li, Z. Jin, and C. Lyu,
+             [63] G. A. Aye and G. E. Kaiser, “Sequence model design for code comple-              “Ircoco: Immediate rewards-guided deep reinforcement learning for code
+                  tion in the modern ide,” arXiv preprint arXiv:2004.05249, 2020.                  completion,” arXiv preprint arXiv:2401.16637, 2024.
+             [64] V. J. Hellendoorn and P. Devanbu, “Are deep neural networks the best        [86] Y. Zhu, J. A. Li, G. Li, Y. Zhao, J. Li, Z. Jin, and H. Mei, “Improving
+                  choice for modeling source code?” in Proceedings of the 2017 11th Joint          code generation by dynamic temperature sampling,” arXiv preprint
+                  meeting on foundations of software engineering, 2017, pp. 763–773.               arXiv:2309.02772, 2023.
+             [65] R.-M. Karampatsis, H. Babii, R. Robbes, C. Sutton, and A. Janes,            [87] L. Guo, Y. Wang, E. Shi, W. Zhong, h. Zhang, j. Chen, R. Zhang, y. Ma,
+                  “Big code!= big vocabulary: Open-vocabulary models for source code,”             and Z. Zheng, “When to stop? towards efficient code generation in llms
+                  in Proceedings of the ACM/IEEE 42nd International Conference on                  with excess token prevention,” in Proceedings of the 33st ACM SIGSOFT
+                  Software Engineering, 2020, pp. 1073–1085.                                       international symposium on software testing and analysis, 2024.
+             [66] S. Kim, J. Zhao, Y. Tian, and S. Chandra, “Code prediction by feeding
+                  trees to transformers,” in 2021 IEEE/ACM 43rd International Conference
+                  on Software Engineering (ICSE). IEEE, 2021, pp. 150–162.
+
+
+
+                                                                                          1152
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 19:01:06 UTC from IEEE Xplore. Restriction
+

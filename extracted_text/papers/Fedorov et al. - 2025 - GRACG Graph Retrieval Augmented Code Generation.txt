@@ -1,0 +1,566 @@
+                                                                                                                                                                                            2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW)
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops (ASEW) | 979-8-3315-8503-7/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASEW67777.2025.00060
+
+
+
+
+                                                                                                                                                                                                GRACG: Graph Retrieval Augmented Code
+                                                                                                                                                                                                             Generation
+                                                                                                                                                                                                   Konstantin Fedorov                       Boris Zarubin                                Vladimir Ivanov
+                                                                                                                                                                                                       AI Talent Hub                      Central University                          Research Center of
+                                                                                                                                                                                                     ITMO University                       Moscow, Russia                       the Artificial Intelligence Institute
+                                                                                                                                                                                                 Saint Petersburg, Russia                0009-0008-7324-4176                           Innopolis University
+                                                                                                                                                                                                  k.fedorov@niuitmo.ru                                                                  Innopolis, Russia
+                                                                                                                                                                                                  0000-0001-9853-8543                                                                v.ivanov@innopolis.ru
+                                                                                                                                                                                                                                                                                      0000-0003-3289-8188
+
+
+                                                                                                                                                                                      Abstract—While file-level context is an effective basis for              of a file, which can reduce the occurrence of repetitive patterns
+                                                                                                                                                                                   many modern code generation tools powered by Large Language                 within individual files. However, these models are constrained
+                                                                                                                                                                                   Models (LLMs), it may be insufficient to fully capture the                  to file-level context and do not consider the entirety of a
+                                                                                                                                                                                   structural and semantic dependencies that extend across entire
+                                                                                                                                                                                   repositories. To address this issue, we propose a graph-based               codebase, making them less effective at addressing cross-
+                                                                                                                                                                                   Retrieval-Augmented Code Generation (GRACG) framework                       file issues such as inconsistencies or unintentional duplication
+                                                                                                                                                                                   that leverages repository-level context. Our approach models                across different parts of a project.
+                                                                                                                                                                                   the repository as a heterogeneous graph of files, classes, and                 Another potential approach is to feed the entire codebase
+                                                                                                                                                                                   functions. A Graph Neural Network (GNN) is used to generate                 to an LLM. However, this becomes impractical, as LLMs
+                                                                                                                                                                                   node embeddings that incorporate information from connected
+                                                                                                                                                                                   nodes. These embeddings are precomputed and serve as an                     have limitations in their context size, typically constrained
+                                                                                                                                                                                   efficient index, allowing us to retrieve context for user queries           by token limits. When working with large codebases, such
+                                                                                                                                                                                   without re-running the GNN. Retrieved nodes are then used                   solution quickly exceeds these limits. Retrieval Augmented
+                                                                                                                                                                                   to construct prompts for LLMs to perform repository-aware                   Generation (RAG) [2] can be applied to avoid the problem.
+                                                                                                                                                                                   function generation. We evaluate retrieval performance on a                 RAG is a technique that combines generative models with
+                                                                                                                                                                                   benchmark where the goal is to identify functions likely to
+                                                                                                                                                                                   be called based on a natural language description. For end-to-              retrieval systems, allowing for the generation of more accurate
+                                                                                                                                                                                   end evaluation, we use pass@k, which measures the percentage                and contextually aware outputs by retrieving relevant external
+                                                                                                                                                                                   of tasks where at least one of the top-k generated solutions                information. This allows for the incorporation of up-to-date,
+                                                                                                                                                                                   passes the associated test cases. Our results show that graph-              domain-specific knowledge at inference time, addressing the
+                                                                                                                                                                                   based retrieval outperforms classical methods, highlighting it as a         problem of outdated or incomplete knowledge within the
+                                                                                                                                                                                   promising direction for future research. However, in terms of end-
+                                                                                                                                                                                   to-end code generation, we observe non-significant improvements             model. By only retrieving the most relevant information,
+                                                                                                                                                                                   in the metrics, even when oracle functions are used. Importantly,           RAG reduces the need for large context windows, making it
+                                                                                                                                                                                   the modular nature of our framework also makes it suitable as a             particularly useful for code-related tasks. In contrast to natural
+                                                                                                                                                                                   building block in multi-agent settings, where specialized compo-            language, code in a repository has a strict structure and can
+                                                                                                                                                                                   nents for retrieval, generation, and verification can collaborate           be represented as a graph that contains functions, classes or
+                                                                                                                                                                                   around repository-level knowledge.
+                                                                                                                                                                                      Index Terms—code generation, graph neural networks, code                 files and relations representing function calls, inheritances and
+                                                                                                                                                                                   retrieval, software repositories, large language models, machine            etc. These relations may help represent code block better by
+                                                                                                                                                                                   learning for software engineering                                           incorporating its neighbors meanings. For instance, it is hard
+                                                                                                                                                                                                                                                               to understand purpose of an orchestrator function, which only
+                                                                                                                                                                                                          I. I NTRODUCTION                                     calls other functions, without a proper documentation. Thus,
+                                                                                                                                                                                      The development and maintenance of large codebases are                   utilization of a semantic graph of a code repository might
+                                                                                                                                                                                   common challenges in software engineering. These challenges                 open the door to more meaningful and efficient retrieval of
+                                                                                                                                                                                   extend beyond code repetition to include issues such as main-               code snippets.
+                                                                                                                                                                                   taining consistency across modules, integrating updates across                 Beyond improving single-model code generation, such
+                                                                                                                                                                                   multiple files, and handling incomplete or poorly documented                graph-enhanced retrieval frameworks can also serve as com-
+                                                                                                                                                                                   code. For instance, inconsistent naming conventions, lack                   ponents for multi-agent systems. Recent studies show that
+                                                                                                                                                                                   of clear documentation, and the rapid evolution of software                 retrieval-augmented generation can be decomposed into spe-
+                                                                                                                                                                                   often lead to difficulties when developers try to understand                cialized agents that collaborate around filtering, retrieval,
+                                                                                                                                                                                   or extend existing code. Recent advancements in Natural Lan-                and generation [3]. In this sense, our approach provides
+                                                                                                                                                                                   guage Processing (NLP), particularly through Large Language                 reusable infrastructure that could be integrated into multi-agent
+                                                                                                                                                                                   Models (LLMs), have had a significant impact on the software                pipelines for software engineering tasks.
+                                                                                                                                                                                   development process. Tools like GitHub Copilot [1] use LLMs
+                                                                                                                                                                                   to autocomplete code based on user comments and the context
+
+
+                                                                                                                                                                                979-8-3315-8503-7/25/$31.00 ©2025 IEEE                                   291
+                                                                                                                                                                                DOI 10.1109/ASEW67777.2025.00060
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                                      II. R ELATED W ORK                                   following limitations: need to assign query to some node in
+                                                                                           the graph is not always feasible and GNN run for every query
+                 A. Graph Retrieval
+                                                                                           which may impose performance overhead.
+                    Traditional LLM-based code generation systems like
+                 GitHub Copilot [1] often operate with only intra-file context,            B. End-to-end Benchmarks
+                 neglecting cross-file dependencies and repository structure.                 Evaluating retrieval-augmented code generation systems
+                 To overcome this, several repository-aware approaches have                requires benchmarks that reflect the complexities of using
+                 emerged. For example, RepoFusion [4] utilize repository struc-            external code context and verifying output correctness. We
+                 ture using the best prompt template from several manually                 categorize existing benchmarks into three types and discuss
+                 created templates, where the best is selected using a classifi-           their limitations in the context of repository-level code gen-
+                 cation model or other algorithm. However, manual nature of                eration. Benchmarks like HumanEval [10], MBPP [11], and
+                 templates may cause issues when encountering some unseen                  APPS [12] assess synthesis at the function level. HumanEval
+                 type of dependency.                                                       and MBPP focus on writing Python functions from docstrings,
+                    Another notable system is RepoCoder [5] that ad-                       while APPS includes a broader range of problem complexity.
+                 dresses repository-level code completion with an iterative re-            Compared to repo-level benchmarks, they allow less reasoning
+                 trieval–generation loop, combining a similarity-based retriever           over existing codebases, making them less ideal for evaluat-
+                 (embedding search over repository snippets) with a pretrained             ing retrieval-augmented models. Repository level benchmarks
+                 code LLM. It retrieves relevant code snippets (lines, APIs,               evaluate a model’s ability to use context from the entire
+                 functions) to iteratively augment context—yet, it treats the              repository and generate consistent code. RepoBench [13] and
+                 repository as a flat collection of snippets and does not utilize          RepoEval introduced in [5] are two prominent examples.
+                 repository structure explicitly.                                          RepoBench focuses on next-line prediction across repo-wide
+                    RAMBO [6] likewise follows an iterative RAG approach                   contexts, including retrieval and generation sub-tasks, while
+                 for repository-level method body completion. It begins by                 RepoEval evaluates multi-granularity tasks like API usage
+                 generating a sketch of the target method, then uses AST                   and function completion. Both benchmarks work with real-
+                 parsing to extract repository elements such as classes, meth-             world Python repositories and cross-file retrieval. Compared
+                 ods, and fields, along with their usages across the repository.           to function-level tasks, these require richer representations and
+                 These elements are iteratively retrieved and integrated into              test longer-range dependencies, but they lack comprehensive
+                 the generation process. While more structurally aware than                functional correctness checks. HumanEval and MBPP include
+                 RepoCoder, RAMBO still does not exploit call graphs or other              small test suites per task, while CodeContests [14] and APPS
+                 relations between elements of repository, leaving opportunities           feature more complex inputs/output pairs. These benchmarks
+                 for richer graph-based retrieval approaches.                              provide rigorous validation of code behavior, but they do
+                    Graph Neural Networks (GNNs) are a promising method,                   not evaluate how well a model retrieves or uses broader
+                 which can integrate the structural information of a graph                 context. Functional correctness is necessary but not sufficient
+                 into its embeddings. GNNs are particularly effective when                 for assessing retrieval-augmented systems.
+                 combined with Large Language Models (LLMs), as they can                      Despite the abundance of benchmarks, few combine
+                 enhance the embeddings by incorporating graph structures,                 repository-level context, function-level generation, and test-
+                 providing richer context for natural language tasks. For in-              based correctness in a single task. RepoBench and RepoE-
+                 stance, the paper [7] utilizes a Graph Attention Network to               val address retrieval and generation but offer limited or no
+                 encode knowledge graph, with the nodes and edges of the                   correctness testing, while HumanEval and similar datasets
+                 subgraph being encoded by an LLM beforehand. Similarly,                   provide correctness signals but lack realistic multi-file context.
+                 the paper [8] explores the use of GNNs for knowledge graph                DevEval [15] helps bridge this gap by aligning with real-world
+                 retrieval by classifying nodes as either relevant or not relevant         code repositories across multiple dimensions, including code
+                 to a given query. The main inspiration for this work was                  and dependency distributions. With 1,874 testing samples from
+                 paper [9] in which the RepoHyper framework was proposed.                  117 repositories, annotated and paired with comprehensive
+                 This method extracts classes, modules, fields, and functions              test cases, DevEval enables evaluation in realistic settings and
+                 with an additional rich set of relations between them in the              serves as a suitable foundation for our benchmark develop-
+                 form of a directed graph. Then, the method retrieves context              ment.
+                 from the graph with the help of both classical approaches
+                 and graph neural network (GNN). Firstly, the approach finds                                    III. M ETHODOLOGY
+                 relevant nodes by embedding similarity to a prompt that serve                We introduce GRACG (Graph Retrieval Augmented Code
+                 as starting points in a graph search. Secondly, it employs                Generation), a repository-aware pipeline that builds a het-
+                 breadth-first search with some limit to a number of nodes and             erogeneous code graph, learns GNN-based node embeddings,
+                 depth. Lastly, the method inserts a new node into the graph               retrieves task-relevant context via a learned query–node align-
+                 and tries to predict which existing nodes should be connected             ment, and conditions an LLM on the retrieved snippets for
+                 to it using GNN. The GNN is trained on a link prediction                  function synthesis. An overview is shown in Fig. 1; we provide
+                 problem in an unsupervised manner. However, we can point                  details below.
+
+
+
+
+                                                                                     292
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                                  Inputs                                            Graph Construction                                                                       Graph & Index
+
+                               Repository
+                                                                Semantic Graph Parser             Heterogeneous Graph                                           GraphSAGE               Node Embeddings hv
+                         Files, Classes, Functions
+
+                                                                                          Query Encoding & Retrieval
+
+                              User Query                             UniXcoder                Projection (MLP)               Similarity Search
+                            Natural language                         encode xq                 q ′ = proj(xq )                  cos(q ′ , hv )                                                Index
+
+                                                                                                     Retrieved Context                                                         Evaluation
+
+                                                                                                                                                                          Retrieval Eval
+                                                                                                                           Top-k Retrieved Nodes
+                                                                                                                                                                        Recall@k, MRR@k
+
+                                                                                               Generation
+
+                                                          Prompt Builder                        LLM                                                                         End-to-End Eval
+                                                          Context + Query                                                     Generated Code
+                                                                                        StarCoder / CodeLlama                                                                   pass@k
+
+
+                                                                                                                                                                            Main flow
+
+                                  Inputs                Graph             Graph Index     Query Encoding       Retrieved         Generation        Evaluation
+                                                      Construction                         & Retrieval          Context
+
+
+                                                     Fig. 1. GRACG pipeline overview. Each block of the pipeline is labeled both by color and captions.
+
+
+
+                 A. Problem Definition                                                                                        Allowed typed edges are defined by the set
+                    We address the task of repository-level code generation,                                                  C = {(a, r, b) | a, b ∈ A, r ∈ R, edge (a, r, b) allowed}.
+                 where the goal is to synthesize a function or method imple-                                                                                                            (2)
+                 mentation using information that may be distributed across                                                   We employ the open-source SemanticGraphParser1
+                 multiple files of a repository.                                                                           to extract G from Python repositories via abstract syntax tree
+                    In this setting, the input is a source-code repository together                                        (AST) parsing. This parser was extended to extract function
+                 with a natural language query describing the desired function-                                            signatures and docstrings. Manual inspection on a random
+                 ality. The output is a code snippet that both satisfies the user                                          subset of eight repositories confirmed extraction accuracy.
+                 query and remains consistent with the surrounding repository                                              A very simple example of the resulting graph structure is
+                 context.                                                                                                  illustrated in Fig. 2.
+                    Because repositories typically contain structural dependen-
+                 cies across files, simply providing a query and a single file                                             C. Retrieval Approaches
+                 as input is insufficient. To overcome this, we retrieve a set                                               Let V be the set of candidate nodes in G. A retrieval
+                 of relevant code snippets from the repository to serve as                                                 function
+                 additional context for generation. These snippets are selected                                                          retrieve : Q × G → Sk ⊆ V             (3)
+                 using retrieval methods that operate over a semantic graph
+                                                                                                                           returns the top-k nodes ranked by a relevance score s(q, v).
+                 representation of the repository.
+                                                                                                                              We use KNN as our baseline method, where both query q
+                 B. Graph Construction                                                                                     and node v are encoded using the UniXcoder [16] model
+                                                                                                                           to obtain embeddings xq , xv ∈ Rd . Relevance is measured by
+                    We represent a source code repository as a heterogeneous                                               cosine similarity:
+                 directed graph                                                                                                                              xq · xv
+                                                                                                                                              sKNN (q, v) =             ,            (4)
+                                             G = (V, E, TV , TE , D),                                        (1)                                            ∥xq ∥ ∥xv ∥
+                                                                                                                           where sKNN (q, v) ∈ [−1, 1] quantifies the semantic similarity
+                 where:
+                                                                                                                           between query q and node v.
+                   • V is the set of nodes, with possible node types                                                         In the proposed method, node embeddings hv are initialized
+                                                                                                                           using a heterogeneous GraphSAGE [17] model over G:
+                                       A = {F ILE, C LASS, F UNCTION};
+                                                                                                                                                 {hv ∈ Rn | v ∈ V} = GNN(G),                                 (5)
+                   •   E ⊆ V ×V is the set of directed edges, with relation types
+                                                                                                                           where message passing is restricted to respect encapsulation
+                            R = {I MPORT, OWNER, C ALL, I NHERITED};                                                       (e.g., caller-to-callee edges only). We adopt GraphSAGE as it
+                                                                                                                           is a well-established GNN architecture with inductive learning
+                   • TV : V → A maps each node to its type;                                                                capabilities and has been used in prior repository-level retrieval
+                   • TE : E → R maps each edge to its relation type;                                                       work [9].
+                   • D = {dv }v∈V is the set of raw node features, including
+                     namespace, docstring, and full code snippet.                                                            1 https://github.com/Andrchest/SemanticGraphParser
+
+
+
+
+                                                                                                                    293
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                   Since query embeddings xq from UniXcoder may not                          the proposed GNN-based method. These snippets correspond
+                align with hv , we introduce a learnable projection proj(·),                 to full function or class definitions and are accompanied
+                implemented as a multilayer perceptron (MLP):                                by their docstrings and signatures. The retrieved snippets
+                                                                 q ′ · hv                    are concatenated into a structured prompt alongside the user
+                             q ′ = proj(xq ),   sGNN (q, v) =                .   (6)         query. The prompt template follows a repository-level format,
+                                                                ∥q ′ ∥ ∥hv ∥
+                                                                                             in which retrieved code context is placed before the query
+                D. Training Strategy                                                         description. The retrieved items are ordered by their relevance
+                   Our retrieval model is trained in two stages: pretraining                 scores so that the most relevant snippets appear closest to
+                on code snippets and finetuning on docstrings. This approach                 the query, mitigating truncation when approaching the model’s
+                addresses the scarcity of natural language annotations in                    context window limit.
+                repositories while leveraging abundant code structure.
+                                                                                                                    IV. E VALUATION
+                   1) Pretraining Phase: The objective of pretraining is to
+                learn repository graph representations by aligning query-like                A. Setup
+                code embeddings with relevant nodes through an edge predic-                    We evaluate our framework on two complementary tasks:
+                tion task.
+                                                                                               1) Retrieval evaluation on the RepoBench dataset, mea-
+                   Let xv be the UniXcoder embedding of the code snippet
+                                                                                                   suring the ability to retrieve relevant code elements
+                for node v, and let hv be its corresponding GNN embedding.
+                                                                                                   from the repository graph given a natural language
+                For each anchor node v, we sample:
+                                                                                                   description.
+                                      +
+                   • a positive node v connected to v by an existing edge of                   2) End-to-end code generation evaluation on the
+                     type r ∈ R;                                                                   EvoCodeBenchPlus benchmark, measuring the func-
+                                        −
+                   • a negative node v     chosen uniformly from nodes not                         tional correctness of generated code when conditioned
+                     connected to v by type r.                                                     on retrieved context.
+                   We project the anchor embedding via a learnable function                  For retrieval, we fix k = 5 retrieved items per query. For
+                proj(·) and optimize a triplet margin loss:                                  generation, we use a single completion (pass@1) per query.
+                                           hproj
+                                            v    = proj(xv ),                    (7)         B. Retrieval Evaluation
+                         +    −
+                                            0, d(hproj            proj
+                                                                                 
+                  L(v, v , v ) = max              v , hv + ) − d(hv , hv − ) + α                We chose RepoBench as the base benchmark for training
+                                                                                 (8)         and evaluating retrieval methods because it contains a large
+                   where d(·, ·) is the cosine distance and α is the margin                  number of repositories and provides line-level granularity with
+                hyperparameter.                                                              labeled cross-file dependencies. However, we encountered
+                   This phase is performed over all relation types, not limited              significant reproducibility issues. The authors provide only
+                to C ALL edges, to capture a broad range of structural depen-                labeled samples from repositories, along with a GitHub link
+                dencies.                                                                     and an acquisition date, but the date corresponds to the first
+                   2) Finetuning Phase: In the finetuning phase, we adapt                    commit in each repository rather than the actual snapshot used
+                the model to natural language queries by replacing code                      for annotation. Consequently, it was impossible to recover the
+                embeddings xv with docstring embeddings. The training is                     exact repository versions used in the original benchmark.
+                restricted to the C ALL relation, reflecting the primary retrieval              To mitigate this, we attempted two strategies: (1) using the
+                goal of locating functions likely to be invoked by a described               current repository state, and (2) reverting to an approximate
+                functionality.                                                               date of benchmark creation. Both yielded inconsistencies, with
+                   The GNN parameters are frozen, and only the projection                    missing functions and broken dependencies. Therefore, we
+                layers are updated to align docstring embeddings with the                    opted to use only the repositories provided by RepoBench,
+                precomputed GNN space.                                                       discarding the original labeled annotations. For reproducibility,
+                   3) Motivation: This two-stage procedure provides two ben-                 we mapped each loaded repository to its Git commit hash.
+                efits. Firstly, it allows the GNN to be trained on the entire                   We parsed 1451 Python repositories into semantic graphs.
+                graph structure without being bottlenecked by limited doc-                   The dataset was split by entire graphs into training (60%),
+                string coverage. Secondly, it produces stable node embeddings                validation (20%), and test (20%) partitions, based on the num-
+                that can be reused across queries, enabling efficient retrieval              ber of (F UNCTION, C ALL, F UNCTION) edges with available
+                at inference time without re-running the GNN.                                docstrings. Table I summarizes the split statistics.
+                                                                                                To simulate a realistic development scenario where the
+                E. End-to-End Generation Pipeline                                            target code has no existing dependent code in the repository,
+                   The end-to-end code generation process combines the re-                   we:
+                trieval component with a large language model (LLM) to                          1) Initial candidate selection: For pretraining, select func-
+                synthesize repository-aware code completions. Given a user                          tions not called by any other function but calling at least
+                query q, we retrieve a set of k relevant code snippets from                         one function themselves. For finetuning, select functions
+                the repository graph G using either the KNN baseline or                             with non-empty docstrings.
+
+
+
+
+                                                                                       294
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                                 Files
+                                                                                        IMPORT                                                              File node
+                                               main.py                                                                      utils.py
+                                                                                                                                                            Class node
+
+                                                                                                                                                            Function node
+                                 Classes                                                                                                                    IMPORT (File → File)
+                                                                                                        INHERITED                                           OWNER (hierarchy)
+                                               class Trainer              class CustomLoader                               class DataLoader                 CALL (Func → Func)
+                                                                                                                                                            INHERITED (Class → Class)
+
+
+                                 Functions
+
+                                             def train model()                           CALL                              def load data()
+
+
+
+
+                                                                                     Fig. 2. Example of repository graph.
+
+
+
+                                             TABLE I                                                                nodes (e.g., utility or orchestrator functions, or functions clus-
+                         DATASET SPLIT OVERVIEW FOR RETRIEVAL EVALUATION                                            tered within the same class or file). While these nodes improve
+                                                                                                                    coverage, they can displace semantically precise matches from
+                    Dataset split          Docstring edge pairs            Number of graphs
+                                                                                                                    the very top ranks, resulting in lower MRR.
+                    Train                           75456                            572
+                    Val                             25152                            442                            C. End-to-End Code Generation Evaluation
+                    Test                            25152                            437                                1) Dataset and Baseline Comparison: We conduct end-
+                                                                                                                    to-end evaluation on EvoCodeBenchPlus, our curated vari-
+                                                                                                                    ant of DevEval [15]. In contrast to the original bench-
+                   2) Graph reduction: Recursively remove all dependent
+                                                                                                                    mark, EvoCodeBenchPlus eliminates corrupted repositories,
+                       nodes, including: (i) owners of candidate or removed
+                                                                                                                    preserves fair evaluation, and provides a reproducible pipeline.
+                       nodes (and their owned nodes), (ii) callers of candidate
+                                                                                                                    As shown in Table III, the DevEval baseline in the no context
+                       or removed nodes, (iii) F ILE nodes importing removed
+                                                                                                                    setting achieves 26.55% pass@1 on our dataset, more than
+                       or candidate nodes, and (iv) classes inheriting from
+                                                                                                                    double the originally reported 12.54%. This confirms that prior
+                       removed or candidate nodes.
+                                                                                                                    results were affected by flawed test cases and highlights the
+                   3) Evaluation candidates: Remaining candidates in the
+                                                                                                                    importance of dataset cleaning.
+                       reduced graph are used for retrieval evaluation.
+                                                                                                                        2) Context Settings: We evaluate three types of context
+                   4) Retrieval and scoring: For each candidate, perform
+                                                                                                                    (Table III):
+                       retrieval and treat its connected nodes in the original
+                                                                                                                        • No context: Only the task description and function
+                       graph as ground truth for computing Recall@k and
+                       MRR@k.                                                                                             signature are provided.
+                                                                                                                        • Gold cross context: Ground-truth snippets with cross-file
+                   1) Metrics: We report Recall@5 and Mean Reciprocal
+                                                                                                                          dependencies are supplied.
+                 Rank (MRR@5):
+                                                                                                                        • GNN context: Context snippets are retrieved automati-
+                   2) Results: Table II presents results for the KNN baseline
+                                                                                                                          cally by our GNN-based method.
+                 and GraphSAGE models with 3, 5, and 7 layers in both
+                 pretraining and finetuning phases.                                                                     In the no context setting, our models closely match the
+                                                                                                                    revised DevEval baseline, validating our evaluation pipeline.
+                                             TABLE II                                                               Adding gold cross context yields only modest gains, with
+                            R ETRIEVAL RESULTS ON R EPO B ENCH TEST SPLIT.                                          pass@1 not exceeding 30% for any model, despite roughly
+                                                                                                                    30% of tasks containing cross-file dependencies. This sug-
+                                                 Pretrain Phase                 Finetune Phase                      gests that either the benchmark underrepresents true cross-file
+                 Model                        Recall@5     MRR@5             Recall@5 MRR@5
+                                                                                                                    reasoning or that models struggle to effectively exploit large
+                 KNN                            0.1993           0.1681        0.1908          0.1584               retrieved code blocks.
+                 GraphSAGE (3 layers)           0.6756           0.2272        0.4032          0.1163
+                 GraphSAGE (5 layers)           0.6927           0.2369        0.3726          0.1037                   The GNN context setting produces results similar to gold
+                 GraphSAGE (7 layers)           0.6967           0.2538        0.3571          0.1186               cross context, indicating that our retriever successfully iden-
+                                                                                                                    tifies relevant cross-file snippets but does not consistently
+                    GraphSAGE significantly outperforms KNN in Recall@5,                                            improve functional correctness. For example, StarCoder 2
+                 indicating better retrieval coverage. However, in the fine-tuning                                  improves slightly when using GNN context, suggesting sen-
+                 phase, the MRR metric is higher for KNN while the recall is                                        sitivity to prompt structure and retrieval format. Overall,
+                 lower. It may indicate that GraphSAGE better retrieves target                                      improvements remain limited, pointing to a mismatch between
+                 nodes but it assigns them lower rank. A possible reason is that                                    retrieval quality and the benchmark’s ability to reward cross-
+                 the GNN prioritizes structurally central or highly connected                                       repository reasoning.
+
+
+
+
+                                                                                                            295
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                                                                               TABLE III
+                                                       F UNCTIONAL CORRECTNESS ON E VO C ODE B ENCH P LUS ( PASS @1, %)
+
+                                                                                                               pass@1 (%)
+                                     Generation                                          DeepSeek Coder 6.7B    StarCoder2 7B   CodeLlama 7B
+                                     DevEval
+                                       w/o context                                               26.55                –            26.52
+                                       local context (completion)                                50.15              47.52          53.23
+                                       local context (infilling)                                 55.29                –              –
+                                     EvoCodeBenchPlus
+                                       w/o context                                               26.65              24.81          27.07
+                                       local context (completion)                                41.19              40.88          44.21
+                                       golden cross context                                      27.67              24.80          27.12
+                                       local context (completion) + gold cross context           42.64              41.17          44.35
+                                       GNN context                                               27.60              25.77          27.34
+
+
+
+                              V. D ISCUSSION AND L IMITATIONS                                   queries and graph nodes are embedded in the same space, en-
+                                                                                                abling flexible retrieval without manual alignment. Moreover,
+                   Our results demonstrate that graph-based retrieval with a
+                                                                                                our GNN computes repository-wide embeddings in a single
+                GNN substantially improves Recall@k compared to a KNN
+                                                                                                forward pass, after which retrieval reduces to lightweight
+                baseline, indicating that structural context from the repository
+                                                                                                similarity search. This design is both more efficient and
+                graph enhances identification of relevant code. For exam-
+                                                                                                more practical, while also producing richer representations
+                ple, our retriever achieved Recall@5 close to 40%, a clear
+                                                                                                through the combination of pretrained LLM embeddings with
+                improvement over embedding-only methods. This confirms
+                                                                                                structural information.
+                that incorporating repository structure yields richer and more
+                                                                                                   Beyond code generation, the retrieval component of RAG
+                meaningful code representations.
+                                                                                                has potential applications in code search and repository navi-
+                   However, these retrieval gains did not consistently translate
+                                                                                                gation. By surfacing semantically and structurally related func-
+                into higher end-to-end code generation accuracy. Even when
+                                                                                                tions, the retriever can assist developers in locating examples,
+                supplying gold context—the ground-truth set of relevant snip-
+                                                                                                identifying dependencies, and exploring project structure. This
+                pets—pass@1 did not exceed 30% for any model (Table III).
+                                                                                                suggests that graph-based retrieval itself is a valuable outcome,
+                This suggests that improvements in retrieval alone are insuf-
+                                                                                                even when end-to-end code generation benefits are modest.
+                ficient: many benchmark tasks emphasize in-file reasoning,
+                while cross-file dependencies are underrepresented or loosely                   Limitations
+                defined. Consequently, retrieved snippets, whether gold or
+                                                                                                  Our approach has several limitations:
+                GNN-based, often remain underutilized by generation models.
+                   We also observed that local completion—where the model                         • Parser dependency: The accuracy of the semantic graph
+
+                on file-local context—consistently outperforms both gold and                        depends on the underlying language parser. In Python,
+                retrieved cross-file context. This highlights two important                         dynamic features and missing type annotations may yield
+                aspects of repository-level generation. First, many benchmark                       incomplete or incorrect graphs.
+                tasks are dominated by in-file dependencies, which can often                      • Edge coverage: Certain relationships, such as global
+
+                be resolved from surrounding code such as imports, vari-                            variables or dynamic imports, are not captured, poten-
+                able definitions, or sibling functions. Second, large language                      tially omitting important context.
+                models appear particularly effective at leveraging file-local                     • Ranking quality: Low MRR values indicate that relevant
+
+                continuity, whereas incorporating cross-file snippets introduces                    nodes are not consistently ranked at the top. This could
+                longer prompts that may dilute attention or overwhelm the                           be addressed with hard negative sampling or ranking-
+                model. Together, these factors explain why local completion                         oriented training objectives.
+                establishes such a strong baseline and why gains from cross-                      • Benchmark scope: Current evaluation is monolingual
+
+                file retrieval remain limited in current benchmarks.                                (Python) and English-only, limiting generalization to
+                   Another key contribution of this work is the release of                          other programming languages and environments.
+                EvoCodeBenchPlus, a cleaned and reproducible variant of
+                                                                                                                       VI. C ONCLUSION
+                DevEval. We showed that previously reported results were
+                inflated by corrupted test cases (e.g., baseline pass@1 of                         We presented the Graph Retrieval-Augmented Code Gener-
+                12.54% vs. 26.55% on EvoCodeBenchPlus), underscoring the                        ation (GRACG) framework for repository-level code genera-
+                importance of dataset curation and standardized evaluation.                     tion. GRACG constructs a semantic graph, encodes nodes with
+                   In contrast to RepoHyper [9], our framework does not                         a heterogeneous GraphSAGE model initialized from pretrained
+                require associating a query with a specific node in the graph,                  LLM embeddings, and retrieves relevant nodes for use in LLM
+                a process that can be troublesome and restrictive. Instead,                     prompts. Compared to a KNN baseline, our approach achieved
+
+
+
+
+                                                                                          296
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                significantly higher retrieval recall across a large set of Python                                      R EFERENCES
+                repositories.
+                                                                                            [1] GitHub. Github copilot: Your ai pair programmer. https://github.com/f
+                   Compared to RepoHyper, GRACG offers several key im-                          eatures/copilot, n.d. Accessed: 2024-12-03.
+                provements: it avoids query-to-node binding, requires only one              [2] Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir
+                GNN pass per repository, and produces richer embeddings that                    Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih,
+                                                                                                Tim Rocktäschel, et al. Retrieval-augmented generation for knowledge-
+                integrate structural and semantic repository information. These                 intensive nlp tasks. Advances in neural information processing systems,
+                design choices make GRACG scalable and user-friendly for                        33:9459–9474, 2020.
+                repository-level reasoning.                                                 [3] Chia-Yuan Chang, Zhimeng Jiang, Vineeth Rakesh, Menghai Pan, Chin-
+                                                                                                Chia Michael Yeh, Guanchu Wang, Mingzhi Hu, Zhichao Xu, Yan
+                   We also released EvoCodeBenchPlus, a reproducible bench-                     Zheng, Mahashweta Das, and Na Zou. MAIN-RAG: Multi-agent filter-
+                mark for repository-level code generation. Using this dataset,                  ing retrieval-augmented generation. In Wanxiang Che, Joyce Nabende,
+                we validated that earlier DevEval results were unreliable and                   Ekaterina Shutova, and Mohammad Taher Pilehvar, editors, Proceedings
+                                                                                                of the 63rd Annual Meeting of the Association for Computational
+                established a stronger basis for future research. While end-to-                 Linguistics (Volume 1: Long Papers), pages 2607–2622, Vienna, Austria,
+                end gains remain modest, they are comparable to or exceed                       July 2025. Association for Computational Linguistics.
+                those achieved under the gold context setting, providing pre-               [4] Disha Shrivastava, Denis Kocetkov, Harm de Vries, Dzmitry Bahdanau,
+                                                                                                and Torsten Scholak. Repofusion: Training code models to understand
+                liminary evidence for the viability of the proposed method.                     your repository. arXiv preprint arXiv:2306.10998, 2023.
+                   Beyond these results, GRACG can also be seen as a reusable               [5] Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin Liu, Daoguang
+                component for multi-agent systems. Its modular retrieval and                    Zan, Yi Mao, Jian-Guang Lou, and Weizhu Chen.               RepoCoder:
+                                                                                                Repository-level code completion through iterative retrieval and gen-
+                generation capabilities align with recent trends in multi-agent                 eration. In Houda Bouamor, Juan Pino, and Kalika Bali, editors,
+                RAG frameworks such as MAIN-RAG [3], highlighting how                           Proceedings of the 2023 Conference on Empirical Methods in Natural
+                graph-enhanced retrieval can support collaborative agent work-                  Language Processing, pages 2471–2484, Singapore, December 2023.
+                                                                                                Association for Computational Linguistics.
+                flows in software engineering.                                              [6] Tuan-Dung Bui, Duc-Thieu Luu-Van, Thanh-Phat Nguyen, Thu-Trang
+                                                                                                Nguyen, Son Nguyen, and Hieu Dinh Vo.              Rambo: Enhancing
+                                         F UTURE W ORK                                          rag-based repository-level method body completion. arXiv preprint
+                                                                                                arXiv:2409.15204, 2024.
+                   Future directions include:                                               [7] Xiaoxin He, Yijun Tian, Yifei Sun, Nitesh Chawla, Thomas Laurent,
+                   • Incorporating query-aware message passing, e.g., through                   Yann LeCun, Xavier Bresson, and Bryan Hooi. G-retriever: Retrieval-
+                                                                                                augmented generation for textual graph understanding and question
+                      attention mechanisms or graph transformers [18].                          answering.     Advances in Neural Information Processing Systems,
+                   • Using ranking-oriented training and hard negative sam-                     37:132876–132907, 2024.
+                      pling to improve retrieval ordering.                                  [8] Costas Mavromatis and George Karypis. GNN-RAG: Graph neural
+                                                                                                retrieval for efficient large language model reasoning on knowledge
+                   • Extending parser capabilities to capture additional de-                    graphs. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and
+                      pendency types such as global variables and dynamic                       Mohammad Taher Pilehvar, editors, Findings of the Association for
+                      imports.                                                                  Computational Linguistics: ACL 2025, pages 16682–16699, Vienna,
+                                                                                                Austria, July 2025. Association for Computational Linguistics.
+                   • Expanding evaluation to multilingual and multi-language                [9] Huy N Phan, Hoang N Phan, Tien N Nguyen, and Nghi DQ Bui.
+                      repositories to assess generalization.                                    Repohyper: Better context retrieval is all you need for repository-level
+                   • Incorporating stronger baselines by comparing against                      code completion. arXiv preprint arXiv:2403.06095, 2024.
+                                                                                           [10] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde
+                      existing GNN-based and repository-aware retrieval sys-                    De Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas
+                      tems (e.g., RepoHyper, RAMBO, RepoCoder) to better                        Joseph, Greg Brockman, et al. Evaluating large language models trained
+                      contextualize performance.                                                on code. arXiv preprint arXiv:2107.03374, 2021.
+                                                                                           [11] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk
+                   • Designing benchmarks that explicitly require cross-file
+                                                                                                Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc
+                      reasoning, ensuring that retrieval quality directly impacts               Le, et al. Program synthesis with large language models. arXiv preprint
+                      code generation performance.                                              arXiv:2108.07732, 2021.
+                                                                                           [12] Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas Mazeika, Akul
+                   In addition to generation, RAG may also serve as a founda-                   Arora, Ethan Guo, Collin Burns, Samir Puranik, Horace He, Dawn Song,
+                tion for practical code search and repository exploration tools,                and Jacob Steinhardt. Measuring coding challenge competence with
+                                                                                                apps. In J. Vanschoren and S. Yeung, editors, Proceedings of the Neural
+                where identifying relevant functions and dependencies is itself                 Information Processing Systems Track on Datasets and Benchmarks,
+                a valuable outcome for developers.                                              volume 1, 2021.
+                                                                                           [13] Tianyang Liu, Canwen Xu, and Julian McAuley. Repobench: Bench-
+                                      C ODE AVAILABILITY                                        marking repository-level code auto-completion systems. In B. Kim,
+                                                                                                Y. Yue, S. Chaudhuri, K. Fragkiadaki, M. Khan, and Y. Sun, editors,
+                   All code and data used in this work are publicly available:                  International Conference on Representation Learning, volume 2024,
+                                                                                                pages 47832–47850, 2024.
+                   • GRACG: https://github.com/KonstFed/GRAGC
+                                                                                           [14] Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrit-
+                   • EvoCodeBenchPlus: https://github.com/Poseidondon/Evo                       twieser, Rémi Leblond, Tom Eccles, James Keeling, Felix Gimeno,
+                     CodeBenchPlus                                                              Agustin Dal Lago, et al. Competition-level code generation with
+                                                                                                alphacode. Science, 378(6624):1092–1097, 2022.
+                                                                                           [15] Jia Li, Ge Li, Yunfei Zhao, Yongmin Li, Huanyu Liu, Hao Zhu,
+                                     ACKNOWLEDGMENTS                                            Lecheng Wang, Kaibo Liu, Zheng Fang, Lanshen Wang, Jiazheng Ding,
+                  The study was supported by the Ministry of Economic                           Xuanming Zhang, Yuqi Zhu, Yihong Dong, Zhi Jin, Binhua Li, Fei
+                                                                                                Huang, Yongbin Li, Bin Gu, and Mengfei Yang. DevEval: A manually-
+                Development of the Russian Federation (agreement No. 139-                       annotated code generation benchmark aligned with real-world code
+                10-2025-034 dd. 19.06.2025, IGK 000000C313925P4D0002).                          repositories. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar,
+
+
+
+
+                                                                                     297
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+                     editors, Findings of the Association for Computational Linguistics: ACL
+                     2024, pages 3603–3614, Bangkok, Thailand, August 2024. Association
+                     for Computational Linguistics.
+                [16] Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming Zhou, and Jian
+                     Yin. UniXcoder: Unified cross-modal pre-training for code represen-
+                     tation. In Smaranda Muresan, Preslav Nakov, and Aline Villavicencio,
+                     editors, Proceedings of the 60th Annual Meeting of the Association for
+                     Computational Linguistics (Volume 1: Long Papers), pages 7212–7225,
+                     Dublin, Ireland, May 2022. Association for Computational Linguistics.
+                [17] Will Hamilton, Zhitao Ying, and Jure Leskovec. Inductive representation
+                     learning on large graphs. Advances in neural information processing
+                     systems, 30, 2017.
+                [18] Petar Velickovic, Guillem Cucurull, Arantxa Casanova, Adriana Romero,
+                     Pietro Lio, Yoshua Bengio, et al. Graph attention networks. stat,
+                     1050(20):10–48550, 2017.
+
+
+
+
+                                                                                               298
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 13:01:12 UTC from IEEE Xplore. Restriction
+

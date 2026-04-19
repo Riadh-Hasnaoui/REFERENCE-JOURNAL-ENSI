@@ -1,0 +1,828 @@
+               CodeRAG: Finding Relevant and Necessary Knowledge for
+                Retrieval-Augmented Repository-Level Code Completion
+               Sheng Zhang1,† , Yifan Ding1,† , Shuquan Lian1 , Shun Song2 , Hui Li1,§
+             1
+               Key Laboratory of Multimedia Trusted Perception and Efficient Computing
+                         Ministry of Education of China, Xiamen University
+                                            2
+                                               Ant Group
+          {sheng, dingyf, shuquanlian}@stu.xmu.edu.cn, songshun.ss@antgroup.com
+                                         hui@xmu.edu.cn
+
+                           Abstract                           file that the programmer is working on) (Li et al.,
+                                                              2018; Wang and Li, 2021). However, real-world
+    Repository-level code completion automati-                software source code generally consists of multiple
+    cally predicts the unfinished code based on
+                                                              code files with complex interdependencies, which
+    the broader information from the repository.
+    Recent strides in Code Large Language Mod-
+                                                              were neglected by early methods. These code files
+    els (code LLMs) have spurred the develop-                 are essential ingredients for programmers to con-
+    ment of repository-level code completion meth-            sider when developing unfinished code and they
+    ods, yielding promising results. Nevertheless,            are typically organized as a source code repository.
+    they suffer from issues such as inappropriate             Thus, a practical code completion tool should be
+    query construction, single-path code retrieval,           repository-level and leverage both code context and
+    and misalignment between code retriever and               information retrieved from the entire codebase to
+    code LLM. To address these problems, we in-
+                                                              provide more accurate and comprehensive code
+    troduce CodeRAG, a framework tailored to
+    identify relevant and necessary knowledge for             suggestions (Zhang et al., 2023).
+    retrieval-augmented repository-level code com-               Since repository-level code completion can bet-
+    pletion. Its core components include log prob-            ter facilitate collaborative development and soft-
+    ability guided query construction, multi-path             ware maintenance, there is a surge of work in
+    code retrieval, and preference-aligned B EST F IT
+                                                              this direction (Zhang et al., 2023; Liu et al.,
+    reranking. Extensive experiments on bench-
+    marks ReccEval and CCEval demonstrate that                2024; Cheng et al., 2024) and most of them con-
+    CodeRAG significantly and consistently out-               sider applying Retrieval-Augmented Generation
+    performs state-of-the-art methods. The imple-             (RAG), a prevalent solution incorporating external
+    mentation of CodeRAG is available at https:               knowledge to help LLMs generate more accurate
+    //github.com/KDEGroup/CodeRAG.                            text (Gao et al., 2023). Based on the idea of RAG,
+                                                              these methods retrieve relevant code knowledge
+1   Introduction                                              from the entire repository as supplementary to code
+Recent years have witnessed the remarkable suc-               context when predicting the unfinished code.
+cess of Large Language Models (LLMs) in various                  Despite the blossom of related approaches, they
+areas (Zhao et al., 2023). As a branch of LLMs,               still suffer from the following shortcomings:
+Code Large Language Models (code LLMs), are                   • P1: Inappropriate Query Construction. Previ-
+trained on massive code data, enabling them to                  ous approaches use either the last k lines before
+comprehend and generate code snippets, thus as-                 the cursor position (Tan et al., 2024) or the last
+sisting programmers in coding tasks and boosting                k lines together with the generated code from
+development efficiency (Nijkamp et al., 2023; Roz-              code LLM (Zhang et al., 2023) as the query for
+ière et al., 2023; Li et al., 2023).                            code retrieval and find relevant code knowledge
+   A typical application of code LLMs is code com-              to assist completion, causing information loss
+pletion, which automatically predicts the unfin-                and introducing noises. For example, program-
+ished code (Svyatkovskiy et al., 2019). Early code              mers may define key variables and classes, or
+completion methods solely leverage code context                 import packages at the beginning of a file, which
+(i.e., information from the function or source code             are essential for understanding and completing
+    †
+        The first two authors contribute equally.               the code accurately. If the last k lines contain ir-
+    §
+        Hui Li is the corresponding authors.                    relevant code, the retrieved code knowledge will
+                                                         23278
+        Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, pages 23278–23288
+                             November 4-9, 2025 ©2025 Association for Computational Linguistics
+        Sparse Retrieval               Code Knowledge 1
+                                                                                            edge base to benefit from the unique advantage
+                                       config = AutoModelConfig.from_pretrained()
+                                                                                            of each code-specific retrieval path.
+ config = T5Config.from_pretrained()
+ Model =                               model =
+ T5ForCausalLM.from_pretrained()       AutoModelForCausalLM.from_pretrained()
+
+                                                                                        • To alleviate P3, CodeRAG adopts preference-
+        Dense Retrieval                Code Knowledge 2
+
+                                       def retriever(engine_name):
+                                                                                          aligned B EST F IT reranking to efficiently find
+ # build search engine
+ name = "some name”                        ‘‘‘construct the retrieval engine’’’
+                                           pass
+                                                                                          necessary code knowledge. The retrieved code
+ searcher = retriever(name)
+                                                                                          knowledge is reranked via LLM reranker accord-
+        Dataflow-guided
+           Retrieval
+                                       Code Knowledge 3
+
+                                       class ModelProvider:
+                                                                                          ing to code LLM’s preference. To reduce the
+ model = ModelProvider(args)
+ model.select_model(some_args)
+                                            def __init__(self):
+                                            def select_model(self):
+                                                                                          reranking overhead, we further distill the pref-
+                                                                                          erence of LLM reranker into a smaller reranker
+Figure 1: Examples of different code retrieval paths,                                     and use it to conduct reranking.
+where the gray text indicates the code to be generated.
+                                                                                        • CodeRAG feeds the reranked code knowledge
+  mislead code LLM to generate inaccurate code.                                           into code LLM for repository-level code comple-
+• P2: Single-path Code Retrieval. Existing meth-                                          tion. Experiments on benchmarks ReccEval and
+  ods either model code as plain text and chuck                                           CCEval show that CodeRAG significantly and
+  code to construct the knowledge base for later                                          consistently exceeds state-of-the-art methods.
+  sparse/dense retrieval (Zhang et al., 2023; Wu                                       2     Our Method CodeRAG
+  et al., 2024), or construct specific data structures
+  (e.g., dataflow graph) representing code for later                                   As depicted in Fig. 2, CodeRAG involves five parts:
+  retrieval (Liu et al., 2024; Cheng et al., 2024).                                    code knowledge base construction (Sec. 2.1), re-
+  While each method has its unique advantage and                                       trieval query construction (Sec. 2.2), multi-path
+  may apply to some code completion cases, nei-                                        code retrieval (Sec. 2.2.1), preference-aligned
+  ther of them can handle all completion cases                                         B EST F IT code reranking (Sec. 2.3) and retrieval-
+  well. For instance, Fig. 1 depicts three code                                        augmented repository-level code completion.
+  completion examples and each fits one retrieval
+                                                                                       2.1     Code Knowledge Base Construction
+  method. Sparse retrieval is ideal when the query
+  and code knowledge directly overlap. Dense re-                                       Constructing code knowledge base involves pars-
+  trieval is more appropriate when the query and                                       ing and processing the code in the repository, trans-
+  code knowledge are semantically related. In con-                                     forming code into structured knowledge to enable
+  trast, dataflow-guided retrieval facilitates addi-                                   more efficient retrieval, understanding, and reuse.
+  tional searches based on variable instantiation.                                        To construct the knowledge base for retrieval,
+                                                                                       general RAG methods typically segment the text
+• P3: Misalignment between Code Retriever
+                                                                                       corpus based on predefined rules, such as split-
+  and Code LLM. Similar to other RAG appli-
+                                                                                       ting by length or delimiters (Sarthi et al., 2024).
+  cations (Jin et al., 2024), inconsistencies may
+                                                                                       However, applying these approaches to code data
+  exist between retrieved code knowledge and nec-
+                                                                                       compromises the structural integrity and leads to
+  essary knowledge for code LLM, due to the sep-
+                                                                                       the loss of pertinent information. For instance, di-
+  arate training process and learning objective of
+                                                                                       viding a class arbitrarily may result in omitting
+  code retriever and code LLM. While this issue
+                                                                                       essential class-related details.
+  has recently been studied in various works on
+                                                                                          To alleviate the above problem, we propose a
+  RAG for question answering (Zhang et al., 2024;
+                                                                                       segmentation strategy tailored to the construction
+  Dong et al., 2024), it is still underexplored for
+                                                                                       of code knowledge base. Specifically, we consider
+  repository-level code completion.
+                                                                                       four elements in constructing the code knowledge
+  To address these issues, we propose a new frame-
+                                                                                       base: functions, global variables, class variables,
+work CodeRAG for finding relevant and necessary
+                                                                                       and class functions, as depicted in Fig. 3. For a
+knowledge in retrieval-augmented repository-level
+                                                                                       target code repository, we first extract the Abstract
+code completion. Our contributions are:
+                                                                                       Syntax Tree (AST) of each code file. Then, we
+• To overcome P1, instead of using last k lines,                                       extract the four types of elements from ASTs. This
+  CodeRAG adopts log probability guided probing                                        way, the code repository can be transformed into
+  to construct retrieval query for code retrieval.                                     a structured knowledge base, including function
+• To address P2, CodeRAG employs multi-path                                            calls and variable usage, providing data support for
+  code retrieval over the constructed code knowl-                                      repository-level code completion.
+                                                                                    23279
+         2   Retrieval Query Construction via Log                                              3 Multi-path Code Retrieval
+                  Probability Guided Probing
+                                             Code Retrieval                         Sparse                     Dense                      Dataflow
+                                                Query r                            Retrieval                  Retrieval                    Guided
+    Current Code File                                                                                                                     Retrieval
+                                                                               1      0   1                                              var.unlink
+         Code Chunk 1
+                                                                               1      1   0
+
+         Code Chunk 2
+                                 …                   …                         0      0   1                Encoder                       var = func()
+             …                                s2 0.4 0.2 0.3
+        Target Chunk                                                           Keyword                           Sim Score
+                                              s0.4 0.3
+                                               1 0.2 0.1 0.1                    matrix                                                   def func():
+                                                                                                                                           pass
+                               Code LLM
+
+
+
+                                                                        Code              …               Code
+                                                                     Knowledge 1                       Knowledge n
+
+
+
+                                                                BestFit                                    Distilled
+                                                               Prompting     LLM                           Reranker       5   Retrieval-Augmented
+                                                                           Reranker
+                                                                                                                               Code Completion
+    Code Files          ASTs            Code
+                                                                                              rerank
+      in the                        Knowledge Base
+    Repository                                                          Code              …               Code
+                                                                     Knowledge 4                       Knowledge 2
+                                                                                                                              Code LLM
+   1 Code Knowledge Base Construction                          4 Preference-Aligned BestFit Reranking
+
+                                                     Figure 2: Overview of CodeRAG.
+
+                 Element             Knowledge                                     Algorithm 1: Construct Retrieval Query
+                                 def func(*args):                                                                 Code Block 1
+             1   Functions          pass
+                                                                                    Input: C (code file to be completed), f (chunk
+                                                                                             length), m (number     of generation
+                                                                                                              Code Block  2       step), g
+                                                                                             (number of selected    chunks)
+                                                                                                              Code Block 3
+             2   Variables       VAR_CONST = “test”                                 Output: r (code retrieval query)
+                                                                                    Function QueryConstruction(C, f , m, g):
+                                                                                                               Unfinished
+                                 class myClass:
+                                                                                       Divide C into fine-grained      chunks and each chunk
+             3   Cls Funcs
+                                    def func(self)                                       having f lines.
+                                                                                       for each chunk ci do
+                                 class myClass:                                            if ci is the target chunk then
+             4   Cls Vars
+                                    self.name = “”                                             Pass.
+                                                                                           Concatenate ci to the target chunk.
+ Figure 3: Examples of Code Knowledge Base Items.                                          Feed the concatenation into code LLM to
+                                                                                             generate m new tokens.
+                                                                                           Record the highest log probability for all tokens
+2.2 Retrieval Query Construction via Log                                                     in the vocabulary at each generation step.
+    Probability Guided Probing                                                             Sum m probability scores as the confidence
+                                                                                             score si .
+In standard RAG, a retrieval query conveys the                                         Select the top-g chunks with the highest
+                                                                                         confidence scores s.
+user intent from the user query or consists of a                                       Concatenate the g chunks with the target chunk as
+specific text chunk from a document. Using the                                           the retrieval query r.
+retrieval query, the RAG framework can retrieve                                        return r.
+relevant knowledge from the knowledge base to
+assist text generation. In existing repository-level
+code completion methods, the concept of retrieval                             log probability to find the fine-grained code chunks
+query shifts to represent an incomplete code seg-                             that are most important to constructing code re-
+ment (Zhang et al., 2023), which could be an un-                              trieval query. In repository-level code completion,
+finished function, a partially defined variable, or a                         we can view log probability as the confidence of
+method call within a class (i.e., code context).                              code LLMs, given the code retrieval query. In
+   To overcome the limitation of using the last k                             other words, log probability can reveal the rele-
+lines as the code retrieval query (i.e., P1 illustrated                       vance of the code chunks in the retrieval query.
+in Sec. 1), we propose to construct the code re-                                 As shown in Alg. 1, we first chunk the code
+trieval query based on the log probability gain.                              file that the programmer is working on into fine-
+Alg. 1 depicts the overall procedure for code re-                             grained pieces and each of them contains f lines.
+trieval query construction. The core idea is to use                           Then, we concatenate each fine-grained chunk to
+                                                                      23280
+the chunk containing unfinished code (the target         representations. The query is encoded at the chunk
+chunk) as the probe and feed it to code LLM to           level, whereas the items in the knowledge base are
+generate m tokens. For simplicity, we choose             either at the function level (functions) or the line
+the token with the maximum log probability at            level (variables). Code knowledge that has high
+each step and use CodeT5p-220m1 as code LLM              similarity with the retrieval query w.r.t. their rep-
+for this step. The sum of the log probabilities for      resentations is retrieved. We use cosine similarity
+all generated token is recorded as the relevance         as the similarity measure and adopt the pre-trained
+score for the fine-grained chunk corresponding to        encoder in CodeT5p-220m as the encoding model.
+the probe. Finally, the top-g fine-grained chunks        Dataflow-Guided Retrieval. It finds relevant in-
+with the highest relevance scores are concatenated       formation w.r.t. the target chunk in the current code
+together with the target chunk as the retrieval query.   file according to data dependency relations. Fol-
+                                                         lowing Cheng et al. (2024), we first formulate the
+2.2.1 Multi-path Code Retrieval
+                                                         unfinished code file into a dataflow graph. Once
+As an essential part of RAG, code retriever finds rel-   the graph is built, we can retrieve the dependency
+evant code knowledge from code knowledge base            starting from the last unfinished line in the dataflow
+according to the code retrieval query. Early code        graph as the retrieved code knowledge.
+retrieval methods rely on traditional information           For sparse and dense retrieval, we use the con-
+retrieval methods like TF-IDF and BM25 (sparse re-       structed retrieval query to retrieve j results from
+trieval), and recent code retrieval approaches com-      each path. If data dependency exists in the dataflow
+monly adopt embedding based methods (Dense               graph, we retrieve dependency-related code via
+Retrieval) (Sun et al., 2024). Most recently, Cheng      dataflow-guided retrieval. After receiving all re-
+et al. (2024) find that dataflow can also be used        trieved results from three paths, we add them to a
+to guide code retrieval (dataflow-guided retrieval).     retrieval list containing n (i.e., 2j + 1) results.
+These methods consider code retrieval from a sin-
+gle perspective and retrieve word-matching knowl-        2.3   Find Necessary Code Knowledge through
+edge, semantically relevant knowledge, or knowl-               Preference-Aligned B EST F IT Reranking
+edge having data dependency relations with the tar-      The retrieved code knowledge is used to augment
+get chunk. Each of them has its unique advantages        the code completion prompt, directly affecting the
+and can well provide retrieved code knowledge for        quality of code completion. Solely using the multi-
+some code completion cases. Hence, we argue that         path code retriever may not provide an appropriate
+conducting a multi-path code retrieval can better of-    order of relevant knowledge. The reason is the
+fer code knowledge for later code completion. Our        misalignment between the code retriever and code
+designed multi-path code retrieval step involves the     LLM, which is caused by their separate training ob-
+following three code retrieval paths:                    jectives (Zhang et al., 2024). Therefore, we further
+Sparse Retrieval. Sparse retrieval relies on key-        deploy a reranking module that reranks retrieved
+word matching between the retrieval query and            code knowledge according to code LLM’s prefer-
+code knowledge in the code knowledge base, which         ence and only keep top-u code knowledge (u < n).
+identifies exact or closely related keywords within
+                                                         2.3.1 B EST F IT Code Reranking
+the codebase, to obtain relevant invocation details,
+API calls, and code snippets that share similar struc-   To address the misalignment, a natural way is to
+tures or functionality. Sparse retrieval is efficient    train the reranker using feedback signals from code
+and particularly effective when searching syntacti-      LLM. However, in repository-level code comple-
+cally similar code or commonly used functions, as        tion, it is very difficult to acquire feedback from
+it can quickly pinpoint segments that contain spe-       code LLM that can perfectly show the quality of
+cific terms or identifiers. We use TF-IDF (Jones,        the generated code. One possible solution is ap-
+2004) for sparse retrieval.                              plying unit tests on the generated code from code
+                                                         LLM (Ma et al., 2025). While conducting unit tests
+Dense Retrieval. Dense retrieval leverages an en-        is possible for function-level code completion, it
+coding model to encode the retrieval query and           is costly in the repository-level setting where the
+code knowledge in the code knowledge base into           complete project must be executed in order to see
+   1
+    https://huggingface.co/Salesforce/                   the impact of inserting generated code. Besides,
+codet5p-220m                                             unlike function-level code completion where inputs
+                                                    23281
+                                                          Retrieved                               LLM
+  Which of the retrieved code snippets is most                          Listwise Prompting                     Results
+                                                            Code                                Reranker
+  helpful for completing the following code snippet?                   … rank code knowledge               [Index 1]…[Index u]
+
+
+
+
+                                                               …
+  The code snippet to be completed:
+                                                                       … which code knowledge                  [Index x]
+  {query}                                                              is most relevant …
+
+                                                                         BestFit Prompting
+  The retrieved code snippet(s):
+                                                          Figure 5: A comparison between listwise code reranking
+  {code snippets}
+                                                          and B EST F IT code reranking.
+  Please provide only the label of the most helpful
+  retrieved code snippet, enclosed in square
+  brackets, within the answer tags. For example, if
+  the code snippet C is the most helpful, the
+  answer should be: <answer>[C]</answer>
+
+Figure 4: Prompt for LLM-based B EST F IT reranking.
+and outputs to unit test are easy to design, craft-
+ing inputs and labeling outputs to unit tests in the      Figure 6: Heap sort operation finally moves top-u code
+repository-level setting is much harder (e.g., more       knowledge pieces to the top. Each circle denotes a
+                                                          window of 3 code knowledge pieces.
+execution parameters or outputs are not variables).
+   Considering the above difficulty, an alternative
+                                                             To avoid exceeding LLM’s input length, we im-
+is to apply an LLM as a zero-shot reranker (Sun
+                                                          plement a sliding window strategy that divides the
+et al., 2023). And the LLM is instructed to di-
+                                                          retrieval list into several equal-sized windows, and
+rectly produce the reranking list of the retrieval
+                                                          the adjacent two windows share one code knowl-
+code knowledge pieces according to their relevance
+                                                          edge. Fig. 6 provides an example with a window
+to the query. Although recent studies (Sun et al.,
+                                                          size of 3. Each time, we feed one window to LLM
+2023; Pradeep et al., 2023) have shown the strong
+                                                          reranker and ask it to pick only the most helpful
+ability of LLMs on zero-shot document reranking,
+                                                          code knowledge. Inspired by prior work (Qin et al.,
+we empirically find that this listwise prompting so-
+                                                          2024; Zhuang et al., 2024) that uses sorting algo-
+lution does not work well on reranking code knowl-
+                                                          rithms to speed up LLM-based pairwise reranking,
+edge: (1) LLMs with a few billion parameters that
+                                                          we apply heap sort to accelerate B EST F IT code
+can be deployed locally more easily do not strictly
+                                                          reranking. Windows are organized as a heap tree
+adhere to listwise prompting, while calling APIs of
+                                                          and each time we use LLM reranker as the com-
+online LLMs that have much larger model sizes and
+                                                          parator to find the most relevant code in a window.
+can understand and strictly follow listwise prompt-
+                                                          Heap sort can quickly find the top-u most relevant
+ing incurs high overhead. (2) Listwise prompting
+                                                          code knowledge in the reranking list. We choose
+itself is computationally intensive since the rerank-
+                                                          heap sort instead of other sorting methods due to
+ing list is generated token by token. LLM reranker
+                                                          its simplicity and the complexity O(N logN ).
+must do one inference for each next token predic-
+tion during reranking list generation.                    2.3.2       Distilled Reranker
+   To overcome this issue, we propose B EST F IT
+                                                          Even though B EST F IT code reranking only re-
+code reranking that prompts the LLM reranker to
+                                                          quires the LLM reranker to have a few billion pa-
+pick the most relevant code knowledge from the
+                                                          rameters, directly employing the LLM reranker
+retrieval list to the query. The prompt is listed
+                                                          may still incur a high computational cost. Hence,
+in Fig. 4. This way, the inference cost is signifi-
+                                                          we distill the preference of the LLM reranker into
+cantly reduced as we only need a single forward
+                                                          a much smaller reranker model.
+pass of the LLM reranker. Fig. 5 depicts the differ-
+                                                             To train the distilled reranker, we first use a data
+ence between listwise and B EST F IT code reranking.
+                                                          augmentation strategy (Alg. 2) to construct distil-
+Moreover, we find that an LLM with a few billion
+                                                          lation training data. We use unfinished code in the
+parameters can strictly follow B EST F IT prompt-
+                                                          training data to formulate code retrieval queries and
+ing. Hence, we directly use Qwen3-8B as LLM
+                                                          conduct multi-path code retrieval to produce initial
+reranker2 , avoiding additional instructing tuning of
+                                                          retrieval lists. Then, we conduct data augmentation
+LLM reranker or calling online LLM APIs.
+                                                          by generating multiple variations of each initial re-
+   2
+       https://huggingface.co/Qwen/Qwen3-8B               trieval list L, where each variation contains differ-
+                                                       23282
+ Algorithm 2: Construct Distillation Data                      code LLM to generate the completion.
+  Input: r (code retrieval query), L
+          (initial retrieval list for r), N (sample            3     Experiment
+          numbers)
+  Output: S (distillation training sample for r)               3.1    Evaluation Settings
+  Function DataConstruction(r, L):
+     for i in N do                                             Metrics. We use prevalent metrics (Liu et al., 2024;
+        for j = 1 to 3 do
+            Randomly pick i code knowledge from L as           Zhang et al., 2023) for evaluation:
+              the retrieved code snippet(s) {code              • Code Match. Exact Match (EM) and Edit Sim-
+              snippets} in Fig. 4.
+            C←[]
+                                                                 ilarity (ES)4 are employed to assess code align-
+            for z = 1 to 5 do                                    ment. EM is 1 when the generated code is identi-
+                Use B EST F IT reranking prompt in Fig. 4        cal to the ground-truth answer, and 0 otherwise.
+                  to guide LLM reranker to select [C]
+                  from {code snippets}.                          ES provides a more nuanced evaluation, calcu-
+                Add [C] to C.                                    lated as ES = 1 − Lev(x, y)/max(∥x∥, ∥y∥),
+            if One code knowledge [C] occurs at least            where Lev(·) denotes the Levenshtein distance.
+              four times in C then
+                Add {r, {code snippets} , [C]} to S.            • Identifier Match. We utilize EM and F1 scores
+                                                                  to evaluate the alignment of identifiers in the
+        return S.
+                                                                  generated code and the ground-truth answer.
+                                                               Baselines.      We use several representative
+ing amounts of code knowledge. After that, we use              repository-level code completion baselines: Zero-
+LLM reranker with B EST F IT prompting to select               Shot, CCFinder (Ding et al., 2024), RG-1 (Zhang
+the most helpful code knowledge from each gener-               et al., 2023), RepoCoder (Zhang et al., 2023),
+ated variation, repeating this process five times to           DraCo (Cheng et al., 2024), RepoFuse (Liang et al.,
+assess selection consistency. When LLM reranker                2024), and Repoformer-3B (Wu et al., 2024).
+demonstrates high confidence in its selections (i.e.,
+                                                               Code LLMs. We use four representative code
+when consistent choices appear in at least four out
+                                                               LLMs with different parameter numbers as code
+of five trials), the generated list, together with the
+                                                               generators: CodeGen-350M5 (Nijkamp et al.,
+corresponding code retrieval query and consensus
+                                                               2023), SantaCoder-1.1B6 (Allal et al., 2023),
+selection, is treated as a distillation training sam-
+                                                               StarCoder2-3B7 (Lozhkov et al., 2024), and
+ple S. This way, S reflects LLM reranker’s most
+                                                               Qwen2.5-Coder-7B8 (Hui et al., 2024).
+reliable decision patterns. We use all curated distil-
+lation samples to fine-tune Qwen3-0.6B3 , the back-            Datasets. We use benchmarks ReccEval (Cheng
+bone of the distilled reranker, using LoRA (Hu                 et al., 2024) and CCEval (Ding et al., 2023).
+et al., 2022) and token-level cross-entropy loss.              Environment and Hyper-Parameters. We use a
+   Finally, the trained distilled reranker is used             machine with two Intel(R) Xeon(R) Silver 4314
+in CodeRAG to actually rerank the retrieved                    CPU @ 2.40GHz and one NVIDIA A800 GPU for
+code knowledge and CodeRAG retains top-u code                  experiments. The maximum number of generation
+knowledge in the reranking list (u < n).                       tokens is set to 48. The temperature during gen-
+2.4 Putting All Together                                       eration is set to 0. The maximum input length of
+                                                               all code LLMs is set to 2,048 by default. We use
+During completion, for an unfinished code file,                the Text Generation Inference9 framework to ac-
+CodeRAG firstly constructs the corresponding                   celerate LLM inference. By default, we use LLM
+code retrieval query r. Then CodeRAG uses r to                 reranker in CodeRAG. We set f and g to 3 and 1
+conduct multi-path code retrieval over the code
+                                                                   4
+knowledge base and retrieves top-n relevant code                     Note that the paper of DraCo adopts a different way
+                                                               to measure ES (see https://github.com/nju-websoft/
+knowledge. After that, CodeRAG leverages the                   DraCo?tab=readme-ov-file#evaluation). We follow the
+B EST F IT reranker to rank the n relevant code                definition of ES used in the paper of RepoCoder.
+                                                                   5
+knowledge and retains the top-u necessary code                       https://huggingface.co/Salesforce/
+                                                               codegen-350M-mono
+knowledge pieces. Finally, the code context of                     6
+                                                                     https://huggingface.co/bigcode/santacoder
+the unfinished code file is concatenated with the u                7
+                                                                     https://huggingface.co/bigcode/starcoder2-3b
+                                                                   8
+pieces of code knowledge, and the result is fed into                 https://huggingface.co/Qwen/Qwen2.5-Coder-7B
+                                                                   9
+                                                                     https://huggingface.co/docs/
+   3
+       https://huggingface.co/Qwen/Qwen3-0.6B                  text-generation-inference/index
+
+                                                            23283
+Table 1: Performance on ReccEval (Use 100% data for evaluation). Bold and underlined values indicate the best
+and the second-best results, respectively.
+                       CodeGen-350M                     SantaCoder-1.1B                    StarCoder2-3B                  Qwen2.5-Coder-7B
+   Methods       Code Match Identifier Match       Code Match Identifier Match       Code Match Identifier Match     Code Match Identifier Match
+                 EM     ES    EM        F1         EM     ES    EM        F1         EM     ES     EM       F1       EM     ES     EM       F1
+  Zero-Shot       4.04   38.36    9.74    26.06     6.27   42.22   12.89   30.08      7.86   45.04   14.44   33.34   11.48   47.72   18.37   36.43
+  CCFinder       16.50   47.71   23.34    40.12    19.08   50.99   26.67   43.31     28.12   58.93   36.44   53.42   28.43   58.95   36.76   53.09
+    RG-1         20.04   50.30   26.53    41.35    24.07   54.72   31.26   46.29     29.35   59.43   36.76   52.27   33.01   61.55   40.15   54.68
+  RepoCoder      23.96   53.27   31.01    45.87    26.78   56.59   34.31   49.07     34.27   63.09   42.30   57.39   34.99   62.71   42.38   56.20
+    DraCo        21.85   51.44   29.44    45.92    30.27   59.38   38.97   55.50     36.57   64.31   45.61   61.42   39.99   66.26   48.55   63.41
+  RepoFuse       21.20   51.18   27.81    43.84    28.73   57.89   36.50   51.74     33.88   61.96   41.43   56.52   38.24   65.11   45.88   60.11
+ CodeRAGllmr     26.81   55.54   34.02    50.13    36.17   63.00   44.17   59.64     42.69   68.07   51.34   65.73   47.48   70.82   55.47   68.68
+
+
+Table 2: Performance on CCEval (Use 100% data for evaluation). Bold and underlined values indicate the best and
+the second-best results, respectively.
+                       CodeGen-350M                     SantaCoder-1.1B                    StarCoder2-3B                  Qwen2.5-Coder-7B
+   Methods       Code Match Identifier Match       Code Match Identifier Match       Code Match Identifier Match     Code Match Identifier Match
+                 EM     ES    EM        F1         EM     ES    EM        F1         EM     ES     EM       F1       EM     ES     EM       F1
+  Zero-Shot       2.70   43.02    8.26    37.85     4.35   46.52   10.58   41.88      6.53   48.56   12.91   44.52   11.11   52.19   18.09   48.35
+  CCFinder       10.58   48.65   17.19    45.96    14.63   53.44   23.08   51.90     21.08   58.11   29.42   57.46   24.80   59.52   33.47   62.61
+    RG-1          8.78   49.54   16.47    46.33    12.83   53.78   21.99   51.76     17.78   57.74   27.35   56.55   22.51   61.84   32.91   60.68
+  RepoCoder      10.58   51.07   19.06    48.93    15.12   55.66   24.62   53.78     21.24   60.90   31.56   60.00   25.89   63.65   36.21   63.09
+    DraCo        12.83   50.71   20.33    48.91    19.70   57.17   29.04   56.82     26.68   62.11   36.29   62.75   30.69   65.46   40.64   66.26
+  RepoFuse       11.22   50.78   19.29    48.77    17.64   56.52   27.02   55.65     23.34   61.28   33.43   61.16   27.73   64.76   38.39   64.82
+ CodeRAGllmr     14.11   52.44   22.28    51.56    22.89   59.92   32.42   60.24     30.66   65.46   41.13   66.62   35.20   68.93   45.97   70.47
+
+
+
+Table 3: Performance of RepoFormer-3B (Use 100%                                    they are surpassed by more sophisticated ap-
+data for evaluation). “l”: only use left context. “lr”: use                        proaches. The results indicate that general RAG
+both left and right contexts.
+                                                                                   indeed enhances completion but the improve-
+             Dataset           RepoFormer-3B
+                         Code Match Identifier Match
+                                                                                   ments are limited since general RAG is not tai-
+                         EM     ES    EM        F1                                 lored to repository-level code completion.
+         ReccEvall       12.88    48.21    19.81     36.93                   • RepoCoder consistently outperforms CCFinder
+         CCEvall         8.18     50.19    15.53     46.25
+         CCEvallr        25.29    63.45    33.77     61.48
+                                                                               and RG-1, demonstrating that iterative re-
+                                                                               trieval (Shao et al., 2023) exceeds naive RAG
+                                                                               in repository-level code completion.
+in Alg. 1, respectively. We set j to 15 in multi-path
+                                                                             • DraCo and RepoFuse show competitive perfor-
+code retrieval and u to 10 in reranking. We use
+                                                                               mance and they show much better results than
+N = {2, 3, 4, 5, 6, 7} in Alg. 2.
+                                                                               other baselines when larger code LLMs are used,
+3.2 Evaluation Results                                                         showing that larger code LLMs may better un-
+                                                                               derstand data dependence features, which are
+3.2.1 Overall Performance                                                      explored by DraCo and RepoFuse.
+We first report the results when using all data for                          • RepoFormer-3B using only left context
+evaluation in Tab. 1 and Tab. 2. In this case, LLM                             (ReccEvall and CCEvall ) lags behind other
+reranker (i.e., CodeRAGllmr ) is used instead of dis-                          methods except Zero-Shot. The reason is that
+tilled reranker (i.e., CodeRAGdisr ) since distilled                           it is optimized to consider both left and right
+reranker requires training data. The results of split-                         contexts while all other methods are designed
+ting data for training and evaluating the distilled                            to only consider left context. Unlike ReccEval
+reranker are analyzed in Sec. 3.2.3. The results of                            where the right context for each completion
+RepoFormer-3B are provided separately in Tab. 3                                case is unknown, CCEval has both left and right
+since it does not rely on extra code LLM to generate                           contexts. We can see that RepoFormer-3B which
+code. From the results, we can observe:                                        takes both left and right parts as input (CCEvallr )
+• Zero-Shot shows the worst performance across                                 surpasses CCEvall , but it is still worse than
+   all settings, indicating that solely relying on code                        CodeRAG using StarCoder2-3B which has the
+   LLMs cannot provide satisfying completion.                                  same model size as RepoFormer-3B.
+• CCFinder and RG-1 using general RAG tech-                                  • CodeRAG achieves the best performance across
+  niques significantly outperforms Zero-Shot but                               all settings, showing its effectiveness. Besides,
+                                                                       23284
+  the performance gains over baselines consis-                                44.67
+                                                                                        46.54     47.48        70
+                                                                                                                      64.26
+                                                                                                                                69.04        70.14       70.82
+
+  tently exist as the size of code LLM varies, show-         40
+                                                                    37.27
+                                                                                                               60
+                                                                                                                    51.53
+                                                                                                                              55.23       55.45      55.54
+                                                                                                               50
+  ing the robustness of CodeRAG.                             30
+                                                                                      26.65     26.81
+                                                                            26.31                              40
+
+
+
+
+                                                        EM
+
+
+
+
+                                                                                                          ES
+                                                                  21.50
+                                                             20                                                30
+3.2.2 Ablation Study                                                                                                                  CodeGen-350m
+                                                                                                               20
+                                                             10                                                                       Qwen2.5-Coder-7B
+To assess the contribution of each part in                                                                     10
+CodeRAG, we compare CodeRAG with its vari-                   0
+                                                                     1         3         5        10
+                                                                                                               0
+                                                                                                                       1         3           5           10
+ations on ReccEval in Tab. 4. Subscripts “df”,
+                                                        Figure 7: Impacts of numbers of retained reranked code
+“s”, “d” and “lr” indicate using dataflow-guided        knowledge on ReccEval (Use 100% data for evaluation).
+retrieval, sparse retrieval, dense retrieval and LLM
+reranker, respectively. Hence, CodeRAGdf+s+d+lr is      multi-path code retrieval, the cost is decided by the
+identical to CodeRAGllmr in Tab. 1.                     slowest path (i.e., dataflow-guided retrieval).
+   From the results, we can observe that incorpo-          Since the main goal of this work is not accel-
+rating more retrieval paths brings improvements         erating code completion and we do not apply ad-
+to code completion in most cases. Besides, us-          vanced acceleration techniques, we believe the cost
+ing reranking module can significantly boost per-       of CodeRAG can be further reduced and it will not
+formance. These findings highlight the effective-       hinder the practical use of CodeRAG. We suggest
+ness of each component of CodeRAG in improving          some possible directions, including constructing
+repository-level code completion.                       retrieval query in batches and parallelization, ac-
+                                                        celerating log probability guided probing through
+3.2.3 Comparisons between LLM Reranker
+                                                        applying an inference speedup framework (e.g.,
+      and Distilled Reranker
+                                                        vLLM10 ) on the prober LLM, using fast sparse and
+We further compare the results of using LLM             dense retrieval libraries (e.g., Faiss11 ) and distilling
+reranker (CodeRAGllmr ) and using distilled             LLM reranker into a smaller distilled reranker.
+reranker (CodeRAGdisr ) on ReccEval in Tab. 5. As
+CodeRAGdisr requires training, we randomly sam-         3.2.5    Impacts of Numbers of Retained
+ple 70% data for training and the remaining 30%                  Reranked Code Knowledge Pieces
+data is used for testing. The results in Tab. 5 are     The reranking step in CodeRAG only retains top-u
+reported over the test data. From the results, we       pieces of relevant code knowledge. In Fig. 7, we
+can observe that using the distilled reranker affects   report the different results w.r.t. EM and ES (code
+the performance compared to using LLM reranker,         match) when setting u to 1, 3, 5 and 10. From the
+but the performance is still competitive.               results, we can observe that:
+                                                        • Regardless of the used code LLM, using a larger
+3.2.4 Computational Cost                                  u can enhance the quality of code completion.
+Tab. 6 provides the average cost for a query on Rec-
+                                                        • The improvements are noticeable when u is in-
+cEval, excluding the cost of code LLM. We can
+                                                          creased from a small value (e.g., increase from
+see that DraCo is the fastest since it only uses a
+                                                          1 to 3), but the enhancement becomes marginal
+single-way, dataflow-guided retrieval, and no simi-
+                                                          when u further grows (e.g., increase from 5 to
+larity search is needed. Other methods are slower
+                                                          10). The diminishing improvement suggests that
+than DraCo as they all require similarity search.
+                                                          larger u may potentially introduce less relevant
+CodeRAG incurs higher cost than baselines since
+                                                          and necessary code knowledge that does not sig-
+it uses more ways of retrieval, applies log proba-
+                                                          nificantly contribute to code completion.
+bility guided probing and a distilled reranker from
+B EST F IT code reranking. However, the cost of         4         Related Work
+CodeRAG is close to RepoCoder and RepoFuse
+even though we do not use advanced accelera-            Recently, there is a surge of works on repository-
+tion methods. Considering the significant improve-      level code completion. RepoFusion (Shrivastava
+ments of CodeRAG over baselines, we believe the         et al., 2023) models the entire repository structure
+subtle increase of overhead is acceptable.              for context-aware completion. RepoCoder (Zhang
+   Tab. 7 reports the average cost for each step of     et al., 2023) employs an iterative code retrieval
+CodeRAG on ReccEval. We can see that the largest             10
+                                                                  https://github.com/vllm-project/vllm
+cost comes from query construction. Note that, for           11
+                                                                  https://github.com/facebookresearch/faiss
+
+                                                   23285
+Table 4: Comparisons among different variations of CodeRAG on ReccEval (Use 100% data for evaluation). Bold
+and underlined values indicate the best and the second-best results, respectively.
+                            CodeGen-350M                            SantaCoder-1.1B                      StarCoder2-3B                      Qwen2.5-Coder-7B
+     Methods          Code Match Identifier Match              Code Match Identifier Match         Code Match Identifier Match         Code Match Identifier Match
+                      EM     ES    EM        F1                EM     ES    EM        F1           EM     ES     EM       F1           EM     ES     EM       F1
+    CodeRAGs         22.07    51.31    29.03         44.80    23.95    56.37    31.36    47.71    33.83    62.03    41.95    57.18    39.89    59.46    36.76    61.24
+    CodeRAGd         20.49    50.36    27.33         43.41    23.04    55.58    30.52    46.90    32.81    61.53    41.18    56.55    39.66    58.47    36.05    60.90
+   CodeRAGd+s        22.88    51.95    29.42         45.51    24.90    57.23    32.38    48.58    35.27    63.23    43.80    58.96    41.95    59.59    37.95    62.14
+    CodeRAGdf        21.28    50.94    28.82         45.20    25.68    57.38    33.98    50.99    35.13    63.25    43.91    60.15    41.86    59.06    37.61    62.79
+   CodeRAGdf+s       24.21    53.01    31.93         47.94    27.18    59.52    35.47    52.10    39.85    66.35    48.72    64.01    44.21    62.36    52.80    66.62
+  CodeRAGdf+s+d      23.89    52.86    31.56         47.80    27.70    59.96    36.10    52.72    40.52    66.87    49.65    64.83    44.61    68.81    53.75    66.57
+ CodeRAGdf+s+d+lr    26.81    55.54    34.02         50.13    36.17    63.00    44.17    59.64    42.69    68.07    51.34    65.73    47.48    70.82    55.47    68.68
+
+
+Table 5: Performance on ReccEval (Use 30% data for evaluation). Bold and underlined values indicate the best and
+the second-best results, respectively.
+                          CodeGen-350M                            SantaCoder-1.1B                      StarCoder2-3B                      Qwen2.5-Coder-7B
+     Methods        Code Match Identifier Match              Code Match Identifier Match         Code Match Identifier Match         Code Match Identifier Match
+                    EM     ES    EM        F1                EM     ES    EM        F1           EM     ES     EM       F1           EM     ES     EM       F1
+   Zero-Shot         4.46    38.09     9.33     26.24         6.87    42.52    13.22    30.28     8.30    44.81    13.99    33.17    12.20    47.55    18.20    36.36
+   CCFinder         17.68    48.31    23.73     40.82        19.58    50.93    26.76    43.24    28.24    59.22    36.13    53.50    29.52    59.04    37.11    53.36
+     RG-1           17.63    48.94    24.07     39.54        24.04    54.80    31.06    46.44    29.63    58.96    35.73    51.81    33.52    61.59    39.67    54.93
+   RepoCoder        20.35    50.84    27.21     42.78        26.86    56.79    34.24    49.22    35.21    63.14    41.82    57.26    34.65    62.19    41.16    55.52
+     DraCo          22.71    51.83    29.98     46.40        30.19    59.70    39.21    55.66    36.60    64.78    45.41    61.76    39.98    66.23    48.18    62.82
+   RepoFuse         21.58    51.54    28.81     44.70        29.98    58.60    37.62    52.71    34.03    62.24    41.62    56.94    39.11    65.54    46.03    60.13
+  CodeRAGllmr       27.73    55.73    34.75     49.97        35.83    63.32    44.08    59.79    43.31    68.54    51.10    65.78    47.57    70.82    54.84    68.38
+  CodeRAGdisr       23.58    53.31    30.55     47.20        32.65    61.37    41.16    57.06    39.88    66.21    47.62    62.89    44.34    68.42    52.18    64.47
+
+
+
+Table 6: Average cost (second) for a query on ReccEval,                                   do not fully address problems discussed in Sec. 1.
+excluding the cost for code generation of code LLM.
+      RepoCoder             DraCo      RepoFuse              CodeRAG                      5      Conclusion
+          0.21               0.04             0.15              0.23
+                                                                                          We present a novel framework CodeRAG for
+                                                                                          repository-level code completion CodeRAG. Its
+Table 7: Average cost (second) for each step of                                           core parts include the log probability guided query
+CodeRAG on ReccEval.                                                                      construction, a multi-path code retrieval mecha-
+  QueryQuery             Multi-path Retrieval                        Distilled            nism, and preference-aligned reranking. Experi-
+  Construction        Sparse Dense Dataflow                          Reranker
+                                                                                          ments demonstrate that CodeRAG significantly and
+       0.14            0.002         0.015            0.03             0.06               consistently outperforms state-of-the-art methods
+                                                                                          on benchmarks. In the future, we plan to explore
+                                                                                          joint training of code retriever and code LLM to
+and generation mechanism. CoCoMIC (Ding et al.,                                           further alleviate their misalignment.
+2024) enhances accuracy by combining cross-file
+and intra-file contexts. RepoFormer (Wu et al.,                                           Limitations
+2024) fine-tunes models to dynamically decide con-
+text retrieval needs. GraphCoder (Liu et al., 2024)                                       We address the misalignment between code re-
+models control-flow dependency, data dependency,                                          triever and code LLM from the perspective of de-
+and control dependency to construct code knowl-                                           signing rerankers and modifying retrieval results
+edge graphs for code completion. ProCC (Tan et al.,                                       while code LLM is not updated accordingly. This
+2024) integrates prompt engineering with contex-                                          idea may not fully alleviate the misalignment, and
+tual bandits for multi-perspective code completion.                                       future work may involve designing new strategies,
+                                                                                          such as joint training or more efficient interfacing
+   DraCo (Cheng et al., 2024) and RepoFuse (Liang
+                                                                                          mechanisms for both code retrieval and code LLM.
+et al., 2024) are closely related to CodeRAG.
+DraCo retrieves dataflow-guided information                                               Acknowledgments
+to augment code completion prompt. Repo-
+Fuse (Liang et al., 2024) fuses analogy context                                           This work was supported by National Natural
+and rationale context, and uses a code LM like                                            Science Foundation of China (No. 62572410,
+UniXcoder (Guo et al., 2022) to choose the most                                           42171456), Natural Science Foundation of Xia-
+similar chunks to the target chunk to construct code                                      men, China (No. 3502Z202471028) and Ant Group
+completion prompt. Despite their accuracy, they                                           through CCF-Ant Research Fund.
+                                                                                   23286
+References                                                   Jian Li, Yue Wang, Michael R. Lyu, and Irwin King.
+                                                                2018. Code completion with neural attention and
+Loubna Ben Allal, Raymond Li, Denis Kocetkov,                   pointer networks. In IJCAI, pages 4159–4165.
+  Chenghao Mou, Christopher Akiki, Carlos Muñoz
+  Ferrandis, Niklas Muennighoff, Mayank Mishra,              Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas
+  Alex Gu, Manan Dey, Logesh Kumar Umapathi,                   Muennighoff, Denis Kocetkov, Chenghao Mou, Marc
+  Carolyn Jane Anderson, Yangtian Zi, Joel Lamy-               Marone, Christopher Akiki, Jia Li, Jenny Chim,
+  Poirier, Hailey Schoelkopf, Sergey Troshin, Dmitry           Qian Liu, Evgenii Zheltonozhskii, Terry Yue Zhuo,
+  Abulkhanov, Manuel Romero, Michael Lappert, and              Thomas Wang, Olivier Dehaene, Mishig Davaadorj,
+  22 others. 2023. Santacoder: don’t reach for the             Joel Lamy-Poirier, João Monteiro, Oleh Shliazhko,
+  stars! arXiv Preprint.                                       and 48 others. 2023. Starcoder: may the source be
+Wei Cheng, Yuhan Wu, and Wei Hu. 2024. Dataflow-               with you! Trans. Mach. Learn. Res., 2023.
+ guided retrieval augmentation for repository-level
+                                                             Ming Liang, Xiaoheng Xie, Gehao Zhang, Xunjin
+ code completion. In ACL, pages 7957–7977.
+                                                               Zheng, Peng Di, Wei Jiang, Hongwei Chen, Cheng-
+Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Han-            peng Wang, and Gang Fan. 2024. REPOFUSE:
+  tian Ding, Ming Tan, Nihal Jain, Murali Krishna Ra-          repository-level code completion with fused dual con-
+  manathan, Ramesh Nallapati, Parminder Bhatia, Dan            text. arXiv Preprint.
+  Roth, and Bing Xiang. 2023. Crosscodeeval: A di-
+  verse and multilingual benchmark for cross-file code       Wei Liu, Ailun Yu, Daoguang Zan, Bo Shen, Wei Zhang,
+  completion. In NeurIPS, pages 46701–46723.                   Haiyan Zhao, Zhi Jin, and Qianxiang Wang. 2024.
+                                                               Graphcoder: Enhancing repository-level code com-
+Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Mu-             pletion via code context graph-based retrieval and
+  rali Krishna Ramanathan, Ramesh Nallapati, Parmin-           language model. arXiv Preprint.
+  der Bhatia, Dan Roth, and Bing Xiang. 2024. Co-
+  comic: Code completion by jointly modeling in-file         Anton Lozhkov, Raymond Li, Loubna Ben Allal, Fed-
+  and cross-file context. In LREC/COLING, pages                erico Cassano, Joel Lamy-Poirier, Nouamane Tazi,
+  3433–3445.                                                   Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,
+                                                               Tianyang Liu, Max Tian, Denis Kocetkov, Arthur
+Guanting Dong, Yutao Zhu, Chenghao Zhang, Zechen               Zucker, Younes Belkada, Zijian Wang, Qian Liu,
+  Wang, Zhicheng Dou, and Ji-Rong Wen. 2024. Un-               Dmitry Abulkhanov, Indraneil Paul, and 38 others.
+  derstand what LLM needs: Dual preference align-              2024. Starcoder 2 and the stack v2: The next genera-
+  ment for retrieval-augmented generation. arXiv               tion. arXiv Preprint.
+  Preprint.
+                                                             Yichuan Ma, Yunfan Shao, Peiji Li, Demin Song,
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia,               Qipeng Guo, Linyang Li, Xipeng Qiu, and Kai Chen.
+  Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, Qianyu Guo,         2025. Unitcoder: Scalable iterative code synthesis
+  Meng Wang, and Haofen Wang. 2023. Retrieval-                 with unit test guidance. arXiv Preprint.
+  augmented generation for large language models: A
+  survey. arXiv Preprint.                                    Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan
+                                                               Wang, Yingbo Zhou, Silvio Savarese, and Caiming
+Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming                Xiong. 2023. Codegen: An open large language
+  Zhou, and Jian Yin. 2022. Unixcoder: Unified cross-           model for code with multi-turn program synthesis.
+  modal pre-training for code representation. In ACL,           In ICLR.
+  pages 7212–7225.
+                                                             Ronak Pradeep, Sahel Sharifymoghaddam, and Jimmy
+Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan              Lin. 2023. Rankvicuna: Zero-shot listwise document
+  Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and              reranking with open-source large language models.
+  Weizhu Chen. 2022. Lora: Low-rank adaptation of              arXiv Preprint.
+  large language models. In ICLR.
+Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-           Zhen Qin, Rolf Jagerman, Kai Hui, Honglei Zhuang,
+  iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,              Junru Wu, Le Yan, Jiaming Shen, Tianqi Liu, Jialu
+  Bowen Yu, Kai Dang, An Yang, Rui Men, Fei Huang,             Liu, Donald Metzler, Xuanhui Wang, and Michael
+  Xingzhang Ren, Xuancheng Ren, Jingren Zhou, and              Bendersky. 2024. Large language models are effec-
+  Junyang Lin. 2024. Qwen2.5-coder technical report.           tive text rankers with pairwise ranking prompting. In
+  arXiv Preprint.                                              NAACL-HLT (Findings), pages 1504–1518.
+
+Jiajie Jin, Yutao Zhu, Yujia Zhou, and Zhicheng Dou.         Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten
+   2024. BIDER: bridging knowledge inconsistency for           Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+   efficient retrieval-augmented llms via key supporting       Jingyu Liu, Tal Remez, Jérémy Rapin, Artyom
+   evidence. In ACL (Findings), pages 750–761.                 Kozhevnikov, Ivan Evtimov, Joanna Bitton, Man-
+                                                               ish Bhatt, Cristian Canton-Ferrer, Aaron Grattafiori,
+Karen Spärck Jones. 2004. A statistical interpretation         Wenhan Xiong, Alexandre Défossez, Jade Copet, and
+  of term specificity and its application in retrieval. J.     6 others. 2023. Code llama: Open foundation models
+  Documentation, 60(5):493–502.                                for code. arXiv Preprint.
+                                                        23287
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh           Shengyao Zhuang, Honglei Zhuang, Bevan Koopman,
+  Khanna, Anna Goldie, and Christopher D. Manning.           and Guido Zuccon. 2024. A setwise approach for
+  2024. RAPTOR: recursive abstractive processing for         effective and highly efficient zero-shot ranking with
+  tree-organized retrieval. In ICLR.                         large language models. In SIGIR, pages 38–47.
+
+Zhihong Shao, Yeyun Gong, Yelong Shen, Minlie
+  Huang, Nan Duan, and Weizhu Chen. 2023. Enhanc-
+  ing retrieval-augmented large language models with
+  iterative retrieval-generation synergy. In EMNLP
+  (Findings), pages 9248–9274.
+
+Disha Shrivastava, Denis Kocetkov, Harm de Vries,
+  Dzmitry Bahdanau, and Torsten Scholak. 2023. Re-
+  pofusion: Training code models to understand your
+  repository. arXiv Preprint.
+
+Weisong Sun, Chunrong Fang, Yifei Ge, Yuling Hu,
+ Yuchen Chen, Quanjun Zhang, Xiuting Ge, Yang Liu,
+ and Zhenyu Chen. 2024. A survey of source code
+ search: A 3-dimensional perspective. ACM Trans.
+ Softw. Eng. Methodol., 33(6):166.
+
+Weiwei Sun, Lingyong Yan, Xinyu Ma, Shuaiqiang
+ Wang, Pengjie Ren, Zhumin Chen, Dawei Yin, and
+ Zhaochun Ren. 2023. Is chatgpt good at search?
+ investigating large language models as re-ranking
+ agents. In EMNLP, pages 14918–14937.
+
+Alexey Svyatkovskiy, Ying Zhao, Shengyu Fu, and Neel
+  Sundaresan. 2019. Pythia: Ai-assisted code comple-
+  tion system. In KDD, pages 2727–2735.
+
+Hanzhuo Tan, Qi Luo, Ling Jiang, Zizheng Zhan, Jing
+  Li, Haotian Zhang, and Yuqun Zhang. 2024. Prompt-
+  based code completion via multi-retrieval augmented
+  generation. arXiv Preprint.
+
+Yanlin Wang and Hui Li. 2021. Code completion by
+  modeling flattened abstract syntax trees as graphs. In
+  AAAI, pages 14015–14023.
+
+Di Wu, Wasi Uddin Ahmad, Dejiao Zhang, Murali Kr-
+  ishna Ramanathan, and Xiaofei Ma. 2024. Repo-
+  former: Selective retrieval for repository-level code
+  completion. In ICML, pages 53270–53290.
+
+Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  Weizhu Chen. 2023. Repocoder: Repository-level
+  code completion through iterative retrieval and gen-
+  eration. In EMNLP, pages 2471–2484.
+
+Lingxi Zhang, Yue Yu, Kuan Wang, and Chao Zhang.
+  2024. ARL2: aligning retrievers with black-box large
+  language models via self-guided adaptive relevance
+  labeling. In ACL, pages 3708–3719.
+
+Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang,
+ Xiaolei Wang, Yupeng Hou, Yingqian Min, Beichen
+ Zhang, Junjie Zhang, Zican Dong, Yifan Du, Chen
+ Yang, Yushuo Chen, Zhipeng Chen, Jinhao Jiang,
+ Ruiyang Ren, Yifan Li, Xinyu Tang, Zikang Liu, and
+ 3 others. 2023. A survey of large language models.
+ arXiv Preprint.
+                                                      23288
+

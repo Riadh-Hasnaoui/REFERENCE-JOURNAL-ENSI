@@ -1,0 +1,933 @@
+                                                                                                                                                                                         2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)
+
+
+
+
+                                                                                                                                                                          AlignCoder: Aligning Retrieval with Target Intent
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) | 979-8-3503-5733-2/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASE63991.2025.00085
+
+
+
+
+                                                                                                                                                                               for Repository-Level Code Completion
+                                                                                                                                                                       Tianyue Jiang1† , Yanli Wang1† , Yanlin Wang1∗ , Daya Guo3 , Ensheng Shi2 , Yuchi Ma2 , Jiachi Chen1 , Zibin Zheng1
+                                                                                                                                                                                                                          1
+                                                                                                                                                                                                                         Sun Yat-sen University, Zhuhai, China
+                                                                                                                                                                                                         2
+                                                                                                                                                                                                             Huawei Cloud Computing Technologies Co., Ltd., Shenzhen, China
+                                                                                                                                                                                                                           3
+                                                                                                                                                                                                                             Independent Researcher, China
+
+
+                                                                                                                                                                          Abstract—Repository-level code completion remains a chal-                      recent methods have adopted the retrieval-augmented gener-
+                                                                                                                                                                       lenging task for existing code large language models (code                        ation (RAG) paradigm [13], [16]–[21], which uses unfinished
+                                                                                                                                                                       LLMs) due to their limited understanding of repository-specific                   code in the current file as a query to retrieve relevant code
+                                                                                                                                                                       context and domain knowledge. While retrieval-augmented gen-
+                                                                                                                                                                       eration (RAG) approaches have shown promise by retrieving                         snippets from the entire repository. These retrieved code
+                                                                                                                                                                       relevant code snippets as cross-file context, they suffer from                    snippets serve as cross-file context and are concatenated with
+                                                                                                                                                                       two fundamental problems: misalignment between the query                          the unfinished code to construct prompts for code LLMs.
+                                                                                                                                                                       and the target code in the retrieval process, and the inability                   For instance, ReACC [16] integrates both sparse and dense
+                                                                                                                                                                       of existing retrieval methods to effectively utilize the inference                retrieval methods. Sparse retrievers, such as BM25 [22],
+                                                                                                                                                                       information. To address these challenges, we propose AlignCoder,
+                                                                                                                                                                       a repository-level code completion framework that introduces                      employ keyword matching algorithms that effectively capture
+                                                                                                                                                                       a query enhancement mechanism and a reinforcement learning                        lexical information. Conversely, dense retrievers encode both
+                                                                                                                                                                       based retriever training method. Our approach generates multi-                    queries and code snippets into dense vectors, enabling the
+                                                                                                                                                                       ple candidate completions to construct an enhanced query that                     identification of semantically similar code snippets through
+                                                                                                                                                                       bridges the semantic gap between the initial query and the target                 vector similarity measurements. Despite these advances, most
+                                                                                                                                                                       code. Additionally, we employ reinforcement learning to train
+                                                                                                                                                                       an AlignRetriever that learns to leverage inference information                   dense retrieval methods fail to leverage the reasoning and un-
+                                                                                                                                                                       in the enhanced query for more accurate retrieval. We evaluate                    derstanding capabilities of code LLMs to enhance the retrieval
+                                                                                                                                                                       AlignCoder on two widely-used benchmarks (CrossCodeEval and                       process, resulting in a semantic gap between query and target
+                                                                                                                                                                       RepoEval) across five backbone code LLMs, demonstrating an                        code in the retrieval process. To mitigate this misalignment,
+                                                                                                                                                                       18.1% improvement in EM score compared to baselines on the                        RepoCoder [17] proposes an iterative retrieval strategy where
+                                                                                                                                                                       CrossCodeEval benchmark. The results show that our framework
+                                                                                                                                                                       achieves superior performance and exhibits high generalizability                  the generator produces intermediate completions based on
+                                                                                                                                                                       across various code LLMs and programming languages.                               retrieved code snippets, which are then incorporated into
+                                                                                                                                                                          Index Terms—Repository-Level Code Completion, Query En-                        subsequent retrieval queries. While this approach represents
+                                                                                                                                                                       hancement, Reinforcement Learning, code LLMs                                      a significant step toward addressing the query-target misalign-
+                                                                                                                                                                                                                                                         ment, the fundamental issue remains unresolved. Specifically,
+                                                                                                                                                                                               I. I NTRODUCTION                                          we have identified the following problems in existing retrieval
+                                                                                                                                                                                                                                                         processes:
+                                                                                                                                                                          Recent developments in code large language models (code
+                                                                                                                                                                       LLMs) [1]–[4] have demonstrated impressive capability in
+                                                                                                                                                                                                                                                         P1 The misalignment between query and target code
+                                                                                                                                                                       general code completion tasks [5]–[8], [8]–[11]. However,
+                                                                                                                                                                                                                                                            remains unresolved. To address the problem of mis-
+                                                                                                                                                                       existing code LLMs demonstrate suboptimal performance on
+                                                                                                                                                                                                                                                            alignment between query and target code in RAG-based
+                                                                                                                                                                       repository-level code completion tasks, primarily due to their
+                                                                                                                                                                                                                                                            code completion, RepoCoder [17] introduces an iterative
+                                                                                                                                                                       insufficient understanding of repository-specific context and
+                                                                                                                                                                                                                                                            retrieval approach that concatenates the completion with
+                                                                                                                                                                       domain knowledge [12]. This limitation stems from the fact
+                                                                                                                                                                                                                                                            the unfinished code to obtain a new query for the next
+                                                                                                                                                                       that target code repositories are often newly created, propri-
+                                                                                                                                                                                                                                                            retrieval round. However, this method has two problems:
+                                                                                                                                                                       etary, or work-in-progress projects, making it hard for code
+                                                                                                                                                                                                                                                            If LLMs produce an incorrect completion in an iteration,
+                                                                                                                                                                       LLMs to acquire repository-specific knowledge during pre-
+                                                                                                                                                                                                                                                            it will cause chain errors that affect the subsequent
+                                                                                                                                                                       training and fine-tuning phases [13]. To address this chal-
+                                                                                                                                                                                                                                                            retrieval. Besides, multiple retrieval rounds significantly
+                                                                                                                                                                       lenge, one straightforward approach leverages the increasing
+                                                                                                                                                                                                                                                            reduce efficiency.
+                                                                                                                                                                       context window length of modern models by concatenating
+                                                                                                                                                                                                                                                         P2 Existing retrieval methods lack the ability to learn
+                                                                                                                                                                       all repository files into a single prompt. However, this naive
+                                                                                                                                                                                                                                                            how to utilize inference information. Although Re-
+                                                                                                                                                                       concatenation introduces substantial irrelevant information that
+                                                                                                                                                                                                                                                            poCoder has demonstrated that the generated completion
+                                                                                                                                                                       interferes with model generation [14], [15]. Consequently,
+                                                                                                                                                                                                                                                            can significantly assist repository-level code completion,
+                                                                                                                                                                         * Yanlin Wang is the corresponding author, wangylin36@mail.sysu.edu.cn.            the method employs sparse (e.g., Jaccard index [23])
+                                                                                                                                                                         † These authors contributed equally to this work.                                  or dense (e.g., UniXcoder [24]) retrievers that are not
+
+
+                                                                                                                                                                    2643-1572/25/$31.00 ©2025 IEEE                                                 971
+                                                                                                                                                                    DOI 10.1109/ASE63991.2025.00085
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                       specifically trained. These retrievers may fail to under-                 1) Retrieve-then-Generate: This approach first retrieves rel-
+                       stand the relationship between the unfinished code and the             evant code snippets from the codebase using the unfinished
+                       candidate completion, and therefore cannot fully leverage              code as a query, then uses the retrieved code snippets to
+                       it for effective retrieval.                                            assist the code completion. Methods like ReACC [16] and
+                    In this paper, we propose a repository-level code completion              RLCoder [26] follow this paradigm. The retrieval process
+                 framework AlignCoder to address the two aforementioned                       takes the unfinished code Cu as input to search through the
+                 problems. First, we introduce a query enhancement mechanism                  repository R for the top-k most similar code snippets S, which
+                 that leverages sampled candidate completions to improve                      are then provided to the language model Pθ as context for
+                 retrieval accuracy. Specifically, our approach employs the                   generating the target completion Ĉt . However, this paradigm
+                 sampler to generate multiple candidate completions, which are                faces the challenge of semantic misalignment. These methods
+                 then expanded to the unfinished code to construct an enhanced                only use unfinished code as a query, which may not contain
+                 query representation. This enhanced query effectively bridges                the key tokens related to the target code. Consequently, it
+                 the gap between the initial query and the desired target com-                becomes difficult to retrieve the relevant code snippets needed
+                 pletion (addressing P1). Secondly, we employ reinforcement                   to generate the target code during the retrieval process [17].
+                 learning to train the retriever, enabling it to learn how to utilize            2) Iterative Generate-and-Retrieve: This approach alternates
+                 the multiple candidate completions contained in the enhanced                 between generation and retrieval in multiple iterations. Starting
+                 query for more accurate retrieval (addressing P2). Specifically,             with an initial retrieval using the unfinished code, the method
+                 given an enhanced query, we employ the retriever to retrieve                 generates a candidate completion and then uses the concate-
+                 multiple potentially relevant code snippets. We then utilize a               nation of the unfinished code and the generated candidate
+                 reward model to evaluate the perplexity (PPL) of generating                  as a new query for the next retrieval iteration. Methods like
+                 the target code using these retrieved code snippets, deriving                RepoCoder [17] employ this iterative approach, where each
+                 rewards from this evaluation process to update the retriever’s               iteration refines both the retrieved context and the generated
+                 parameters.                                                                  completion. However, since each iteration relies on a single
+                    We evaluate AlignCoder with extensive experiments using                   candidate completion, errors can propagate through the chain.
+                 five backbone LLMs on two benchmarks: CrossCodeEval [25]                     If errors occur in the intermediate generation step or key
+                 and RepoEval [17]. These two benchmarks are widely used in                   tokens are still missing, the subsequent retrieval will be based
+                 repository-level code completion. Experimental results show                  on flawed information, leading to cascading errors throughout
+                 that our framework achieves an 18.1% improvement in EM                       the remaining iterations.
+                 score compared with baselines on the CrossCodeEval Python.
+                 AlignCoder demonstrates high generalizability, showing ef-                   B. Semantic Gap in Repository Code Retrieval
+                 fectiveness across various code LLMs and programming lan-                       Repository-level code completion leverages contextual in-
+                 guages.                                                                      formation across multiple files to generate accurate code
+                    To summarize, our main contributions are:                                 completions. Formally, given an unfinished code Cu and a
+                    • We introduce AlignCoder, a repository-level code com-                   repository R, the objective is to generate target code Ct such
+                       pletion framework. The proposed query enhancement                      that C = Cu ⊕ Ct is syntactically and semantically correct. A
+                       mechanism allows the enhanced query to have a greater                  challenge in this task stems from the semantic gap between
+                       possibility of including key tokens relevant to the target             unfinished code and target code. Using Cu directly as a query
+                       code. This framework effectively addresses the misalign-               is suboptimal because unfinished code and target code belong
+                       ment problem between query and target code in the                      to different semantic spaces, making alignment difficult [27].
+                       retrieval process.                                                     The semantic gap can be formalized as :
+                    • We train the retriever using reinforcement learning, re-
+                       sulting in Alignretriever. This retriever learns to leverage                     G(Cu , Cr ) = d(Φquery (Cu ), Φtarget (Cr ))       (1)
+                       the inference information in enhanced queries to achieve
+                                                                                              where Φquery and Φtarget be embedding functions mapping
+                       more accurate retrieval.
+                                                                                              code to semantic spaces and d is a distance function in the se-
+                    • We perform extensive experimental evaluation on vari-
+                                                                                              mantic space. Previous approaches like RLCoder [26] attempt
+                       ous benchmarks and code LLMs. The results show that
+                                                                                              to bridge this gap through reinforcement learning, while Re-
+                       AlignCoder achieves superior performance compared to
+                                                                                              poCoder [17] uses iterative retrieval-generation to update the
+                       previous approaches. We provide our code and data at
+                                                                                              query. However, the former requires semantic space alignment
+                       https://anonymous.4open.science/r/AlignCoder.
+                                                                                              between unfinished code and target code, which is inherently
+                                       II. P RELIMINARIES                                     challenging due to the differences in their representations. The
+                                                                                              latter relies on a single sample from each iteration, which can
+                 A. Retrieval-Augmented Code Completion Paradigms                             easily propagate errors in a chain reaction—if one iteration
+                    Retrieval-augmented methods have been widely adopted                      produces an incorrect completion, subsequent iterations are
+                 for repository-level code completion. Such methods can be                    built upon this flawed foundation, leading to compounding
+                 categorized into two primary paradigms:                                      errors throughout the retrieval-generation process.
+
+
+
+
+                                                                                        972
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                                                          ReACC / RLCoder                                                                  RepoCoder
+                     # src/routes/users.py                                          Query (Unfinished Code)
+                     from src.database.db import get_db
+                     from src.database.models import User, UserRole, BlacklistToken                                                Code             Unfinished
+                     from src.repository import users as repository_users                                                         Snippets            Code
+                     from src.services.auth import auth_service
+                     ...
+                     router = APIRouter(prefix="/users", tags=["users"])
+                     allowed_operation_get = RoleAccess([UserRole.Admin, UserRole.Moderator, UserRole.User])
+                     ...
+                         user = await repository_users.
+                                                                                                                                            Retrieval
+                     update_user(body, user, db)                                                        Groundtruth
+
+                     # src/routes/auth.py                                               Bad Reference Code                            May Cause Chain Error
+                     @router.post("/signup", response_model=UserResponse,
+                     status_code=status.HTTP_201_CREATED)
+                     async def signup(body: UserModel, request: Request, db: Session = Depends(get_db)):
+                         exist_user = await repository_users.get_user_by_email(body.email, db)                                             Generation
+                         if exist_user:
+                             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Account
+                     already exists")
+                         body.password_checksum = auth_service.pwd_context.hash(body.password_checksum)
+                         new_user = await repository_users.create_user(body, db)                                                           Prediction
+                         return new_user
+                                                                          Missing Key Tokens in Groundtruth
+                  Fig. 1. Motivating example. Limitations of prior works: ReACC and RLCoder use the unfinished code as the query, which may miss key tokens in the ground
+                  truth. RepoCoder may cause chain errors and has potential efficiency issue.
+
+
+
+                 C. Multiple Sampling in LLMs                                                     we can approximate the samples as quasi-independent for
+                    LLMs exhibit inherent stochasticity in their generation                       analytical purposes.
+                 process, making single-sample outputs unreliable. The prob-                        Let ρ denote the correlation coefficient between samples,
+                 abilistic nature of token sampling introduces variability that                   where 0 ≤ ρ ≤ 1. For truly independent samples (ρ = 0),
+                 can lead to inconsistent or incorrect responses, even when                       the probability of obtaining at least one correct answer from
+                 queried with identical prompts. However, through the multiple                    n attempts would be:
+                 sampling strategy, we can significantly improve the likelihood                         Pindependent (at least one correct) = 1 − (1 − ps )n         (4)
+                 of obtaining correct completions.
+                    1) Single Sample Unreliability: For a given query q, an                         However, accounting for inter-sample correlation, the actual
+                 LLM generates a response by sampling from the learned                            probability can be approximated as:
+                 probability distribution over the vocabulary V at each timestep.                         P (at least one correct) ≈ 1 − (1 − ps )n·(1−ρ)            (5)
+                 Let pθ (y|x) denote the probability of generating sequence y
+                 given input x and model parameters θ. The sampling process                          where the effective number of independent samples is
+                 can be formulated as:                                                            reduced by the correlation factor (1 − ρ).
+                                                                                                     In practice, modern sampling techniques (such as temper-
+                                           yt ∼ pθ (·|x, y<t )                        (2)         ature scaling T > 0 or top-p sampling) introduce sufficient
+                                                                                                  randomness that ρ remains relatively small, making the inde-
+                 where yt represents the token at position t, and y<t denotes                     pendence approximation reasonable:
+                 all previously generated tokens.
+                    Due to the stochastic nature of sampling, a single generation                  P (at least one correct) ≈ 1 − (1 − ps )n        when ρ ≪ 1 (6)
+                 attempt has probability ps of producing a correct answer,                           This relationship demonstrates that even with correlated
+                 typically ps < 1 and may be lower for complex queries.                           samples, the success probability increases substantially with
+                 Threrefore, the probability of generating an incorrect response                  the number of sampling attempts. For practical applications,
+                 in a single attempt is:                                                          multiple sampling strategy consistently yields higher accuracy
+                                          P (error) = 1 − ps                          (3)         than single sampling, establishing it as an effective strategy
+                                                                                                  for improving LLM reliability in critical applications.
+                    2) Multiple Sampling Benefits: When performing multiple                          The above provides an introduction to the theoretical foun-
+                 sampling attempts, we acknowledge that individual samples                        dations. In the following part, we demonstrate the effectiveness
+                 are not truly independent events, as they originate from the                     of multiple sampling strategy compared to single sampling
+                 same model with identical parameters and input prompt.                           through a preliminary experiment. This experiment utilizes the
+                 However, due to the stochastic nature of the sampling process                    CrossCodeEval and RepoEval, where the prompt consists of
+                 (temperature-based sampling, top-k, or nucleus sampling),                        BM25 retrieval code snippets concatenated with unfinished
+
+
+
+
+                                                                                            973
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                                                                                                      creased correct sample probability against the cost of error
+                              0.35
+                                                                                                      accumulation. The expected utility can be formulated as:
+                              0.30
+                                                                                                          U (n) = α · P (at least one correct) − β · ϵn − γ · n    (9)
+                              0.25
+                       EM@k
+
+
+
+
+                                                                                                      where α, β, and γ represent the weights for correctness benefit,
+                                                                                                      error penalty, and computational cost, respectively.
+                              0.20
+                                                                                                         Substituting our previous formulations:
+                                                                 CrossCodeEval (Python)
+                                                                 CrossCodeEval (Java)
+                              0.15                               RepoEval (Line)                         U (n) = α · [1 − (1 − ps )n ] − β · n(1 − ps ) − γ · n   (10)
+                                                                 RepoEval (API)
+                                     1   2   3   4    5    6     7      8     9     10
+                                                     k in EM@k                                          Taking the derivative with respect to n and setting it to zero:
+
+                 Fig. 2. EM@k performance trends on CrossCodeEval and RepoEval with                    dU (n)
+                 varying k parameters. The trends indicate that multiple sampling strategy                    = α · (1 − ps )n ln(1 − ps ) − β(1 − ps ) − γ = 0 (11)
+                                                                                                        dn
+                 provides a higher probability of producing a correct completion compared
+                 tosingle sampling.
+                                                                                                        The optimal sampling threshold n∗ can be approximated by
+                                                                                                      solving:
+                                                                                                                                              
+                 code. We present the EM@k results (k ranging from 1 to                                                       ln β(1−p   s )+γ
+                                                                                                                                   α ln(1−ps )
+                 10) for DeepSeekCoder-1B using the aforementioned prompt                                               n∗ ≈                                (12)
+                 with 10 sampling attempts. Specifically, EM@k represents the                                                    ln(1 − ps )
+                 probability of that at least one of the k samples exactly matches
+                 the target code (EM=1). As shown in figure 2, the EM@k                                 This theoretical framework demonstrates that while multi-
+                 values on both benchmarks increase with the value of k. This                         ple sampling is beneficial, there exists an optimal threshold
+                 indicates that multiple sampling strategy provides a higher                          beyond which additional samples provide marginal utility and
+                 probability of generating a correct completion compared to                           may even degrade overall system performance due to increased
+                 single sampling, which also means it is easier to contain key                        complexity in answer selection and computational overhead.
+                 tokens related to the correct completion.
+                    3) Diminishing Returns and Optimal Sampling Threshold:                            D. Perplexity in LLMs for Code Assessment
+                 While multiple sampling generally improves the probability
+                 of obtaining correct completions, excessive sampling can in-                           Perplexity (PPL) quantifies how well a probability model
+                 troduce diminishing returns and potentially counterproductive                        predicts token sequences, serving as an intrinsic measure of
+                 effects. As the number of samples increases beyond an optimal                        model confidence in Large Language Models. For a token
+                 threshold, several factors contribute to degraded performance:                       sequence y = (y1 , y2 , . . . , yT ), perplexity is defined as:
+                    Error Accumulation: With increased sampling numbers,                                                          T
+                                                                                                                                                      !
+                 the absolute number of incorrect responses grows, potentially                                                 1X
+                                                                                                                PPL(y) = exp −       log pθ (yt |y<t )            (13)
+                 overwhelming correct completions during aggregation or se-                                                    T t=1
+                 lection processes. If we define ϵn as the cumulative error rate
+                 after n samples, we have:                                                               where pθ (yt |y<t ) represents the conditional probability of
+                                                                                                      token yt given preceding context y<t . Lower perplexity indi-
+                                             ϵn = n · (1 − ps )                           (7)         cates higher model confidence.
+                                                                                                         While not directly measuring correctness, perplexity cor-
+                    Selection Complexity: The probability of selecting the cor-                       relates with code quality through several mechanisms: (1)
+                 rect answer from a pool containing both correct and incorrect                        Statistical regularity: well-formed code follows learned pat-
+                 responses depends on the selection mechanism. For random                             terns from training data; (2) Syntactic consistency: valid syntax
+                 selection from n samples, where k samples are correct, the                           exhibits predictable token transitions; (3) Semantic coherence:
+                 probability of selecting a correct answer is:                                        logical code patterns yield lower perplexity.
+                                                           k   n · ps                                    However, perplexity has limitations: uncommon but correct
+                                 P (correct selection) =     =        = ps                (8)         coding styles, domain-specific patterns, and model understand-
+                                                           n     n
+                                                                                                      ing gaps can cause discrepancies between perplexity and actual
+                   However, for more sophisticated selection mechanisms (e.g.,                        correctness. Empirical studies show moderate positive corre-
+                 majority voting, confidence-based selection), the relationship                       lation between low perplexity and code correctness [28], [29],
+                 becomes more complex.                                                                making it effective as a first-order heuristic for ranking code
+                   Optimal Sampling Threshold: To determine the optimal                               completion candidates when combined with other validation
+                 number of samples n∗ , we must balance the benefit of in-                            methods.
+
+
+
+
+                                                                                                974
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                           Ⅰ Codebase Construction                                          Ⅱ     Query Enhancement
+
+                                                                   Coarse-Grained Retrieval                                Multiple Sampling Strategy
+
+                                 Unfinished Code
+                                  (Initial Query)
+                                                                  Sparse           Reference               LLM-based                 Multiple                     Enhanced
+                                                                 Retriever         Snippets                 Sampler                 Candidates                     Query
+
+                                    Codebase
+                                                                                          Ⅲ      RL-based Training & Inference
+                                                                                                                                                  Reward Design
+                                                                   Fine-Grained Retrieval             Training Stage
+
+                               Base      Dependency                                                                    LLM-based
+                              Snippets    Snippets                                                                                               PPL-based Reward
+                                                                                                                        Evaluator
+                                                               AlignRetriever      Reference
+                                                                                   Snippets
+                                                                                                      Inference Stage
+                                                                                                                   LLM-based              Completed            Developer
+                                 Code Repository                              RL Training                           Generator               Code
+
+                   Fig. 3. Overview of AlignCoder. Our approach utilizes the inference capability of the LLM to sample multiple candidate completions and learn to understand
+                   the inference information for accurate retrieval for repository-level code completion.
+
+
+
+                                         III. M ETHODOLOGY                                                                              Enhanced Query
+                                                                                                                                Initial Query (Unfinished Code)
+                                                                                                         # example_cfg.py
+                    In this section, we introduce AlignCoder, a framework for                            ...
+                 repository-level code completion. The pipline of AlignCoder                             sampled_token, _ = generator.sample_current(logits_mixed)
+                                                                                                         if sampled_token.item() == tokenizer.eos_token_id:
+                 is shown in Figure 3, which contains three stages. 1 Given                                  break
+                                                                                                         batch_token = sampled_token.repeat(2, 1)
+                 a code repository, we extract two types of code snippets to                             generator.
+                 construct the codebase for retrieval. 2 For the unfinished                                                      # Candidate Completion 1
+                 code needs to be completed, we use it as the original query to                          sequence = torch.cat((generator.sequence, batch_token), dim = 1)
+                                                                                                                                                                  Bad Completion
+                 perform the coarse-grained retrieval. Then we use the retrieved                                                 # Candidate Completion 2
+                 code snippets concatenated with the unfinished code as the                              gen_accept_token(batch_token)
+                                                                                                                                                                 Good Completion
+                 prompt for sampler. The sampler is a lightweight LLM to                                                         # Candidate Completion 3
+                 sample multiple candidate completions. Then we concatenate                              gen_accept_token(batch_token.unsqueeze(0))
+                                                                                                                                                               Similar Completion
+                 the unfinished code with the sampled candidate completions
+                                                                                                                        Enhanced Query Can Use More Potential Completion
+                 to serve as the enhanced query. 3 We use the enhanced
+                 query to perform fine-grained retrieval, which returns several                       Fig. 4. Example: the initial query and the enhanced query obtained with the
+                                                                                                      query enhancement mechanism. Task id: project_cc_python/74.
+                 reference code snippets. In the training phase, the reward
+                 model will give each reference code snippet a reward to
+                 evaluate the helpfulness. The parameter of the retriever will be
+                 updated by the reward, which is calculated through an LLM-                           construction methodologies for base and dependency code
+                 based evaluator. In the inference phase, we concatenate the                          snippets.
+                 retrieved code snippets with the unfinished code to construct                           1) Base Code Snippets Construction: Previous works con-
+                 the prompt, based on which the generator performs the final                          struct retrieval codebase using fixed window sizes [17] and
+                 code completion.                                                                     dependency parsing approaches [13], [31], [32]. However,
+                                                                                                      fixed window strategies may disrupt code continuity, while
+                 A. Codebase Construction                                                             dependency parsing-based methods may only focus on limited
+                    In constructing the retrieval codebase, we construct two                          context in the context graph and struggle to be applied to
+                 distinct types of code snippets, namely base and dependency                          complex scenarios, such as when repository dependencies are
+                 code snippets. Each category of code snippets is tailored to                         highly intricate. Therefore, we adopt the Split-Aggregate strat-
+                 represent a corresponding type of cross-file information. The                        egy [26] to construct base code snippets. This approach is in-
+                 first type is the base context, which consists of initial code                       spired by human programming habits, first dividing the cross-
+                 segments within the cross-files. The second type is dependency                       files into mini-blocks based on blank lines, then aggregating
+                 context, which provides deep semantic understanding of class                         these mini-blocks into code snippets according to a predefined
+                 hierarchies and API interactions within the codebase [30].                           length. Formally, given a cross-file F = {l1 , l2 , . . . , ln } where
+                 The following section provides a detailed introduction to the                        li represents the i-th line, we first split F into mini-blocks
+
+
+
+
+                                                                                                975
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                 based on blank lines:                                                              Our query enhancement mechanism consists of two phases:
+                                                                                                 coarsed-grained retrieval and multiple sampling strategy. (1) In
+                  Split(F ) = {B1 , B2 , . . . , Bk } where Bj = {ls , . . . , le } (14)
+                                                                                                 the coarse-grained retrieval, we use BM25 method to retrieve
+                 where each mini-block Bj is a contiguous sequence of non-                       code snippets from the codebase using the unfinished code
+                 empty lines. Subsequently, we aggregate these mini-blocks                       as the initial query. These code snippets may include both
+                 into code snippets:                                                             base and dependency code snippets, providing the original
+                                                                                                 code information and deep semantic understanding of class
+                  Si = Aggregate({Bj , Bj+1 , . . . , Bj+m }) s.t. |Si | ≤ L (15)                hierarchies and API interactions. (2) These code snippets are
+                 where Si represents the i-th standard code snippet, L is the                    then concatenated with the unfinished code to build a prompt.
+                 predefined maximum line counts, and |Si | denotes the line                      The sampler samples k candidate completions based on this
+                 counts of snippet Si . The aggregation process ensures that:                    prompt. Finally, these candidate completions are appended to
+                                                                                                 the initial query to construct an enhanced query, which guides
+                               j+m                    j+m+1
+                               X                       X                                         the retriever in the fine-grained retrieval phase. For example,
+                                     |Bk | ≤ L and            |Bk | > L            (16)
+                                                                                                 Figure 4 presents a task project_cc_python/74 with
+                               k=j                     k=j
+                                                                                                 the initial query and the enhanced query after processing
+                    2) Dependency Code Snippets Construction: We use tree-                       through the query enhancemant mechanism. In the task, we
+                 sitter [33] to extract import statements from in-file context and               need to complete a specific line in example cfg.py where a
+                 parse each statement to obtain module name, entity name, and                    method is called on the generator object. The generator
+                 alias. We filter out standard library and third-party imports,                  object is an instance of the ExLlamaGenerator class
+                 retaining only intra-repository module references. Formally,                    defined in generator.py, and the target code is a method
+                 given import statements I = {i1 , i2 , . . . , in }:                            get_accept_token defined in this class. Among the can-
+                                                                                                 didate completions sampled by the sampler, candidate comple-
+                     Iintra = {i ∈ I | m(i) ∈
+                                            / (StdLib ∪ ThirdParty)}               (17)
+                                                                                                 tion 1 is an incorrect completion, while candidate completion
+                 where m(i) extracts the module name of import i. The intra-                     2 is the correct completion, and candidate completion 3 is
+                 repository references are categorized into class imports Ic ,                   a completion similar to the target code. We consider that
+                 method imports Im , and function imports If .                                   candidate completions 2 and 3 contain key tokens related to
+                    We then parse cross-files using tree-sitter and extract match-               the target code. The enhanced query may improve the ability
+                 ing code bodies based on these references. We refer to the                      of the retriever to retrieve more relevant code snippets in the
+                 corresponding code bodies as entities [13], [34], denoted by                    following fine-grained retrieval phase.
+                 u. For function and method imports (i ∈ If ∪ Im ):
+                                                                                                 C. AlignRetriever: RL-based Retriever Aglignment Training
+                                 Dependency(i) = Signature(ui )                    (18)
+                                                                                                    1) Training data construction: We randomly selected
+                 For class imports (i ∈ Ic ):                                                    10,000 Python and Java repositories from GitHub. These
+                                                                                                 repositories contain cross-file dependencies and were created
+                             Dependency(i) = {σc , Σm , Σnc , Σnm }                (19)          before March 2023 and are not included in our evaluation
+                 where σc is the main class signature, Σm contains all class                     benchmarks, CrossCodeEval [25] and RepoEval [17], ensuring
+                 method signatures, Σnc contains nested class signatures, and                    no data leakage and maintaining the fairness of the evaluation.
+                 Σnm contains nested class method signatures. The complete                       Constructing training data involves the following three steps:
+                 dependency information is:                                                       1 We divide each code repository into a series of clusters,
+                                        [                                                        where the code files within these clusters have interdependent
+                                 D=          Dependency(i)               (20)                    relationships. We exclude clusters that contain only a single
+                                          i∈Iintra                                               file. 2 Then, we perform topological sorting on the remaining
+                 We construct dependency code snippets based on extracted                        clusters. This sorting is based on the in-degree and out-degree
+                 information, treating each imported class’s dependency infor-                   relationships between the files. The final sorting result ensures
+                 mation as an individual dependency code snippet. For imported                   that : The first code file is dependent upon other files in the
+                 methods or functions, we aggregate their signatures into a                      same cluster, but does not contain dependencies on other files.
+                 single snippet. Finally, we combine base code snippets and                      All subsequent code files depend on one or more other files
+                 dependency code snippets to form the retrieval codebase.                        within the cluster. 3 For each cluster, we randomly select
+                                                                                                 one non-first file to construct the target code for completion.
+                 B. Query Enhancemant Mechanism                                                  To ensure the preceding context of the target code contains
+                    If the query used for retrieval only contains the unfinished                 sufficient information, we avoid selecting starting positions of
+                 code, it is likely to retrieve code snippets that are similar to                the target code from either the beginning or the end of the
+                 them. This raises a gap between the query and the target code,                  current file. The length of the target code is also randomly
+                 potentially leading to reduced retrieval accuracy. To address                   determined (set to be from 16 to 96 tokens in our experiment),
+                 this issue, we propose a query enhancement mechanism. The                       and the entire code segment must lie within the boundaries of
+                 details of the mechanism are illustrated below.                                 the current file.
+
+
+
+
+                                                                                           976
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                    2) The training objective function: The reward mechanism                    B. Baseline Methods
+                 in reinforcement learning provides the model with environ-                       In our experiments, we compare AlignCoder with previous
+                 mental feedback, allowing it to progressively learn particular                 RAG-based methods, encompassing ReACC, RepoCoder, and
+                 capabilities based on this feedback signal. We define the                      RLCoder.
+                 reward function as Reward(·), where the reward function needs
+                                                                                                  • ReACC: ReACC [16] adopt the hybrid retriever [40], [41]
+                 to be maximized during AlignRetriever training period. The
+                                                                                                    framework by combining sparse and dense retriever.
+                 detailed mathematical expression for Reward(·) is:
+                                                                                                  • RepoCoder: RepoCoder [17] is an iterative retrieval and
+                                       n                                                            generation framework, where it searches for the relevant
+                                       X                   exp(si,q )
+                           Reward =         I(ci ) × log Pn                        (21)             code snippets using the output generated by code LLMs
+                                        i=1               j=1 exp(sj,q )
+                                                                                                    from the previous iteration.
+                 where q is the enhanced query, C = {c1 , c2 , . . . , cn } is the set            • RLCoder: RLCoder [26] is a reinforcement learning
+
+                 of retrieved code snippets, n is the number of code snippets,                      framework, which can enable the retriever to learn to
+                 I(ci ) is the indicator function denoting correctness of snippet                   retrieve useful snippets without the need for labeled data.
+                 ci , and si,q = cos(emb(ci ), emb(q)) represents the cosine                    C. Evaluation Metrics
+                 similarity between embeddings of code snippet ci and query
+                 q. The definition of I(ci ) is:                                                   Following the established practice [13], [17], [26], [34], we
+                                              (                                                 use two metrics, Exact Match (EM) and Edit Similarity (ES),
+                                                1, if ci = cmp                                  to evaluate code completion accuracy.
+                                     I(ci ) =                                    (22)
+                                                0, otherwise                                    D. Experimental Details
+                 where cmp ∈ C and satisfies:                                                     We performed all experiments on a machine configured with
+                                                                                                2 NVIDIA Tesla A100 GPUs, each with 80 GB of memory.
+                       PPL(t|q, cmp ) ≤ PPL(t|q, ci )      ∀i ∈ {1, . . . , n}     (23)           • Training Stage: In the training stage, we initialize the
+
+                 where the formula PPL(t|q, ci ) is defined as:                                     retriever using UniXcoder and use DeepSeekCoder-1B
+                                                                                                    as the evaluator. We trained the retriever for a total of 20
+                                                 1
+                                                     PL
+                            PPL(t|x, ci ) = e− L      j=1 log P (tj |ci ,q,t<j )   (24)             epochs. Each epoch utilized 3,000 samples for training,
+                                                                                                    and the learning rate was set to 5e-5.
+                 where L denotes the total number of tokens in the target code.                   • Inference Stage: In the inference stage, since our
+                                                                                                    approach employs multiple sampling, we utilize the
+                                   IV. E XPERIMENTAL SETUP                                          vLLM [42] framework to accelerate model inference.
+                   In this section, we introduce the benchmarks, backbone                                       V. E XPERIMENTAL R ESULTS
+                 models, baseline methods, and evaluation metrics used in our
+                 experiments.                                                                     We aims to answer the following research questions (RQs):
+                                                                                                  • RQ1: How effective is AlignCoder in repository-level
+                 A. Benchmarks and Backbone Models                                                  code completion?
+                                                                                                  • RQ2: The effectiveness of multiple sampling strategies,
+                    In our evaluation, we use two benchmarks for repository-
+                                                                                                    and what the optimal sampling numbers should be?
+                 level code completion tasks: CrossCodeEval [25] and Repo-
+                                                                                                  • RQ3: What is the contribution of each AlignCoder com-
+                 Eval [17]. These two benchmarks have been widely used in
+                                                                                                    ponent to its performance?
+                 previous work [4], [26], [34]–[36].
+                                                                                                  • RQ4: What is the robustness of AlignCoder’s parameter
+                   • CrossCodeEval: CrossCodeEval is a diverse and mul-                             settings?
+                     tilingual code completion benchmark that requires a
+                     deep understanding of context across different files in                    A. RQ1: Overall Performance of AlignCoder
+                     the repository to ensure accurate code completion. We                        In this section, we study the effectiveness of AlignCoder
+                     conduct the evaluation on Python and Java sets.                            compared with three baseline methods. Table I presents the
+                   • RepoEval: RepoEval is allowed for assessments at three                     performance comparison of AlignCoder against three baseline
+                     granularities, line, API invocation, and function body.                    methods across multiple benchmarks and backbone models.
+                     In our evaluation, we focus on the line-level and API                      The results demonstrate that AlignCoder outperforms previous
+                     invocation tasks.                                                          methods across all evaluation settings.
+                    In our experiments, we select five code LLMs as gen-                          From the perspective of benchmarks, AlignCoder achieves
+                 erators. These code LLMs have been proven to perform                           greater improvements on CrossCodeEval compared to RepoE-
+                 well on repository-level code completion tasks in previous                     val. For the CrossCodeEval Python, AlignCoder demonstrates
+                 work [17], [18], [26], [30], [37]. These five code LLMs are:                   substantial performance gains, with EM score improvements
+                 CodeLlama-7B [38], StartCoder-7B [39], StarCoder2-7B [1],                      ranging from 12.7% to 18.1% compared to RLCoder. For
+                 DeepSeekCoder-1B [35], and DeepSeekCoder-7B [35].                              the CrossCodeEval Java, AlignCoder maintains its superiority
+
+
+
+
+                                                                                          977
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                                                                              TABLE I
+                       P ERFORMANCE COMPARISON . S UPERSCRIPTED PERCENTAGES REPRESENT THE IMPROVEMENT OVER THE CORRESPONDING BEST BASELINE .
+                                                  CrossCodeEval (Python)         CrossCodeEval (Java)             RepoEval (Line)             RepoEval (API)
+                    Method/Model
+                                                  EM             ES            EM              ES            EM            ES            EM            ES
+                    ReACC CodeLlama-7B            21.76          69.09         23.42           66.13         42.31         64.35         34.38         61.45
+                    RepoCoder CodeLlama-7B        23.34          70.84         24.17           66.56         43.94         65.81         37.00         63.51
+                    RLCoder CodeLlama-7B          26.64          72.26         26.27           67.60         46.63         67.86         37.94         64.32
+                    AlignCoder CodeLlama-7B       30.13 ↑13.1%   74.29 ↑2.8%   28.80 ↑9.6%     68.38 ↑1.2%   46.96 ↑0.7%   67.92 ↑0.1%   39.56 ↑4.3%   66.01 ↑2.6%
+                    ReACC StarCoder-7B            22.33          69.60         22.16           67.80         43.81         64.83         31.94         56.00
+                    RepoCoder StarCoder-7B        23.15          70.71         22.53           68.22         45.69         66.90         33.44         57.81
+                    RLCoder StarCoder-7B          26.00          72.16         25.76           68.80         47.81         68.50         35.06         58.08
+                    AlignCoder StarCoder-7B       30.43 ↑17.0%   74.33 ↑3.0%   28.00 ↑8.7%     70.04 ↑1.8%   48.38 ↑1.2%   68.56 ↑0.1%   36.25 ↑3.4%   59.49 ↑2.4%
+                    ReACC StarCoder2-7B           22.89          70.66         23.42           69.13         44.44         65.95         34.50         58.78
+                    RepoCoder StarCoder2-7B       24.35          71.71         23.75           69.59         45.81         67.37         36.44         59.92
+                    RLCoder StarCoder2-7B         27.47          73.39         26.69           70.35         48.63         68.59         37.75         61.08
+                    AlignCoder StarCoder2-7B      31.74 ↑15.5%   75.70 ↑3.1%   30.43 ↑14.0%    72.64 ↑3.3%   48.81 ↑0.4%   68.82 ↑0.3%   38.69 ↑2.5%   61.59 ↑0.8%
+                    ReACC DeepSeekCoder-1B        19.74          67.68         18.89           62.47         39.31         62.04         33.00         60.41
+                    RepoCoder DeepSeekCoder-1B    20.23          68.78         19.59           62.35         40.88         63.56         35.13         61.92
+                    RLCoder DeepSeekCoder-1B      24.02          70.45         20.66           63.17         44.06         66.05         36.00         62.50
+                    AlignCoder DeepSeekCoder-1B   28.37 ↑18.1%   73.02 ↑3.6%   23.24 ↑12.5%    64.58 ↑2.2%   44.69 ↑1.4%   66.74 ↑1.0%   37.25 ↑3.5%   64.43 ↑3.1%
+                    ReACC DeepSeekCoder-7B        23.30          70.84         22.49           66.78         45.69         66.67         38.00         65.66
+                    RepoCoder DeepSeekCoder-7B    26.98          72.96         24.96           66.52         46.38         67.51         39.31         66.29
+                    RLCoder DeepSeekCoder-7B      30.09          74.43         26.37           67.28         48.81         69.48         39.75         66.01
+                    AlignCoder DeepSeekCoder-7B   33.92 ↑12.7%   76.97 ↑3.4%   28.28 ↑7.2%     68.31 ↑1.5%   49.56 ↑1.5%   69.93 ↑0.6%   41.88 ↑5.4%   67.75 ↑2.6%
+
+
+
+                 with EM score improvements of 7.2% to 14.0% compared to                          (2) Performance degradation in certain datasets when
+                 RLCoder across backbone models.                                               sampling numbers exceed a threshold. A performance
+                    From the perspective of models, results show that maximal                  degradation is observed on certain datasets when sampling
+                 improvement is achieved by DeepSeekCoder-1B on Cross-                         numbers surpass 4. When the sampling number is set to 5,
+                 CodeEval Python (EM: +18.1%, ES: +3.6%). For Cross-                           the results on CrossCodeEval Java and line-level/API-level
+                 CodeEval Java, StarCoder2-7B demonstrated the highest im-                     tasks of RepoEval are all inferior to single sampling. When
+                 provement (EM: +14.0%, ES: +3.3%). Regarding RepoEval                         the sampling number is set to 6, there is a decline compared
+                 performance, DeepSeekCoder-7B showed the most significant                     to single sampling on CrossCodeEval Java and line-level tasks
+                 gains. It achieved EM score improvements of 1.5% on line-                     of RepoEval. This indicates that although multiple sampling
+                 level tasks and 5.4% on API-level tasks.                                      is effective compared to single sampling, excessive sampling
+                                                                                               may cause the candidate completions to contain non-negligible
+                  RQ1 Summary: AlignCoder consistently outperforms all                         noise, which could affect the accuracy of subsequent retrieval.
+                  baseline methods across different benchmarks and backbone                       (3) Determining the optimal sampling numbers. We
+                  models. The best-performing setting improves 18.1% on the                    evaluate the performance of AlignCoder by computing av-
+                  EM score, with particularly gains on CrossCodeEval Python.                   erage EM and ES scores under different sampling settings.
+                                                                                               As shown in Table II, the setting of sampling numbers at
+                 B. RQ2: Mutiple Sampling Strategy                                             4 demonstrates superior performance. This evidence estab-
+                    In this section, we investigate two questions: (1) whether                 lishes sampling numbers of 4 as the optimal balance for our
+                 multiple sampling is more effective than single sampling, and                 approach, maximizing performance gains while maintaining
+                 (2) what the optimal sampling numbers for AlignCoder. We                      computational efficiency.
+                 conduct performance comparison experiments with sampling
+                                                                                                RQ2 Summary: We demonstrate the effectiveness of the
+                 numbers set from 1 to 6. The generator used in this experiment
+                                                                                                multiple sampling strategy compared to single sampling.
+                 is DeepSeekCoder-1B. The experimental results are presented
+                                                                                                When the sampling number exceeds a threshold, Align-
+                 in Table II.
+                                                                                                Coder’s performance declines. Experimental results show
+                    (1) Effectiveness of Multiple Sampling. Multiple sampling
+                                                                                                that the optimal sampling number is 4.
+                 (2, 3, and 4 samples) generally outperforms single sampling
+                 in EM and ES scores. The few exceptions show only minimal
+                 decreases: 0.2% lower EM on API-level tasks of RepoEval                       C. RQ3: Ablation Studies
+                 (sampling numbers set to 2), for instance. These results                         To demonstrate the effectiveness of the three core compo-
+                 indicate that multiple sampling enhances the likelihood of                    nents in AlignCoder, we conduct experiments focusing on:
+                 generating key tokens related to target code, thus improving                  (1) incorporating dependency context as cross-file information
+                 the retrieval performance.                                                    by constructing and retrieving dependency code snippets; (2)
+
+
+
+
+                                                                                         978
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                                                                                              TABLE II
+                                       S UPERSCRIPTED PERCENTAGES INDICATE THE RELATIVE INCREASE OR DECREASE OF MULTI - SAMPLING COMPARED TO SINGLE - SAMPLING .
+                                                                 CrossCodeEval (Python) CrossCodeEval (Java)                              RepoEval (Line)      RepoEval (API)           Average
+                                 Method
+                                                                 EM                ES                  EM             ES             EM           ES        EM         ES        EM         ES
+                                 Sampling Number=1 27.20       71.98                                   23.05       64.49       44.75        66.47       36.69       63.39       32.92       66.58
+                                 Sampling Number=2 27.65 ↑1.7% 72.41 ↑0.6%                             23.42 ↑1.6% 65.45 ↑1.5% 45.19 ↑1.0% 66.98 ↑0.8% 36.63 ↓0.2% 63.90 ↑0.8% 33.22 ↑0.9% 67.19 ↑0.9%
+                                 Sampling Number=3 28.29 ↑4.0% 72.71 ↑1.0%                             23.19 ↑0.6% 63.93 ↓0.9% 44.75 ↑0.0% 66.35 ↓0.2% 36.88 ↑0.5% 63.93 ↑0.9% 33.28 ↑1.1% 66.73 ↑0.2%
+                                 Sampling Number=4 28.37 ↑4.3% 73.02 ↑1.5%                             23.24 ↑0.8% 64.58 ↑0.1% 44.69 ↑-0.1% 66.74 ↑0.4% 37.25 ↑1.5% 64.43 ↑1.6% 33.39 ↑1.4% 67.19 ↑0.9%
+                                 Sampling Number=5 28.44 ↑4.6% 71.68 ↓0.4%                             22.81 ↓1.0% 64.10 ↓0.6% 44.37 ↓0.9% 66.44 ↓0.1% 36.63 ↓0.2% 63.43 ↑0.1% 33.06 ↑0.4% 66.41 ↓0.3%
+                                 Sampling Number=6 28.07 ↑3.2% 72.54 ↑0.8%                             22.87 ↓0.8% 64.18 ↓0.5% 44.63 ↓0.3% 66.38 ↓0.1% 37.81 ↑3.1% 64.07 ↑1.1% 33.35 ↑1.3% 66.79 ↑0.3%
+
+                                                                   TABLE III
+                                                           A BLATION STUDY RESULTS .
+                                                                                                                                          applied to the retriever, so the retriever has not learned how
+                                                    CrossCodeEval (Python)                       CrossCodeEval (Java)                     to utilize the key tokens in the enhanced query.
+                                Method
+                                                    EM                    ES                   EM                ES
+                                                                                                                                             Our ablation study reveals performance patterns: (1) when
+                                                                                                                                          w/o DC and w/o QH, both EM and ES scores consistently
+                                AlignCoder          33.92                 76.97                28.28             68.31
+                                                                                                                                          decrease across benchmarks. The only exception is a negligible
+                                 w/o DC             31.44↓7.3%            75.82↓1.5%           27.44↓3.0%        67.54↓1.1%
+                                 w/o QH             31.33↓7.6%            75.21↓2.3%           27.12↓4.1%        67.63↓1.0%               0.08% improvement in ES for RepoEval line-level tasks in the
+                                 w/o RL             28.14↓17.4%           73.39↓4.7%           25.62↓9.4%        66.85↓2.1%               w/o DC setting. (2) Performance degradation becomes more
+                                                          RepoEval (Line)                             RepoEval (API)
+                                                                                                                                          pronounced under w/o RL. The experimental results show that
+                                Method                                                                                                    w/o RL has a significant impact on AlignCoder’s performance,
+                                                    EM                    ES                   EM                ES
+                                                                                                                                          which demonstrates that merely considering dependency con-
+                                AlignCoder          49.56                 69.93                41.88             67.75                    text and query enhancement mechanism is insufficient, and it
+                                 w/o DC             49.06↓1.0%            69.96↑0.0%           40.44↓3.4%        66.75↓1.5%               is also necessary to train the retriever to learn to utilize the
+                                 w/o QH             48.94↓1.3%            69.63↓0.4%           40.19↓4.0%        66.52↓1.8%
+                                 w/o RL             46.56↓6.1%            68.06↓2.7%           38.63↓7.8%        65.10↓3.9%
+                                                                                                                                          additional information in the query.
+
+                                                                                                                                           RQ3 Summary: Our ablation studies demonstrate the
+                                                                                                                                           critical roles of three components. Results show that w/o
+                                70                                                 70
+                                                                                                                                           RL causes greater performance drops. This indicates that
+                                60                                           60
+                CrossCodeEval
+
+
+
+
+                                                                   Python EM                                         Python EM             dependency context and query enhancement are incomplete
+                                50                                 Python ES 50                                      Python ES             without training the retriever to exploit the additional infor-
+                                                                   Java EM                                           Java EM
+                                40                                 Java ES   40                                      Java ES               mation in the enhanced query.
+                                30                                                 30
+
+                                     0.60   0.65   0.70   0.75     0.80     0.85        0.70   0.75    0.80   0.85    0.90   0.95
+                                                                                                                                          D. RQ4: Sampling Parameter Stability
+                                                                                                                                             In this section, we analyze the influence of two sampling pa-
+                                60                                            60                                                          rameters, temperature and top-p, on AlignCoder’s performance
+                                                                      Line EM                                          Line EM            when sampling candidate completions. Temperature and top-
+                RepoEval
+
+
+
+
+                                                                      Line ES                                          Line ES
+                                50                                    API EM 50                                        API EM             p are two crucial parameters that control the randomness
+                                                                      API ES                                           API ES             and diversity of generation. Temperature regulates the degree
+                                40                                                 40                                                     of randomness in generated text, while top-p constrains the
+                                     0.60   0.65   0.70   0.75     0.80     0.85        0.70   0.75    0.80   0.85    0.90   0.95
+                                                                                                                                          candidate vocabulary by sampling only from the highest-
+                                                   Temperature                                           Top­p                            probability tokens whose cumulative probability reaches the
+                  Fig. 5. Temperature and top-p sampling parameter effects on AlignCoder                                                  specified p value. Since we employ the vLLM framework to
+                  performance.                                                                                                            accelerate model inference, the temperature and top-p settings
+                                                                                                                                          in AlignCoder follow the default parameter configurations
+                                                                                                                                          for the model sampling process as specified in the vLLM
+                  employing a query enhancement mechanism; and (3) using                                                                  documentation, with temperature set to 0.8 and top-p set to
+                  reinforcement learning to train the retriever to learn to utilize                                                       0.95. We conducted a series of experiments to examine the
+                  the inference information in the enhanced query. We conduct                                                             stability of AlignCoder’s performance varying temperature
+                  ablation studies on the CrossCodeEval and RepoEval. All                                                                 (0.85, 0.75, 0.7, 0.65, 0.6) and top-p (0.9, 0.85, 0.8, 0.75,
+                  experiments are implemented with DeepSeekCoder-7B as the                                                                0.7) values when using the optimal sampling number 4.
+                  generator, with detailed results shown in Table III.                                                                       Our experiments used DeepSeekCoder-1B as the generator,
+                     Table III shows three ablation settings. w/o DC indicates                                                            Figure 5 demonstrates that parameter adjustments typically
+                  that the dependency context is not considered. w/o QH denotes                                                           lead to modest performance changes. Most configurations
+                  the configuration without the query enhancement mechanism                                                               exhibit EM and ES score variations of less than 1% across
+                  applied. w/o RL indicates that reinforcement learning is not                                                            both benchmarks. However, five configurations show differ-
+
+
+
+
+                                                                                                                                    979
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                                              Enhanced Query
+                                      Initial Query (Unfinished Code)                                                Good Reference Code Snippet
+                                                                                           # Potential invoked APIs:
+                    # python/packager/pep517.py
+                                                                                           class BuildConfiguration:
+                    from typing import Any, Dict, Iterator, Optional, Union
+                                                                                               def _set_config_setting(self, config_settings: Dict[str, Any]) -> None:
+                    from .build_config import BuildConfiguration
+                                                                                               def update(self, config_settings: Optional[Dict[str, Any]]) -> None:
+                    from .nativelib import locate_local_libtl2cgen,
+                                                                                               def get_cmake_args(self) -> List[str]:
+                    locate_or_build_libtl2cgen
+                    ...
+                    def build_wheel(                                                                                 Bad Reference Code Snippet
+                          wheel_directory: str,                                            # file path: nativelib.py
+                          config_settings: Optional[Dict[str, Any]] = None,                def build_libtl2cgen(cpp_src_dir: pathlib.Path, build_dir: pathlib.Path,
+                          metadata_directory: Optional[str] = None,                        build_config: BuildConfiguration,) -> pathlib.Path:
+                    ) -> str:                                                                  """Build libtl2cgen in a temporary directory and obtain the path to
+                         """Build a wheel"""                                               built libtl2cgen"""
+                         logger = logging.getLogger("tl2cgen.packager.build_wheel")            logger = logging.getLogger("tl2cgen.packager.build_libtl2cgen")
+                         build_config = BuildConfiguration()                                   if not cpp_src_dir.is_dir():
+                         build_config.                                                             raise RuntimeError(f"Expected {cpp_src_dir} to be a directory")
+                                                                                               logger.info("Building %s from the C++ source files in %s...",
+                                          Candidate Completions                            _lib_name(), ste(cpp_src_dir))
+                    # candidate completion 1:
+                    init_build_configuration()
+
+                    # candidate completion 2:                                                   RepoCoder                       init_build_configuration()
+                    load_from_build_sdist(wheel_directory)
+                                                                                                RLCoder                                load_config()
+                    # candidate completion 3:
+                    initialize_from_config_settings(config_settings)
+                                                                                               AlignCoder                        update(config_settings)
+                    # candidate completion 4:
+                    update(config_settings)
+                                                                                                                  1st Reference Code Snippet For the Three Methods
+
+                  Fig. 6. Case study, task id: project cc python/5407. The highlighted words represent identical tokens that exist in both the query and the reference code.
+
+
+
+                 ences: a 2.4% EM decrease on CrossCodeEval Python under                            [51]. Retrieval-augmented generation (RAG) has become par-
+                 temperature at 0.8 and top-p at 0.7, for instance.                                 ticularly influential, with methods like RedCoder [52] en-
+                                                                                                    hancing code generation relevant code snippets retrieval,
+                  RQ4 Summary: AlignCoder demonstrates robust per-                                  DocPrompting [53] leveraging documentation for unseen func-
+                  formance under different temperature and top-p sampling                           tions, and AceCoder [54] integrating examples retrieval with
+                  configurations, consistently exhibiting stability in EM and                       guided generation to improve completion quality.
+                  ES metrics across most experimental configurations.
+
+                 E. Case Study                                                                      B. Repository-Level Code Completion
+
+                    We illustrate the effectiveness of AlignCoder through a                            Repository-level code completion extends traditional com-
+                 case study. In the Figure 6, the model needs to complete the                       pletion by leveraging broader repository context to improve
+                 function update of the BuildConfiguration class. The                               accuracy and relevance [17], [18], [30], [31], [55], [56].
+                 highest similarity code snippet retrieved through AlignCoder is                    Existing approaches can be categorized into several paradigms.
+                 a dependency code snippet related to the Validator class.                          Learning-based methods such as CoCoMIC [31] and RepoHy-
+                 Based on this snippet, the generator is able to generate the                       per [18] employ dependency analysis and adaptive learning
+                 correct completion. However, the most similar code snippet                         mechanisms, though they face challenges in training data
+                 retrieved by RLCoder or RepoCoder is a base code snippet                           acquisition and generalizability. Static analysis approaches, in-
+                 highly similar to the unfinished code, ultimately leading the                      cluding CodePlan [55], RepoFuse [30], and A3 -CodeGen [56],
+                 model to produce an incorrect result.                                              utilize program analysis techniques to identify relevant code
+                                                                                                    candidates. GraphCoder [13] captures the context by lever-
+                                         VI. R ELATED W ORK                                         aging the structural information in the source code via a
+                                                                                                    constructed code context graph. Iterative retrieval strategies
+                 A. Code Completion                                                                 have been explored by RepoCoder [17], which performs multi-
+                    Code completion has been a fundamental task in software                         round retrieval and generation, and De-Hallucinator [57],
+                 engineering, aiming to predict subsequent code tokens or                           which refines completion through iterative processes. Tool-
+                 statements to assist programmers during development [8],                           augmented methods such as CodeAgent [58] and ToolGen [59]
+                 [43]. Traditional approaches relied on rule-based methods                          investigate external tool invocation, while RLCoder [26] em-
+                 or statistical methods [44]–[47], but recent advances have                         ploys reinforcement learning for repository-specific retrieval
+                 been driven by deep learning techniques. Modern neural                             optimization.
+                 approaches [48]–[50] have significantly improved completion                           Despite these advances, AlignCoder differs by leveraging
+                 accuracy by learning from large codebases. The emergence                           LLMs’ powerful inference capabilities to obtain multiple ref-
+                 of large language models has further revolutionized this field,                    erence code snippets, combining this with a reinforcement
+                 with studies exploring LLM-based completion systems [28],                          learning-based approach for training the retriever to achieve
+
+
+
+
+                                                                                              980
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                 more accurate retrieval and superior repository-level code                              [12] Z. Tang, J. Ge, S. Liu, T. Zhu, T. Xu, L. Huang, and B. Luo,
+                 completion performance.                                                                      “Domain adaptive code completion via language models and decoupled
+                                                                                                              domain databases,” in 2023 38th IEEE/ACM International Conference
+                                                                                                              on Automated Software Engineering (ASE). IEEE, 2023, pp. 421–433.
+                                            VII. CONCLUSION                                              [13] W. Liu, A. Yu, D. Zan, B. Shen, W. Zhang, H. Zhao, Z. Jin, and
+                                                                                                              Q. Wang, “Graphcoder: Enhancing repository-level code completion via
+                    In this paper, we present AlignCoder, a repository-level                                  code context graph-based retrieval and language model,” arXiv preprint
+                 code completion framework that addresses the fundamental                                     arXiv:2406.07003, 2024.
+                 challenges of query-target misalignment and ineffective in-                             [14] F. Shi, X. Chen, K. Misra, N. Scales, D. Dohan, E. H. Chi, N. Schärli,
+                                                                                                              and D. Zhou, “Large language models can be easily distracted by
+                 ference information utilization in existing retrieval-augmented                              irrelevant context,” in International Conference on Machine Learning.
+                 generation approaches. Our key contributions include a query                                 PMLR, 2023, pp. 31 210–31 227.
+                 enhancement mechanism that generates multiple candidate                                 [15] O. Yoran, T. Wolfson, O. Ram, and J. Berant, “Making retrieval-
+                                                                                                              augmented language models robust to irrelevant context,” arXiv preprint
+                 completions to bridge the semantic gap between queries                                       arXiv:2310.01558, 2023.
+                 and target codes, and a reinforcement learning-based Align-                             [16] S. Lu, N. Duan, H. Han, D. Guo, S.-w. Hwang, and A. Svyatkovskiy,
+                 retriever that learns to leverage inference information for                                  “Reacc: A retrieval-augmented code completion framework,” arXiv
+                                                                                                              preprint arXiv:2203.07722, 2022.
+                 more precise retrieval. Extensive experiments on CrossCodeE-                            [17] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan, Y. Mao,
+                 val and RepoEval benchmarks across five backbone models                                      J.-G. Lou, and W. Chen, “Repocoder: Repository-level code com-
+                 demonstrate the effectiveness of our approach, achieving an                                  pletion through iterative retrieval and generation,” arXiv preprint
+                                                                                                              arXiv:2303.12570, 2023.
+                 18.1% improvement in EM score on the Python subset of                                   [18] H. N. Phan, H. N. Phan, T. N. Nguyen, and N. D. Bui, “Repohyper:
+                 CrossCodeEval and showing strong generalizability across                                     Better context retrieval is all you need for repository-level code com-
+                 various code LLMs and programming languages. This work                                       pletion,” CoRR, 2024.
+                                                                                                         [19] J. Wang, Y. He, and H. Chen, “Repogenreflex: Enhancing repository-
+                 contributes to the development of repository-level code gen-                                 level code completion with verbal reinforcement and retrieval-
+                 eration tools and may help improve developer productivity in                                 augmented generation,” arXiv preprint arXiv:2409.13122, 2024.
+                 programming tasks.                                                                      [20] T.-D. Bui, D.-T. Luu-Van, T.-P. Nguyen, T.-T. Nguyen, S. Nguyen, and
+                                                                                                              H. D. Vo, “Rambo: Enhancing rag-based repository-level method body
+                                                                                                              completion,” arXiv preprint arXiv:2409.15204, 2024.
+                                         ACKNOWLEDGEMENTS                                                [21] M. Liang, X. Xie, G. Zhang, X. Zheng, P. Di, W. Jiang, H. Chen,
+                   This work is supported by CCF-Huawei Populus Grove                                         C. Wang, and G. Fan, “Repogenix: Dual context-aided repository-level
+                                                                                                              code completion with language models,” in Proceedings of the 39th
+                 Fund CCF-HuaweiSE202403.                                                                     IEEE/ACM International Conference on Automated Software Engineer-
+                                                                                                              ing, 2024, pp. 2466–2467.
+                                               R EFERENCES                                               [22] S. Robertson, H. Zaragoza et al., “The probabilistic relevance frame-
+                                                                                                              work: Bm25 and beyond,” Foundations and Trends® in Information
+                  [1] A. Lozhkov, R. Li, L. B. Allal, F. Cassano, J. Lamy-Poirier, N. Tazi,                   Retrieval, vol. 3, no. 4, pp. 333–389, 2009.
+                      A. Tang, D. Pykhtar, J. Liu, Y. Wei et al., “Starcoder 2 and the stack             [23] P. Jaccard, “The distribution of the flora in the alpine zone. 1,” New
+                      v2: The next generation,” arXiv preprint arXiv:2402.19173, 2024.                        phytologist, vol. 11, no. 2, pp. 37–50, 1912.
+                  [2] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi,         [24] D. Guo, S. Lu, N. Duan, Y. Wang, M. Zhou, and J. Yin, “Unixcoder:
+                      J. Liu, R. Sauvestre, T. Remez et al., “Code llama: Open foundation                     Unified cross-modal pre-training for code representation,” arXiv preprint
+                      models for code,” arXiv preprint arXiv:2308.12950, 2023.                                arXiv:2203.03850, 2022.
+                  [3] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen,                       [25] Y. Ding, Z. Wang, W. Ahmad, H. Ding, M. Tan, N. Jain, M. K.
+                      X. Bi, Y. Wu, Y. Li et al., “Deepseek-coder: When the large language                    Ramanathan, R. Nallapati, P. Bhatia, D. Roth et al., “Crosscodeeval:
+                      model meets programming–the rise of code intelligence,” arXiv preprint                  A diverse and multilingual benchmark for cross-file code completion,”
+                      arXiv:2401.14196, 2024.                                                                 Advances in Neural Information Processing Systems, vol. 36, 2024.
+                  [4] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu, J. Zhang,              [26] Y. Wang, Y. Wang, D. Guo, J. Chen, R. Zhang, Y. Ma, and Z. Zheng,
+                      B. Yu, K. Lu et al., “Qwen2. 5-coder technical report,” arXiv preprint                  “Rlcoder: Reinforcement learning for repository-level code completion,”
+                      arXiv:2409.12186, 2024.                                                                 arXiv preprint arXiv:2407.19487, 2024.
+                  [5] D. Zan, B. Chen, F. Zhang, D. Lu, B. Wu, B. Guan, Y. Wang, and J.-G.               [27] L. Wang, N. Yang, and F. Wei, “Query2doc: Query expansion
+                      Lou, “Large language models meet nl2code: A survey,” arXiv preprint                     with large language models,” 2023. [Online]. Available: https:
+                      arXiv:2212.09420, 2022.                                                                 //arxiv.org/abs/2303.07678
+                  [6] Z. Zhang, C. Chen, B. Liu, C. Liao, Z. Gong, H. Yu, J. Li, and R. Wang,            [28] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan,
+                      “Unifying the perspectives of nlp and software engineering: A survey                    H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large
+                      on language models for code,” arXiv preprint arXiv:2311.07989, 2023.                    language models trained on code,” arXiv preprint arXiv:2107.03374,
+                  [7] Z. Zheng, K. Ning, Y. Wang, J. Zhang, D. Zheng, M. Ye, and J. Chen,                     2021.
+                      “A survey of large language models for code: Evolution, benchmarking,              [29] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan,
+                      and future trends,” arXiv preprint arXiv:2311.10372, 2023.                              E. Jiang, C. Cai, M. Terry, Q. Le et al., “Program synthesis with large
+                  [8] M. Izadi, J. Katzy, T. Van Dam, M. Otten, R. M. Popescu, and                            language models,” arXiv preprint arXiv:2108.07732, 2021.
+                      A. Van Deursen, “Language models for code completion: A practical                  [30] M. Liang, X. Xie, G. Zhang, X. Zheng, P. Di, H. Chen, C. Wang,
+                      evaluation,” in Proceedings of the IEEE/ACM 46th International Con-                     G. Fan et al., “Repofuse: Repository-level code completion with fused
+                      ference on Software Engineering, 2024, pp. 1–13.                                        dual context,” arXiv preprint arXiv:2402.14323, 2024.
+                  [9] D. Guo, C. Xu, N. Duan, J. Yin, and J. McAuley, “Longcoder: A long-                [31] Y. Ding, Z. Wang, W. U. Ahmad, M. K. Ramanathan, R. Nallapati,
+                      range pre-trained language model for code completion,” in International                 P. Bhatia, D. Roth, and B. Xiang, “Cocomic: Code completion by jointly
+                      Conference on Machine Learning. PMLR, 2023, pp. 12 098–12 107.                          modeling in-file and cross-file context,” 2023.
+                 [10] Q. Ren, C. Gao, J. Shao, J. Yan, X. Tan, W. Lam, and L. Ma,                        [32] J. Liu, Y. Chen, M. Liu, X. Peng, and Y. Lou, “Stall+: Boosting
+                      “Codeattack: Revealing safety generalization challenges of large lan-                   llm-based repository-level code completion with static analysis,” arXiv
+                      guage models via code completion,” arXiv preprint arXiv:2403.07865,                     preprint arXiv:2406.10018, 2024.
+                      2024.                                                                              [33] M.Brunsfeld, P.Thomson, A.Hlynskyi, J.Vera, P.Turnbull, T.Clem,
+                 [11] D. Shrivastava, D. Kocetkov, H. de Vries, D. Bahdanau, and T. Scholak,                  D.Creager, A.Helwer, R.Rix, H. Antwerpen, M.Davis, Ika, T.-A.Nguyen,
+                      “Repofusion: Training code models to understand your repository,” arXiv                 S.Brunk, N.Hasabnis, bfredl, M.Dong, V.Panteleev, ikrima, S.Kalt,
+                      preprint arXiv:2306.10998, 2023.                                                        K.Lampe, A.Pinkus, M.Schmitz, M.Krupcale, narpfel, S.Gallegos,
+
+
+
+
+                                                                                                   981
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+                     V.Martı́, Edgar, and G.Fraser, “Tree-sitter,” site:https://github.com/             [54] J. Li, Y. Zhao, Y. Li, G. Li, and Z. Jin, “Acecoder: Utilizing existing code
+                     tree-sitter/tree-sitter, 2020, accessed: 2023-11-03.                                    to enhance code generation,” arXiv preprint arXiv:2303.17780, 2023.
+                [34] W. Cheng, Y. Wu, and W. Hu, “Dataflow-guided retrieval augmentation                [55] R. Bairi, A. Sonwane, A. Kanade, A. Iyer, S. Parthasarathy, S. Rajamani,
+                     for repository-level code completion,” arXiv preprint arXiv:2405.19782,                 B. Ashok, S. Shet et al., “Codeplan: Repository-level coding using llms
+                     2024.                                                                                   and planning,” arXiv preprint arXiv:2309.12499, 2023.
+                [35] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen,                       [56] D. Liao, S. Pan, Q. Huang, X. Ren, Z. Xing, H. Jin, and Q. Li, “Context-
+                     X. Bi, Y. Wu, Y. Li et al., “Deepseek-coder: When the large language                    aware code generation framework for code repositories: Local, global,
+                     model meets programming–the rise of code intelligence,” arXiv preprint                  and third-party library awareness,” arXiv preprint arXiv:2312.05772,
+                     arXiv:2401.14196, 2024.                                                                 2023.
+                [36] Y. Wei, Z. Wang, J. Liu, Y. Ding, and L. Zhang, “Magicoder: Empower-               [57] A. Eghbali and M. Pradel, “De-hallucinator: Iterative grounding for llm-
+                     ing code generation with oss-instruct,” arXiv preprint arXiv:2312.02120,                based code completion,” arXiv preprint arXiv:2401.01701, 2024.
+                     2023.                                                                              [58] K. Zhang, J. Li, G. Li, X. Shi, and Z. Jin, “Codeagent: Enhancing code
+                [37] D. Wu, W. U. Ahmad, D. Zhang, M. K. Ramanathan, and X. Ma,                              generation with tool-integrated agent systems for real-world repo-level
+                     “Repoformer: Selective retrieval for repository-level code completion,”                 coding challenges,” arXiv preprint arXiv:2401.07339, 2024.
+                     arXiv preprint arXiv:2403.10059, 2024.                                             [59] C. Wang, J. Zhang, Y. Feng, T. Li, W. Sun, Y. Liu, and X. Peng,
+                [38] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi,              “Teaching code llms to use autocompletion tools in repository-level code
+                     J. Liu, T. Remez, J. Rapin et al., “Code llama: Open foundation models                  generation,” arXiv preprint arXiv:2401.06391, 2024.
+                     for code,” arXiv preprint arXiv:2308.12950, 2023.
+                [39] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,
+                     M. Marone, C. Akiki, J. Li, J. Chim et al., “Starcoder: may the source
+                     be with you!” arXiv preprint arXiv:2305.06161, 2023.
+                [40] V. Karpukhin, B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov,
+                     D. Chen, and W.-t. Yih, “Dense passage retrieval for open-domain
+                     question answering,” in Proceedings of the 2020 Conference on
+                     Empirical Methods in Natural Language Processing (EMNLP),
+                     B. Webber, T. Cohn, Y. He, and Y. Liu, Eds. Online: Association
+                     for Computational Linguistics, Nov. 2020, pp. 6769–6781. [Online].
+                     Available: https://aclanthology.org/2020.emnlp-main.550/
+                [41] X. Ma, K. Sun, R. Pradeep, and J. Lin, “A replication study of dense
+                     passage retriever,” 2021. [Online]. Available: https://arxiv.org/abs/2104.
+                     05740
+                [42] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. Gonzalez,
+                     H. Zhang, and I. Stoica, “Efficient memory management for large
+                     language model serving with pagedattention,” in Proceedings of the 29th
+                     Symposium on Operating Systems Principles, 2023, pp. 611–626.
+                [43] C. Wang, J. Hu, C. Gao, Y. Jin, T. Xie, H. Huang, Z. Lei, and Y. Deng,
+                     “How practitioners expect code completion?” in Proceedings of the 31st
+                     ACM Joint European Software Engineering Conference and Symposium
+                     on the Foundations of Software Engineering, 2023, pp. 1294–1306.
+                [44] A. Hindle, E. T. Barr, M. Gabel, Z. Su, and P. Devanbu, “On the
+                     naturalness of software,” Communications of the ACM, vol. 59, no. 5,
+                     pp. 122–131, 2016.
+                [45] V. Raychev, M. Vechev, and E. Yahav, “Code completion with statistical
+                     language models,” in Proceedings of the 35th ACM SIGPLAN conference
+                     on programming language design and implementation, 2014, pp. 419–
+                     428.
+                [46] M. Bruch, M. Monperrus, and M. Mezini, “Learning from examples
+                     to improve code completion systems,” in Proceedings of the 7th joint
+                     meeting of the European software engineering conference and the ACM
+                     SIGSOFT symposium on the foundations of software engineering, 2009,
+                     pp. 213–222.
+                [47] R. Robbes and M. Lanza, “How program history can improve code
+                     completion,” in 2008 23rd IEEE/ACM International Conference on
+                     Automated Software Engineering. IEEE, 2008, pp. 317–326.
+                [48] A. Bhoopchand, T. Rocktäschel, E. Barr, and S. Riedel, “Learning
+                     python code suggestion with a sparse pointer network,” arXiv preprint
+                     arXiv:1611.08307, 2016.
+                [49] R.-M. Karampatsis, H. Babii, R. Robbes, C. Sutton, and A. Janes,
+                     “Big code!= big vocabulary: Open-vocabulary models for source code,”
+                     in Proceedings of the ACM/IEEE 42nd International Conference on
+                     Software Engineering, 2020, pp. 1073–1085.
+                [50] S. Proksch, J. Lerch, and M. Mezini, “Intelligent code completion with
+                     bayesian networks,” ACM Transactions on Software Engineering and
+                     Methodology (TOSEM), vol. 25, no. 1, pp. 1–31, 2015.
+                [51] Y. Wang, H. Le, A. D. Gotmare, N. D. Bui, J. Li, and S. C. Hoi,
+                     “Codet5+: Open code large language models for code understanding
+                     and generation,” arXiv preprint arXiv:2305.07922, 2023.
+                [52] M. R. Parvez, W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W.
+                     Chang, “Retrieval augmented code generation and summarization,”
+                     arXiv preprint arXiv:2108.11601, 2021.
+                [53] S. Zhou, U. Alon, F. F. Xu, Z. Wang, Z. Jiang, and G. Neubig,
+                     “Docprompting: Generating code by retrieving the docs,” arXiv preprint
+                     arXiv:2207.05987, 2022.
+
+
+
+
+                                                                                                  982
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 05,2026 at 00:47:04 UTC from IEEE Xplore. Restriction
+

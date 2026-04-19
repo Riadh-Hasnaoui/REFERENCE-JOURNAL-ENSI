@@ -1,0 +1,1025 @@
+                                                                                                                                                                                      2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE)
+
+
+
+                                                                                                                                                              LiSSA: Toward Generic Traceability Link Recovery
+                                                                                                                                                                  through Retrieval-Augmented Generation
+                                                                                                                                                                Dominik Fuchß , Tobias Hey , Jan Keim , Haoyu Liu , Niklas Ewald , Tobias Thirolf , Anne Koziolek
+                                                                                                                                                                                                KASTEL - Institute of Information Security and Dependability
+                                                                                                                                                                                                           Karlsruhe Institute of Technology (KIT),
+                                                                                                                                                                                                                     Karlsruhe, Germany
+                                                                                                                                                                                                 {dominik.fuchss, hey, jan.keim, haoyu.liu, koziolek}@kit.edu
+                                                                                                                                                                                                  niklas.ewald@alumni.kit.edu, tobias.thirolf@student.kit.edu
+   2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) | 979-8-3315-0569-1/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSE55347.2025.00186
+
+
+
+
+                                                                                                                                                                Abstract—There are a multitude of software artifacts which        to commit [17]–[21], requirements to requirements [1], [22]–
+                                                                                                                                                             need to be handled during the development and maintenance            [24], or architecture documentation to architecture models [7].
+                                                                                                                                                             of a software system. These artifacts interrelate in multiple,       However, the approaches’ performances vary depending on
+                                                                                                                                                             complex ways. Therefore, many software engineering tasks are
+                                                                                                                                                             enabled — and even empowered — by a clear understanding of           the tasks. Often, approaches do not achieve the necessary
+                                                                                                                                                             artifact interrelationships and also by the continued advancement    performance to be used in practice [22], [25], [26].
+                                                                                                                                                             of techniques for automated artifact linking.                           Large Language Models (LLMs) offer promising capabil-
+                                                                                                                                                                However, current approaches in automatic Traceability Link        ities regarding natural language understanding. Furthermore,
+                                                                                                                                                             Recovery (TLR) target mostly the links between specific sets of      LLMs have already proven to be effective in a variety of soft-
+                                                                                                                                                             artifacts, such as those between requirements and code. Fortu-
+                                                                                                                                                             nately, recent advancements in Large Language Models (LLMs)          ware engineering tasks, including code generation [27]–[30],
+                                                                                                                                                             can enable TLR approaches to achieve broad applicability. Still,     code summarization [31]–[33], or API recommendation [34].
+                                                                                                                                                             it is a nontrivial problem how to provide the LLMs with the          In particular, LLMs could lead to a generic approach for
+                                                                                                                                                             specific information needed to perform TLR.                          TLR. Nevertheless, LLMs face the challenge that they do not
+                                                                                                                                                                In this paper, we present LiSSA, a framework that har-            know the project and its context. In particular, an LLM cannot
+                                                                                                                                                             nesses LLM performance and enhances them through Retrieval-
+                                                                                                                                                             Augmented Generation (RAG). We empirically evaluate LiSSA on         handle the complete content of a larger software project due
+                                                                                                                                                             three different TLR tasks, requirements to code, documentation       to the project’s size and limited input lengths. Fortunately,
+                                                                                                                                                             to code, and architecture documentation to architecture models,      the processing can be augmented by retrieval techniques,
+                                                                                                                                                             and we compare our approach to state-of-the-art approaches.          called retrieval-augmented generation (RAG) [35]. Here, the
+                                                                                                                                                                Our results show that the RAG-based approach can signifi-         first step is retrieving relevant artifacts based on information
+                                                                                                                                                             cantly outperform the state-of-the-art on the code-related tasks.
+                                                                                                                                                             However, further research is required to improve the perfor-
+                                                                                                                                                                                                                                  retrieval (IR) techniques. The LLM then generates the answer
+                                                                                                                                                             mance of RAG-based approaches to be applicable in practice.          using the retrieved artifacts.
+                                                                                                                                                                                                                                     In this paper, we propose using RAG with LLMs to perform
+                                                                                                                                                              Index Terms—Traceability Link Recovery, Large Language              TLR between various artifacts. Our RAG-based approach is
+                                                                                                                                                             Models, Retrieval-Augmented Generation                               called LiSSA (Linking Software System Artifacts). We focus on
+                                                                                                                                                                                                                                  three different TLR tasks that cover diverse settings to generate
+                                                                                                                                                                                    I. I NTRODUCTION                              insights about the performance of RAG-based approaches
+                                                                                                                                                                In the complex task of software development, developers           for TLR: tracing requirements to code, tracing architecture
+                                                                                                                                                             and other stakeholders handle numerous artifacts, such as re-        documentation to code, and tracing architecture documentation
+                                                                                                                                                             quirements, code, documentation, and models. Consequently,           to architecture models.
+                                                                                                                                                             success in development depends, in part, on understanding               The example project in Figure 1 illustrates these tasks. The
+                                                                                                                                                             how software artifacts interrelate. To deal with the interre-        project contains requirements, some classes from the source
+                                                                                                                                                             lations of these artifacts, researchers and practitioners actively   code, the component-based architecture, and a part of the
+                                                                                                                                                             investigate the creation and recovery of so-called trace links       documentation of a system that provides and processes images.
+                                                                                                                                                             between these artifacts. Traceability Link Recovery (TLR)            We consider the four artifacts as different sources of informa-
+                                                                                                                                                             identifies correspondences between elements in artifacts and         tion about the system. The requirements contain the need for a
+                                                                                                                                                             makes them explicit. Thus, TLR helps to reduce the com-              REST API that is implemented in the code as RestFacade.
+                                                                                                                                                             plexity of many development tasks, such as change impact             Thus, there is this trace link between the requirement and
+                                                                                                                                                             analysis [1], [2], bug localization [3], and maintenance [4],        the code file. The component diagram shows the database
+                                                                                                                                                             [5]. Moreover, trace links can also be used to identify in-          component, realized in code as package db. This results
+                                                                                                                                                             consistencies between artifacts [6], [7]. Typically, automated       in a trace link between the architecture and the code. Lastly,
+                                                                                                                                                             approaches are task-specialized, i.e., they are designed to          the documentation describes using a REST interface to process
+                                                                                                                                                             recover specific types of trace links, such as requirements          the images. This defines trace links from the documentation
+                                                                                                                                                             to code [8]–[14], documentation to code [15], [16], issues           to the code and to the Image Processing component.
+
+
+                                                                                                                                                             1558-1225/25/$31.00 ©2025 IEEE                                   1396
+                                                                                                                                                             DOI 10.1109/ICSE55347.2025.00186
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                                                                           we discuss the evaluation of retrieval-augmented LLMs for
+                 Requirements                                       Architecture
+                                                                                           TLR and their performance on three established TLR tasks.
+                                                                                           Afterward, we discuss our findings and their implications for
+                  The system             The meta-data             Component:
+                                                                                           practice and research in Section V. Lastly, we conclude the
+                  shall use a            shall be stored            Database
+                                                                                           paper in Section VI.
+                  REST API.                in the DB.
+                                                                   Component:                                   II. R ELATED W ORK
+                 Source Code                                          Image
+                                           package db                                         In this section, we focus on the state-of-the-art in the dif-
+                                                                    Processing
+                     Image               DbConnection                                      ferent TLR tasks and discuss the various existing approaches.
+                                                                                           We also cover recent advances in using LLMs for TLR.
+                                                                  Documentation
+                                                                                           A. Traceability Link Recovery
+                  RestFacade                DbDriver               We use REST
+                                                                                              In the following, we discuss the state-of-the-art approaches
+                                                                     to process
+                getImg(id: int)          connect(conn)                                     for the three types of TLR tasks we consider: requirements to
+                                                                    the images.
+                                                                                           code, documentation to code, and architecture documentation
+                                                                                           to architecture models.
+             Fig. 1. Example Project with Requirements, an Architecture Diagram, Natural      1) Requirements to Code: A significant amount of research
+             Language Documentation, and Source Code
+                                                                                           in TLR focuses on the relationship between requirements and
+                                                                                           code. Within this context, methods from natural language
+                                                                                           processing serve as fundamental components of various ap-
+                We select these three different TLR tasks to empirically
+                                                                                           proaches. Notably, vector space models, latent semantic in-
+             evaluate LiSSA on a variety of artifact types and trace links.
+                                                                                           dexing and latent dirichlet allocation are frequently employed
+             Moreover, these tasks have been actively researched in the past
+                                                                                           techniques [8]–[12]. These models consider semantic simi-
+             and datasets are available to evaluate TLR performance.
+                                                                                           larity between requirements and code to bridge the semantic
+                This motivates us to ask RQ1: Is a generic RAG-based TLR
+                                                                                           gap and recover trace links. To measure similarity, important
+             approach better than task-specific, state-of-the-art approaches?
+                                                                                           features such as common terms between artifacts and semantic
+                Moreover, as recent research indicates that Chain-of-thought
+                                                                                           vectors of artifacts are primarily considered.
+             (CoT) prompting can be more effective than other zero-shot
+                                                                                              However, developers might use different terms to refer to
+             prompts in certain scenarios [36], we want to further explore
+                                                                                           the same concept across different artifacts [38]. This might
+             how the performance is affected by these LLM prompting
+                                                                                           result in mismatched vocabulary, making trace links hard to
+             techniques. Thus, we ask RQ2: Is CoT prompting more
+                                                                                           recover. To address this problem, Gao et al. [14], [39] use
+             effective than a simple classification prompt?
+                                                                                           co-occurring term pairs (biterms) from both requirements and
+                RAG heavily depends on the ability to retrieve relevant
+                                                                                           code to enrich the artifact texts from both sides. The idea is
+             information, i.e., (parts of) artifacts. Consequently, we investi-
+                                                                                           that biterms indicate the consensus between the artifacts.
+             gate the impact of different preprocessing techniques for this
+                                                                                              Hey et al. [13] show that a more fine-grained interpretation
+             retrieval; and since related research shows that fine-grained
+                                                                                           of artifacts could improve recovery results. Their approach
+             mappings can improve the performance of TLR tasks [13],
+                                                                                           FTLR uses sentences from requirements and methods from
+             we ask RQ3: Does retrieval and mapping on a fine-grained,
+                                                                                           code files as units for the similarity mapping, rather than the
+             sub-artifact level improve the TLR performance compared to
+                                                                                           whole requirements and source code files. FTLR represents the
+             mapping on an artifact level? Furthermore, we investigate
+                                                                                           semantics of the fine-grained elements through word embed-
+             RQ4: Does RAG improve the TLR performance compared
+                                                                                           dings. Moreover, they discovered that selecting the appropriate
+             to embedding-based IR TLR?
+                                                                                           information is crucial for enhancing the performance of the ap-
+                We make the following contributions:
+                                                                                           proach. Hey et al. also show that the relevant information can
+             C1: We provide LiSSA, an RAG-based approach for TLR                           be derived automatically with an LLM-based classifier [40].
+                 between different types of software artifacts. The ap-                       The consensus of these approaches is the ambition to
+                 proach, datasets, and results are publicly available in our               semantically understand the artifacts to bridge the semantic
+                 replication package [37].                                                 gap. LLMs promise deep language understanding of the input
+             C2: We evaluate the performance of LiSSA on three different                   text, making them a plausible alternative for TLR.
+                 TLR tasks and compare it to state-of-the-art approaches.                     Another option to bridge the semantic gap is using transitive
+             C3: We investigate the influence of prompt techniques and                     links between artifacts. The underlying idea is that intermedi-
+                 preprocessing on the performance of LiSSA.                                ate artifacts can find implicit tracing relationships [41].
+                The remainder of this work is structured as follows: In                       Nishikawa et al. [42] generate trace links between two
+             Section II, we present related work and discuss the state-                    artifact types, A and B, by utilizing an intermediate artifact
+             of-the-art for different TLR tasks. Afterward, in Section III,                type C. They use a vector space model to create trace links
+             we present our RAG-based approach LiSSA. In Section IV,                       between artifacts of types A and C and between artifacts of
+
+
+                                                                                       1397
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+             types B and C. Artifacts from A and B that both trace to the                           Knowledge
+             same artifact of type C are considered connected.                                                                  0..1 parent
+                                                                                                 - identifier
+                 Moran et al. [41] introduced COMET, a Bayesian inference-                                                       Element
+                                                                                                 - type
+             based method for TLR. The method involves three stages:                                                        - granularity
+                                                                                                 - content
+             initially combining multiple text similarity metrics to generate
+             preliminary trace links, then incorporating developer feedback
+             to refine these links, and finally utilizing information from                            Artifact
+             transitive links to enhance the results.
+                 However, when there are multiple transitive paths between                      Fig. 2. Data Model: Knowledge, Elements, and Artifacts
+             artifact pairs, it remains a challenge how to aggregate them.
+             This challenge is explored by Rodriguez et al. [43]. Their ap-
+             proach aggregates multiple paths using one of three methods:              model element. ArDoCo then traces these clusters to the model
+             the maximum score, the sum, or a weighted sum. Rodriguez et               elements. Their dataset for this task is publicly available [49].
+             al. found that an optimal transitive technique requires specific          B. Using LLMs for TLR: Prompting and RAG
+             tuning for each project and possibly for different trace paths
+                                                                                          Until now, LLMs have only rarely been employed for TLR.
+             within a project.
+                                                                                       Lin et al. [17] fine-tune a CodeBERT LLM for the task of
+                 Transitive links can also help within a single artifact
+                                                                                       recovering trace links between issues and commits. However,
+             type like code. Panichella et al. [44] showed the benefits
+                                                                                       their approach requires initial trace links from a project for
+             of including call and inheritance dependencies for TLR.
+                                                                                       fine-tuning. Therefore, they tackle a different kind of TLR
+             Kuang et al. [45] then demonstrated that data dependencies
+                                                                                       problem than our approach.
+             provide complementary information to call dependencies that
+                                                                                          Recently, Rodriguez et al. [36] studied the application of
+             are beneficial for linking requirements to code. The idea is that
+                                                                                       prompt engineering on TLR. They showed the LLM’s ability
+             “close” methods are probably linked to similar requirements.
+                                                                                       to comprehend domain-specific knowledge such as acronyms.
+                 2) Documentation to Code: The second type of TLR task is
+                                                                                       Furthermore, they showed that small modifications of prompts
+             the recovery of trace links between documentation and code. In
+                                                                                       can result in differences in TLR results.
+             their study on recovering trace links between code and manual
+                                                                                          In contrast to our approach, neither the work by Ro-
+             pages, Antoniol et al. [8] found that programmers often use
+                                                                                       driguez et al. nor other existing approaches explore the ap-
+             meaningful names for program items. As such, they use a uni-
+                                                                                       plication of RAG for different TLR tasks. Since TLR handles
+             gram language model and a Bayesian classifier and compared
+                                                                                       large amounts of data, it can be expensive or even impossible
+             it to a vector space model. Marcus and Maletic [9] apply latent
+                                                                                       due to size restrictions to process all data naively. Therefore,
+             semantic indexing, achieving higher precision and recall.
+                                                                                       retrieval-augmented generation [35] is one possible approach
+                 The approach TransArC by Keim et al. [15] uses a
+                                                                                       to make TLR applicable to large datasets.
+             component-based architecture model as an intermediate arti-
+                                                                                          Moreover, we focus on the application of prompting tech-
+             fact to recover trace links between architecture documentation
+                                                                                       niques and different preprocessing instead of prompt engineer-
+             and code. This transitive approach yields improved results
+                                                                                       ing. Finally, we also apply our approach to different TLR tasks
+             by combining TLR approaches that need to bridge smaller
+                                                                                       to evaluate its applicability on various TLR tasks.
+             semantic gaps. Because architecture models are not always
+             present, they also provide a baseline for their performance                                  III. T HE L I SSA A PPROACH
+             without using the intermediate artifact, namely ArDoCode.                    In this section, we present the LiSSA approach and discuss
+                 3) Documentation to Models: The third type of TLR task                its different components. The approach uses multiple steps to
+             is the recovery of trace links between documentation and                  recover trace links between different artifacts. As input, LiSSA
+             architecture models. For this task, Cleland-Huang et al. [46]             takes a set of artifacts, e.g., requirements, documentation, or
+             propose enhancement strategies to maximize recall and pre-                architecture models. The output of LiSSA is a set of trace links
+             cision, while maintaining a high recall. To achieve this, they            between the elements within the artifacts or between artifacts,
+             discover that links that have a medium probability (a.k.a. low            e.g., sentences to source code files or text files to code files.
+             confidence links) are hard to distinguish between true and false
+             links, resulting in bad performance. To mitigate this problem,            A. Preprocessing & Embedding
+             they propose the usage of hierarchical information and logical               LiSSA distinguishes artifacts, elements, and knowledge.
+             groupings of artifacts to enhance precision.                              Their relationship is shown in Figure 2. We define artifacts as
+                 For tracing documentation to Business Process Model and               the inputs that can be processed by LiSSA. Artifacts consist
+             Notation (BPMN), Lapena et al. found that both the linguistic             of the original content of files and have a specific artifact
+             particularities [47] of BPMN models and their execution                   type. Elements are the traceable units of the artifacts and,
+             traces [48] can help recovering lost links.                               thus, are mainly the parts that are used to create the trace
+                 Keim et al. [7] propose ArDoCo for TLR of architecture                links. Besides their identifier, type, and content, they also
+             documentation to component-based architecture models. They                have a granularity. This granularity is used to define the
+             use heuristics to identify word clusters that could define a              level of abstraction of the trace links. Furthermore, elements
+
+
+                                                                                   1398
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                   Artifacts             Preprocessing                                      Type: uml:Component, Name: FileStorage
+                Source Code                                                                 Interface Realization: IFileStorage
+                                            Code-like                                       Operation: getFiles, Operation: storeFile
+                Requirements                Artifacts                                       Uses: FileSystem
+
+                 Architecture                                       Embedding
+                                          NL Artifacts                                         Fig. 4. Example textual representation of a model element
+                    Docs
+
+                 Architecture              Model-like                  Vector
+                   Models                   Artifacts                  Store               Preprocessors in Detail: In the following, we present the
+                                                                                        preprocessors of LiSSA that we identified as relevant for the
+             Fig. 3. Preprocessing & Embedding of Artifacts (NL for Natural Language)
+                                                                                        artifacts of the given TLR tasks. The decision is informed by
+                                                                                        the datasets from related work (cf. Section II).
+                                                                                              a) None: The first preprocessor does not change the
+             can have a parent. The child-parent relationship is directly               artifact and only creates the embedding. This means that no
+             reflected by the granularity of the elements. For example,                 splitting is done, and the whole artifact is used as one element.
+             a sentence (child) is part of a text file (parent). Knowledge              One issue in this preprocessing is that artifacts might be longer
+             defines all data that can be used by LiSSA to create trace                 than the maximum input size of the embedding model or the
+             links. It is defined by an identifier, a type, and its content.            LLM. To deal with this, we cap the artifacts w.r.t. the input
+             In this work, we regard both the contents of the artifacts and             size of the models. In the future, this issue might dissolve with
+             their elements as knowledge. We have kept this base class                  models that support increased maximum input sizes.
+             knowledge intentionally general because we designed LiSSA                        b) Sentence: The second way of preprocessing is tailored
+             as an extensible framework. Most important, knowledge does                 to text-based natural language artifacts. The artifact can be
+             not need to be artifacts or elements. This makes it possible to            split into sentences and each sentence is then defined as an
+             enrich prompts with information that is not (directly) part of             element. This way, the approach supports fine-grained trace
+             them. It also enables more sophisticated retrieval techniques              links between sentences and other elements.
+             and ensures the extensibility of the framework.                                  c) Chunk(N): When preprocessing text-based artifacts
+                After loading the relevant artifacts, the approach first pre-           like source code, one method to split is chunking. This means
+             processes the artifacts. As shown in Figure 3, the approach                the text is divided into chunks of a given size N . For source
+             currently distinguishes three types of artifacts: Natural lan-             code, this chunking can also be tailored to the programming
+             guage artifacts, code artifacts, and model artifacts.                      language by splitting the text at language-dependent keywords
+                Natural language artifacts describe text-based artifacts that           to create chunks of approximately the desired size. In our
+             mainly consist of written natural language text. Examples                  evaluation, we also assess the impact of different chunk sizes.
+             include requirements and documentation. These artifacts are                      d) Method: A second way to split source code is to
+             typically preprocessed by splitting them into lines, sentences,            split it based on method declarations. Methods including their
+             paragraphs, or arbitrary chunks of text.                                   body, signature, and documentation define a unit that shall
+                Code artifacts define artifacts that are written in a program-          fulfill a certain task. Consequently, the preprocessor splits
+             ming language. This could either be source code, test code,                the code before each method definition, including its method
+             or shell scripts. Code artifacts are preprocessed based on their           documentation like Javadoc. The underlying idea is to treat
+             programming language. For this paper, we focus on Java code                methods as meaningful, atomic units and not possibly split in
+             since the obtained datasets from related work mostly contain               the middle of a method. The resulting elements could also be
+             Java code. The approach extracts elements of the code artifacts            used to generate trace links on the method level.
+             by splitting the code based on methods, classes, or files.                       e) Models (Feature Extraction): Compared to the other
+                Model artifacts like architecture models are instances of a             kinds of artifacts, we preprocess models differently. Models
+             certain metamodel. In our case, we focus on UML component                  are instances of a certain metamodel. In our case, we focus
+             diagrams that are used to describe the architecture of a soft-             on UML component models based on the Eclipse Modeling
+             ware system. We select these models because they are used by               Framework (EMF). The model preprocessor is tailored to this
+             one of the state-of-the-art approaches, allowing us to compare             specific type of model and extracts features from a given model
+             our approach to them. Model artifacts are preprocessed by                  instance. The extractor identifies components, interfaces, their
+             extracting the elements like components and interfaces.                    operations (methods), and their dependencies (realizations and
+                In general, the approach preprocesses elements from the                 usages). These extracted features are used to create a textual
+             different artifact types by transforming them into a textual rep-          representation of a model element (component or interface)
+             resentation that can be used for retrieval. As shown in Figure 3,          that can be used for the retrieval process. The creation of
+             after transformation, LiSSA uses embedding models to create                the textual representation is based on templates that are filled
+             a vector representation of each element. The embeddings of                 with the information of extracted features. Figure 4 shows an
+             elements from artifacts are stored in a vector store.                      example of the textual representation of a model element.
+
+
+                                                                                    1399
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                  Target            Preprocessing              Target                                            Vector Store
+                  Artifact             (Target)               Elements                                        (Target Elements)
+                                                                                     Embedding                                                    Retrieval
+                  Source            Preprocessing              Source                                          Finding similar          k     Target Element
+                  Artifact            (Source)                Elements                                            elements                      Candidates
+
+                      Mapping         Prompting                Aggregation                 Trace Links
+
+                              Fig. 5. Overview of the Retrieval & Mapping. Data is in orange, prompting is in blue, and other processing is in white.
+
+
+
+             B. Retrieval
+                                                                                               Prompt 1: KISS
+                As shown in Figure 5, the next step after preprocessing the
+                                                                                               Question: Here are two parts of software develop-
+             artifacts is the retrieval. The retrieval step is responsible for
+                                                                                               ment artifacts.
+             finding the Top-k most similar elements for a given source
+                                                                                               {source type}: '''{source content}'''
+             element in the vector store containing the target elements. For
+                                                                                               {target type}: '''{target content}'''
+             the comparison of embeddings, the approach uses the cosine
+                                                                                               Are they related?
+             similarity of vectors. These most similar elements are then
+                                                                                               Answer with 'yes' or 'no'.
+             used as target element candidates. Only these candidates can
+             be potential targets of a trace link for the given source element.
+             Because the source elements are used to retrieve the target                       Prompt 2: Chain-of-thought
+             elements, the retrieval step defines the direction of the TLR                     Below are two artifacts from the same software
+             task. We call A to B TLR (e.g., Requirements to Code TLR)                         system. Is there a traceability link between (1) and
+             when A is the source artifact and B is the target artifact.                       (2)? Give your reasoning and then answer with 'yes'
+                In summary, the retrieval step takes the elements from                         or 'no' enclosed in <trace> </trace>.
+             a preprocessed source artifact, creates the embeddings, and                       (1) {source type}: '''{source content}'''
+             identifies for each source element the Top-k most similar                         (2) {target type}: '''{target content}'''
+             target elements as candidates. The preprocessing steps strongly
+             influence the retrieval because the retrieval defines the possible
+             mappings between elements. For example, in requirements to
+             code TLR with the sentence preprocessor for requirements and
+                                                                                           and the CoT prompt. The KISS prompt is a simple classifi-
+             the method preprocessor for code, the candidate mappings are
+                                                                                           cation prompt that gives the LLM the freedom to interpret
+             between single sentences and single methods.
+                                                                                           its task. The CoT prompt is a zero-shot prompt that is more
+             C. Mapping                                                                    complex and requires the LLM to reason about the elements.
+                After the retrieval comes the mapping process. The mapping                 We detail these prompts in the following.
+             takes a source element and its respective target element candi-                     a) KISS Prompt: The KISS prompt is a simple zero-shot
+             dates and uses an LLM to classify which of the target element                 prompt (see Prompt 1). The prompt first defines the software
+             candidates belong to the source element. The approach then                    development domain. Afterward, the prompt states the types
+             aggregates the identified mappings to create trace links on the               of elements and their contents. Lastly, the prompt contains a
+             desired level of abstraction. Consequently, the whole mapping                 yes-or-no question if the source element belongs to the target
+             process consists of two steps: prompting and aggregation.                     element candidate. In the LLM’s response, the approach looks
+                1) Prompting: In the prompting step, the source element                    for the term yes. If found, the approach traces the source
+             and the target element candidates are combined to create                      element to the target element.
+             prompts for the LLM. The LLM’s responses are then used                              b) Chain-of-thought (CoT): The second prompt is the
+             to decide, for each candidate, if the source element belongs                  CoT prompt (see Prompt 2). This prompt also is a zero-shot
+             to the target element, and, therefore, if there should be a trace             prompt. It starts with the setting of the context by defining that
+             link. The approach supports different prompting techniques.                   the LLM gets two artifacts from a software system. Afterward,
+                The prompting relies on the granularity of the source and                  the prompt contains the same yes-or-no question as the KISS
+             target elements. For example, if there is requirements to code                prompt. In contrast to the KISS prompt, the prompt asks the
+             TLR and the approach uses the sentence preprocessor for                       LLM to provide reasoning. Lastly, the prompt defines the
+             requirements and the method preprocessor for code, then the                   output format and provides the source and target elements.
+             LLM classifies if a sentence belongs to a method.                             Again, the approach looks at the output of the LLM and if the
+                We base our prompts on the work of Rodriguez et al. [36].                  LLM approves, the approach again traces the source element
+             Based on their work, we derive two prompts: the KISS prompt                   to the target element. The reasoning itself is disregarded.
+
+
+                                                                                       1400
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                           TABLE I                                                                         TABLE II
+              OVERVIEW OF DATASET FOR R EQUIREMENTS TO C ODE TLR. IT M ARKS                     N UMBER OF A RTIFACTS P ER T YPE AND N UMBER OF T RACE L INKS IN
+               I TALIAN AND EN E NGLISH NATURAL L ANGUAGE D ESCRIPTIONS , AND                     THE G OLD S TANDARD F OR E ACH A RCHITECTURE T RACEABILITY
+                                  TL S TANDS F OR T RACE L INK                                      P ROJECT. AD STANDS FOR ARCHITECTURE DOCUMENTATION .
+
+                                                  Language         # of Artifacts               Artifact Type                 MS      TS     TM     BBB       JR
+               Dataset          Domain       NL   Programming    Req   Code         TL          AD Sentences                  37      43     198      85       13
+                                                                                                Architecture Model Elements   23      19      16      24        6
+               SMOS             Education    IT   Java            67    100    1044             Source Code Files             97     205     832     547    1,979
+               eTour            Tourism      EN   Java            58    116     308
+               iTrust           Healthcare   EN   Java           131    226     286             AD to Model Trace Links       29      27       51      52      18
+               Dronology (RE)   Aerospace    EN   Java, Python    99    423     602             AD to Code Trace Links        50     707    7,610   1,295   8,240
+               Dronology (DD)   Aerospace    EN   Java, Python   211    423     740
+
+
+                                                                                            However, the Dronology dataset contains different types of
+                2) Aggregation: The final step of the mapping is the                        natural language artifacts, such as requirements (RE) and de-
+             aggregation. In this step, the traced pairs of source and target               sign definitions (DD). We use their summary and description,
+             elements are combined to trace links that match the defined                    as well as their relationship to tasks and code, to derive
+             level of abstraction. The following example illustrates this:                  two ground truths: A mapping from requirements to code
+             Based on the configured preprocessors, the prompting step has                  and a mapping from design definition, similar to low-level
+             traced sentences of requirements and methods of code classes.                  requirements, to code.
+             The desired granularity for trace links is requirement file to                    2) Tracing Architecture Documentation to Architecture
+             code file. The aggregator creates the trace links if there is at               Models: For tracing architecture documentation to architecture
+             least one correspondence between a sentence of a requirement                   models, we use the ArDoCo dataset [7], [49]. The dataset
+             file and a method of a certain class. By doing so, the aggregator              contains component-based architecture models, their docu-
+             can output the trace links on the desired level of abstraction.                mentation, and the gold standard for documentation to model
+                                      IV. E VALUATION                                       trace links for five projects. The projects are MediaStore
+                                                                                            (MS), TeaStore (TS), TEAMMATES (TM), BigBlueButton
+                In this section, we present the evaluation of our approach.
+                                                                                            (BBB), and JabRef (JR). Again, the projects cover a variety of
+             We evaluate the performance of our approach on the three
+                                                                                            domains (media, micro-services, education, web conferencing,
+             different TLR tasks and compare it to state-of-the-art ap-
+                                                                                            and reference management). Table II gives an overview of the
+             proaches. Therefore, we discuss the used datasets, metrics,
+                                                                                            artifacts in the dataset. The artifacts of all projects are written
+             used models, baselines, and the performance of our RAG-
+                                                                                            in English. We use these projects to evaluate our approach
+             based approach. We also perform significance tests to provide
+                                                                                            against the state-of-the-art.
+             a statistical analysis of the results. Finally, we address the
+             potential threats to validity. We provide all our results and                     3) Tracing Documentation to Code: For tracing documen-
+             datasets in our replication package [37].                                      tation to code, we use the dataset provided in TransArC’s repli-
+                                                                                            cation package [53]. The dataset expands the ArDoCo dataset
+             A. Datasets                                                                    by the corresponding code for the five projects and a gold
+                To reduce the bias of the creation of a new dataset, we use                 standard for architecture documentation to code trace links.
+             existing datasets from the literature. As already discussed, this              We use the projects BigBlueButton, MediaStore, and TeaStore
+             is one factor in our selection of the respective TLR tasks.                    to compare our approach to the state-of-the-art approaches.
+                1) Tracing Requirements to Code: For tracing requirements                   Furthermore, we discuss challenges regarding large projects
+             to code, we use a dataset from the replication package by                      like the two remaining projects of the dataset, JabRef and
+             Hey [50]. We use the projects SMOS, eTour, and iTrust as                       TEAMMATES, separately. These projects are characterized
+             these projects are used for the evaluation of the state-of-the-art             by the fact that they have many architecture documentation to
+             approaches FTLR and COMET. These projects were gathered                        code trace links. While the projects BigBlueButton (1295 trace
+             by the Center of Excellence for Software & Systems Trace-                      links), MediaStore (50 trace links), and TeaStore (707 trace
+             ability (CoEST) [51] and cover different domains (education,                   links) contain on average up to 16.4 trace links per sentence
+             tourism, and healthcare). Additionally, we use the Dronology                   of documentation, TEAMMATES contains 38.4 and JabRef
+             dataset [52] (aerospace domain), and apply our approach and                    633.8 trace links per sentence on average. The code artifacts
+             FTLR on it. Table I shows the characteristics of these projects,               of all projects are also written in English, and the gold standard
+             such as the used natural (NL) and programming languages,                       covers only the Java and Shell script parts of their code.
+             and the number of requirements, source code files, and trace
+             links in the datasets. Note that all projects except for SMOS                  B. Metrics
+             provide natural language descriptions in English. The SMOS                        To evaluate the performance of our approach, we use
+             project has requirements and source code identifiers in Italian.               commonly used metrics for TLR [22], [54]: precision, recall,
+             For SMOS, eTour, and iTrust, we can use the information                        and Fβ -score. We use the F1 -score, as both precision and recall
+             on traceability links between requirements and code directly.                  are essential for fully automated TLR. For semi-automatic
+
+
+                                                                                         1401
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+             TLR, where recall is more critical to avoid missing links, we             illustrating the upper boundary of FTLR’s performance. This
+             also report the F2 -score. By doing so, we can compare our                configuration only uses requirements filter based on use case
+             approach’s performance to the reported results of the state-of-           templates and functional aspects, and no method comments
+             the-art approaches. The information also gives us insights into           or call dependencies. For the baseline COMET [41], we
+             future applications of an RAG-based approach for TLR.                     also provide the results for the best per-project optimized
+                                                                                       configuration (COMETOPT ). The results for SMOS, eTour, and
+             C. Significance Tests                                                     iTrust are already part of the replication package by Hey [50].
+                To provide a statistical analysis of the results, we perform           Thus, we report these results for comparison. Dronology has
+             significance tests. Due to non-negligible costs of the experi-            not been evaluated with FTLR so far, so we apply FTLR to it.
+             ments, we test only the on-average best configuration. This               Unfortunately, we could not run and evaluate COMET on the
+             also makes sense with a view to the practical application                 Dronology dataset. For the VSM and LSI baselines we make
+             of LiSSA. In practice, a ready-to-use solution would be                   use of the code provided by Gao et al. [14] in their replication
+             required. We use the two-sided Wilcoxon signed-rank test with             package. The code only produces ranked lists of target artifacts
+             a significance level of α “ 0.05. We calculate the Wilcoxon               per source artifact without a fixed threshold for determining
+             effect size r and interpret it using common thresholds: small             the final trace links. Therefore, we again calculated the per-
+             r0.1, 0.3q, moderate r0.3, 0.5q, and large r0.5, 1.0s. We run the         project optimized F1 -scores (VSMOPT & LSIOPT ) by varying
+             best configuration 5 additional times with other random seeds,            the cutoff threshold between r0, 1s in 0.01 steps. The results,
+             resulting in a sample size of still only 6. Thus, the power of            thus, again show the upper boundary of their performance.
+             the conclusions might be limited due to a risk of errors.                    3) Tracing Documentation to Code: For this task, we
+                                                                                       compare our approach with the work of Keim et al. [15]
+             D. Models                                                                 (see also Section II-A2). Since we focus on the direct linking
+                For the evaluation, we use OpenAI’s recent models. We use              of documentation to code, we do not compare to TransArC.
+             text-embedding-3-large as the embedding model. We opted for               TransArC uses intermediate artifacts and, thus, extra knowl-
+             that model based on the datasets we used for the evaluation.              edge that is not available for the direct linking approach.
+             The datasets do not only contain English language artifacts               Consequently, we use the best-known approach for direct
+             but also artifacts in other languages. Furthermore, the vendor            linking from Keim et al. — ArDoCode. ArDoCode is based
+             of the embedding model states that this model is their newest             on heuristics that have been originally optimized for the
+             and best-performing embedding model.                                      TLR from documentation to architecture models. Nevertheless,
+                For the Large Language Model for classification, we use                ArDoCode achieved the best results for the direct TLR from
+             GPT-4o (gpt-4o-2024-05-13) and GPT-4o mini (gpt-4o-mini-                  documentation to code, i.e., without using architecture models.
+             2024-07-18). OpenAI claims that GPT-4o is their most ad-                     4) Tracing Architecture Documentation to Architecture
+             vanced model. GPT-4o mini is OpenAI’s most recent model                   Models: For tracing between architecture documentation and
+             at the time of writing that is potent, cheap, and fast.                   architecture models, we compare our approach with the state-
+                                                                                       of-the-art approach ArDoCo [7]. ArDoCo is based on heuris-
+             E. Baselines                                                              tics and tailored to this TLR task (cf. Section II-A3). We again
+                In order to evaluate the performance of our approach, we               compare our results directly with the results reported by the
+             compare it to state-of-the-art approaches.                                authors of ArDoCo without any modifications.
+                1) Retrieval-Only: A baseline approach for all our TLR
+             tasks is the retrieval-only approach. This approach does not              F. Results
+             use the classifying LLM, but only the retrieval step of our                  This section presents and discusses the evaluation. Our
+             approach. We then mock the classifier by always stating                   replication package [37] contains all detailed results.
+             that a source element belongs to all found target element                    1) Tracing Requirements to Code: Table III shows the
+             candidates. By doing so, we maximize the overall recall of                detailed results using GPT-4o. For the TLR from Requirements
+             the approach for a given amount of k target elements that                 to Code, we consider eleven different configurations. In the
+             should be retrieved. This allows the analysis of what effects             first group, there are three configurations without prepro-
+             the classifier step has and whether the classifier is beneficial.         cessing the artifacts. These three configurations compare the
+                2) Tracing Requirements to Code: For tracing requirements              effects of the different classifiers introduced in Section III-C,
+             to code, we compare our approach to the state-of-the-art                  i.e., using no LLM at all, using Prompt 1 (KISS prompt), and
+             approaches FTLR and COMET. Both approaches have already                   using Prompt 2 (CoT prompt).
+             been discussed in Section II. Additionally, we compare our                   The second group of results shows the effects of preprocess-
+             approach to a VSM and LSI baseline. For FTLR [13], [40], we               ing the input by reducing the requirements to sentences and
+             provide the results of the best configuration with the originally         splitting the code into chunks. As chunk size, we define a value
+             defined thresholds. It uses method comments, call dependen-               of 200 characters. This value should ensure a fine-grained
+             cies, and filter based on use case templates and functional               splitting, where also parts of the methods are transformed into
+             aspects. Additionally, we take a look at the results of the               elements. In this setting, we evaluate four classifiers. Again,
+             best per-project optimized threshold configuration (FTLROPT ),            we evaluate the use of no LLM, the KISS prompt, and the CoT
+
+
+                                                                                   1402
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                                                                TABLE III
+                 R ESULTS F OR R EQUIREMENT- TO -C ODE TLR W ITH GPT-4 O & T OP -20 (P REP. FOR P REPROCESSOR , C LS . FOR C LASSIFIER , A RT. FOR A RTIFACTS )
+
+                                             SMOS                        eTour                         iTrust                                 Dronology (RE)                             Dronology (DD)
+               Approach              P      R     F1     F2      P      R     F1     F2      P       R            F1        F2          P           R          F1          F2        P        R       F1          F2
+               VSMOPT               .430   .414   .422   .417   .557   .427   .483   .448   .208    .227          .217     .223        .844        .087        .158     .106     .846        .071    .131         .087
+               LSIOPT               .415   .430   .422   .427   .452   .453   .453   .453   .251    .255          .253     .254        .333        .107        .162     .124     .757        .074    .135         .090
+               COMETOPT             .195   .572   .291   .413   .410   .468   .437   .455   .361    .231          .282     .249         —           —           —        —        —           —       —            —
+               FTLR                 .444   .331   .380   .349   .379   .633   .474   .558   .165    .339          .222     .280        .183        .161        .172     .165     .129        .154    .140         .148
+               FTLROPT              .314   .588   .409   .501   .505   .597   .548   .576   .234    .241          .238     .240        .184        .170        .177     .173     .140        .147    .144         .146
+               Prep.        Cls.
+                            No      .325   .418   .366   .395   .216   .815   .342   .525   .058    .531          .105     .202        .128        .420        .196     .288     .085        .482    .144         .249
+               None /
+               None
+
+
+
+
+                            P1      .632   .184   .285   .214   .378   .711   .493   .604   .206    .493          .290     .385        .200        .372        .260     .317     .155        .442    .229         .322
+                            P2      .590   .195   .294   .226   .409   .734   .526   .633   .199    .451          .276     .360        .226        .344        .273     .311     .177        .380    .241         .309
+               Chunk(200)
+
+
+
+
+                            No      .247   .546   .340   .439   .091   .815   .164   .315   .066    .563          .119     .225        .150        .331        .206     .266     .119        .424    .186         .281
+               Sentence /
+
+
+
+
+                            P1      .327   .297   .311   .302   .136   .581   .220   .351   .152    .451          .227     .324        .198        .233        .214     .225     .193        .315    .239         .280
+                            P2      .344   .289   .314   .299   .140   .617   .228   .366   .143    .465          .219     .321        .216        .194        .205     .198     .217        .281    .245         .265
+                            +Art.   .333   .336   .335   .336   .138   .662   .229   .377   .153    .517          .236     .350        .225        .281        .250     .267     .199        .351    .254         .305
+                            No      .327   .541   .408   .479   .073   .597   .130   .245   .063    .598          .114     .221        .132        .282        .180     .230     .101        .369    .159         .241
+               Sentence /
+               Method
+
+
+
+
+                            P1      .475   .351   .403   .370   .107   .412   .169   .262   .184    .503          .269     .373        .215        .208        .211     .209     .203        .276    .234         .257
+                            P2      .479   .379   .423   .396   .107   .435   .172   .270   .171    .517          .257     .368        .209        .211        .210     .211     .197        .258    .224         .243
+                            +Art.   .486   .343   .402   .364   .109   .484   .178   .287   .168    .535          .256     .372        .203        .249        .224     .238     .190        .323    .239         .283
+
+
+
+             prompt. Additionally, we evaluate how the provided elements                                                         TABLE IV
+             affect the performance of the approach. Therefore, we defined                          C OMPARISON O F T HE AVERAGE A ND W EIGHTED AVERAGE Fβ -S CORES
+                                                                                                    U SING GPT-4 O A ND GPT-4 O MINI F OR R EQUIREMENT- TO -C ODE TLR
+             a variant where the LLM is provided with the original artifact                                              U SING T OP -20 R ETRIEVAL
+             instead of the elements from the retrieval. This means that we
+             use the elements, i.e., parts of artifacts, to retrieve relevant                                                                      Avg.                                       w. Avg.
+             artifacts. The LLM then uses the whole artifact to decide.                                 Approach                  GPT-4o                GPT-4o mini              GPT-4o             GPT-4o mini
+                The final group shows the results where the preprocessor                             Prep.          Cls.          F1          F2          F1          F2        F1          F2      F1            F2
+             for code is replaced with the method preprocessor tailored to                                          No           .230        .332       .230          .332      .249        .332    .249        .332
+                                                                                                     None /
+
+
+
+
+             Java source code. Similar to the previous group of results, we
+                                                                                                     None
+
+
+
+
+                                                                                                                    P1           .312        .369       .247          .345      .288        .319    .260        .334
+             evaluate four classifiers and their performance.                                                       P2           .322        .368       .295          .356      .299        .319    .282        .315
+                In the first group, as expected, the configuration using no
+                                                                                                     Chunk(200)
+
+
+
+
+                                                                                                                    No           .203        .305       .203          .305      .235        .332    .235        .332
+                                                                                                     Sentence /
+
+
+
+
+             LLM at all achieves the highest recall. This configuration                                             P1           .242        .296       .210          .309      .256        .288    .241        .331
+                                                                                                                    P2           .242        .290       .236          .317      .257        .279    .261        .325
+             defines the upper bound for recall of a retrieval-augmented                                            +Art.        .261        .327       .243          .318      .277        .320    .263        .314
+             TLR approach for a defined preprocessing. The next two rows
+                                                                                                                    No           .198        .283       .198          .283      .243        .321    .243        .321
+                                                                                                     Sentence /
+
+
+
+
+             in the table show the results for the two prompt types. Except
+                                                                                                     Method
+
+
+
+
+                                                                                                                    P1           .257        .294       .211          .292      .285        .299    .256        .325
+             for SMOS, the configurations using the two prompt types                                                P2           .257        .297       .232          .295      .289        .305    .268        .307
+             outperform the no LLM configuration, both in F1 -score and F2 -                                        +Art.        .260        .309       .238          .296      .288        .312    .267        .298
+             score. In many cases, for GPT-4o, Prompt 2, the CoT prompt,                             Baselines                          F1                      F2                     F1                  F2
+             outperforms the KISS prompt regarding F1 -score. On average,                            VSMOPT                            .282                    .256                  .283                  .257
+             this is our overall best configuration w.r.t. F1 -score.                                LSIOPT                            .285                    .270                  .285                  .268
+                                                                                                     FTLR                              .278                    .300                  .273                  .277
+                In the second group with chunks consisting of 200 charac-                            FTLROPT                           .303                    .327                  .294                  .329
+             ters, CoT prompts outperform the KISS prompts. Furthermore,
+             the table shows that the use of target artifacts instead of target
+             elements increases the performance of the approach in F1 -
+             score and F2 -score. Nevertheless, this preprocessing performs                        and, therefore, another configuration might be more suitable
+             slightly worse compared to the variant without preprocessing.                         for projects in English. eTour’s method comments are often
+                In the third group with method-chunking, the performance                           inconsistent with the code they describe [55]. This may
+             of the prompts varies between the projects. Our overall best                          negatively impact the performance of the embedding, and
+             results in F1 -score and F2 -score for SMOS are achieved using                        therefore, the retrieval. On eTour, we observe a decrease in
+             this preprocessing. For eTour, this preprocessing achieved the                        recall from 0.815 to 0.597 in the retrieval-only configurations,
+             worst results. The other projects are comparable to the results                       if considering methods as elements to embed.
+             in the previous groups. This indicates that there might be                               Table IV provides an overview of the results for the two
+             some characteristics in the projects that affect the performance                      models, GPT-4o and GPT-4o mini, in comparison to FTLR,
+             of the approach. SMOS is the only project written in Italian                          VSM, and LSI. We report the average and weighted average
+
+
+                                                                                             1403
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                              TABLE V                                                                              TABLE VI
+               P-VALUES OF THE W ILCOXON S IGNED -R ANK T EST (T WO -S IDED ) FOR                     C OMPARISON O F T HE AVERAGE A ND W EIGHTED AVERAGE Fβ -S CORES
+                  F 1{F 2 - SCORES OF R EQUIREMENT- TO -C ODE TLR W ITH GPT-4 O ,                      FOR S OFTWARE A RCHITECTURE D OCUMENTATION TO C ODE TLR O N
+               N ONE /N ONE /P2, A ND T OP -20. (Ò OURS BETTER , Ó BASELINE BETTER ).                 T HE S MALLER P ROJECTS B IG B LUE B UTTON , T EA S TORE , M EDIA S TORE
+                                                                                                                 U SING GPT-4 O MINI A ND T OP -20 R ETRIEVAL
+               Approach      SMOS        eTour      iTrust     DR     DR     Avg.   w. Avg.
+                                                               RE     DD                                             Approach                    Avg.          w. Avg.
+               VSMOPT          .03Ó       .03Ò        .03Ò     .03Ò   .03Ò   .03Ò     .03Ò                   Preprocessor     Classifier    F1          F2   F1      F2
+               LSIOPT          .03Ó       .03Ò        .03Ò     .03Ò   .03Ò   .03Ò     .03Ò                                    No LLM       .209     .257     .240   .260
+               COMETOPT      .09{.03Ó     .03Ò      .84{.03Ò    —      —      —        —                     Sentence /
+                                                                                                                              Prompt 1     .212     .259     .243   .262
+               FTLR            .03Ó       .03Ò        .03Ò     .03Ò   .03Ò   .03Ò     .03Ò                   None
+                                                                                                                              Prompt 2     .217     .255     .249   .253
+               FTLROPT         .03Ó     .03Ó{.03Ò     .03Ò     .03Ò   .03Ò   .03Ò   .44{.03Ó
+                                                                                                                              No LLM       .206     .238     .214   .204
+                                                                                                             Sentence /
+                                                                                                                              Prompt 1     .206     .238     .214   .204
+                                                                                                             Chunk(200)
+                                                                                                                              Prompt 2     .213     .241     .221   .203
+             for the F1 -score and F2 -score. The overall best results regard-
+                                                                                                                              No LLM       .196     .230     .213   .206
+             ing both scores are achieved by our approach without splitting                                  Sentence /
+                                                                                                                              Prompt 1     .196     .228     .213   .205
+                                                                                                             Chunk(1000)
+             the artifacts. The larger model outperforms both the smaller                                                     Prompt 2     .205     .237     .217   .203
+             model and the state-of-the-art approach on average and on                                       Baselines                      F1          F2   F1      F2
+             weighted average F1 -scores. Regarding, F2 -scores, the results                                 ArDoCode                      .178     .302     .189   .318
+             show that, on average, the best configuration is achieved by the
+             GPT-4o model using Prompt 1 without preprocessing. Except
+             for the weighted average F2 -score using GPT-4o, applying
+             classifiers improve our performance in both scores. There, the                       comparable to GPT-4o. In the end, we’ve spent approx. $850
+             best performance is achieved by using no LLM. However, this                          for the evaluation of this task with GPT-4o (excluding the
+             result is mainly influenced by the SMOS project.                                     repetitions for the significance tests). GPT-4o mini only cost
+                Interestingly, for SMOS GPT-4o mini achieves an F1 -                              us approx. $30 for worse, but comparable results.
+             score of 0.425 using the KISS prompt for Sentence-Method-                               2) Tracing Documentation to Code: In the second task,
+             Preprocessing. Thereby, GPT-4o mini outperforms GPT-4o for                           we evaluate TLR from documentation to code. As discussed
+             this project. This means that for some projects, GPT-4o mini                         in Section IV-A3, we use the TransArC dataset for this
+             can outperform the state-of-the-art and the larger GPT-4o.                           evaluation. Since this task is defined as tracing single sentences
+             Overall, GPT-4o mini is comparable to the state-of-the-art.                          to code files, we always use the sentence preprocessor for the
+                We perform significance tests for the best configuration of                       documentation. Regarding code, we evaluate the configura-
+             the GPT-4o model (No preprocessing and Prompt 2). The                                tions for no preprocessing, small chunks with 200 characters,
+             p-values of the significance test are shown in Table V. The                          and larger chunks with 1000 characters.
+             results with a significant difference between our results and                           We first evaluate the performance of the smaller projects
+             the baseline are marked in bold font. If our result is better                        (BigBlueButton, MediaStore, and TeaStore). The results for
+             than a baseline, we mark it with Ò — otherwise, we mark                              those using Top-20 retrieval are shown in Table VI. Similar
+             it with Ó. On average, our approach is significantly better                          to the evaluation of requirements to code TLR, we report
+             than all state-of-the-art approaches. However, the results also                      the results for the two different prompt techniques and the
+             show that our on-average best prompt is not significantly                            retrieval-only (No LLM) for each preprocessing configuration.
+             better for the SMOS dataset. Here, we emphasize that this                            On average, we can see again that the combination of CoT and
+             is the only project of the dataset that contains Italian language                    no further preprocessing achieves the best results regarding F1 .
+             artifacts. The only non-significant differences occur for per-                       For this configuration, the Wilcoxon signed-rank test shows
+             project optimized baselines. It may be expected that their                           that the F1 -scores of the averages are significantly better than
+             actual performance in practice is lower, exemplified by FTLR                         the baseline ArDoCode and the No LLM configuration (both
+             vs. FTLROPT . The results for F1 -score and F2 -score are similar.                   p “ 0.031). Moreover, the effect size is large (r ě 0.5) in
+             The only differences are for COMETOPT on SMOS and iTrust                             both cases. The baseline ArDoCode is better in F2 -score due
+             as well as FTLROPT on eTour and in weighted average. In                              to high recall. However, the average precision is only 0.107.
+             F2 -score LiSSA is significantly better than the baselines on                        For the smaller projects, the approach already achieves similar
+             eTour and iTrust. Regarding effect size, we observed that if                         or even better results than the baseline.
+             the difference is significant, the effect size is large (r ě 0.5).                      Nevertheless, we also uncover challenges for larger projects.
+             For confidence intervals, means, and standard deviations, we                         With large projects, the retrieval is problematic: On the two
+             refer to our replication package [37].                                               largest projects JabRef and TEAMMATES, the best retrieval-
+                In summary, the approach LiSSA outperforms the state-                             only configuration for Top-40 elements achieves a recall of
+             of-the-art approaches FTLR and COMET using GPT-4o. In                                0.027 for JabRef and 0.061 for TEAMMATES. Additionally,
+             contrast to the GPT-4o mini model, this comes with the                               the bad retrieval for the large projects affects the weighted
+             disadvantage of high costs. Considering the results for GPT-4o                       average heavily: the weighted average F1 -score of the best
+             mini, the approach performs similarly to FTLR and performs                           configuration including the large projects is 0.081 (without:
+
+
+                                                                                               1404
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                        TABLE VII                                                                      Considering the different features, on average, the ap-
+              C OMPARISON O F T HE AVERAGE A ND W EIGHTED AVERAGE Fβ - SCORES                                       proach’s performance worsens with the number of used fea-
+                FOR A RCHITECTURE M ODEL TO A RCHITECTURE D OCUMENTATION
+                 (M2D) AND A RCHITECTURE D OCUMENTATION TO A RCHITECTURE                                            tures. We assume that this is due to the kind of trace links. The
+                M ODEL (D2M) TLR U SING T OP -10 R ETRIEVAL A ND GPT-4 O MINI                                       LLM has to decide if a component belongs to a sentence. Too
+                                                                                                                    much information that might not be directly related or that is
+                                                     Avg.                               w. Avg.                     unique to the component can negatively influence (“distract”)
+                  Approach            D2M                   M2D              D2M                  M2D               the LLM. This then leads to decreased precision.
+               Features      Cls.   F1          F2      F1          F2     F1          F2     F1          F2           Overall, our approach does not outperform the state-of-the-
+               Name          No     .162        .305    .350        .505   .131        .259   .334        .466
+                                                                                                                    art approach ArDoCo.
+                             P1     .173        .323    .357        .512   .140        .275   .340        .472
+                             P2     .286        .467    .458        .589   .234        .404   .424        .534      G. Threats to Validity
+               Name,         No     .162        .305    .349        .504   .131        .259   .334        .466         In this part, we discuss threats to validity and base this
+               Interfaces    P1     .169        .317    .355        .509   .138        .271   .339        .471      discussion on the guidelines by Runeson et al. [56]. We also
+                             P2     .274        .447    .450        .586   .223        .383   .419        .534
+                                                                                                                    consider the work by Sallou et al. [57] that focuses on threats
+               Name,         No     .161        .303    .341        .494   .130        .257   .322        .452      for experiments with LLMs in software engineering.
+               Interfaces,   P1     .169        .315    .348        .501   .137        .269   .329        .458
+               Usages        P2     .265        .435    .417        .554   .215        .373   .384        .499         Regarding construct validity, there is the threat that the
+                                                                                                                    datasets are biased. To mitigate this threat, we use the same
+               Baselines                   F1                  F2                 F1                 F2
+                                                                                                                    datasets as the state-of-the-art approaches. The datasets cover
+               ArDoCo                    .822                .814               .802               .806
+                                                                                                                    different domains and project sizes. Nevertheless, the datasets
+                                                                                                                    mostly contain open-source projects that may have other
+                                                                                                                    characteristics compared to closed-source projects. In this
+             0.249). Again, the best configuration in this case is the same                                         work, we do not focus on prompt engineering, i.e., we do not
+             as for the smaller projects: CoT prompt without preprocessing.                                         extensively modify prompts and compare their performance.
+                In summary, our approach LiSSA achieves significantly                                               Consequently, a potential threat to the validity of our results
+             better results in F1 -score than state-of-the-art approaches on                                        regarding RQ1-4 is the selection of the prompts. However,
+             smaller projects. For larger projects, the performance of the                                          we closely follow the suggestions of Rodriguez et al. [36].
+             retrieval needs to improve.                                                                            Another threat is a biased selection of metrics. To diminish
+                3) Tracing Architecture Documentation to Architecture                                               this risk, we use commonly used metrics in TLR research.
+             Models: The final TLR task is recovering trace links between                                           Overall, we try to reduce potential confounding factors that
+             architecture documentation and architecture models. Because                                            could prevent us from effectively addressing our RQs.
+             there are comparably few model elements and few sentences,                                                Considering internal validity, there is the threat that other
+             we additionally analyzed the effect of the direction for TLR.                                          factors might influence our experiments. These could influence
+             This means, we evaluate both, TLR for Documentation to                                                 our interpretations and lead to wrong conclusions. To mitigate
+             Model (D2M) and TLR for Model to Documentation (M2D).                                                  this threat, we follow established practices. We ensure that
+             For both cases, we use a retriever that retrieves the 10 most                                          we use datasets and projects from state-of-the-art approaches.
+             similar target elements for each source element. Since the TLR                                         Furthermore, we clearly state the origins of the projects and
+             task requires a trace link between a sentence and a model                                              ground truths. This also reduces the risk of selection bias.
+             element (i.e., for this TLR task, a component), we used the                                            Since the datasets mostly consist of open-source projects, they
+             sentence preprocessor to split the documentation.                                                      still might vary in quality. The quality and consistency within
+                We evaluate the effect of the prompt type and the effect of                                         one project can affect the performance of the approach.
+             the features that are extracted from the model preprocessor.                                              Regarding external validity, there are various threats. First,
+             The results of the evaluation are shown in Table VII. On                                               we only evaluate the approach on a limited number of projects
+             average, the CoT prompt outperforms the KISS prompt and                                                and a limited number of TLR tasks. The results can vary for
+             using retrieval-only in both scores.                                                                   other projects and other TLR tasks. To reduce this threat, we
+                For the D2M TLR task, the displayed F1 -score comes from                                            use established datasets and projects from different domains
+             a very high recall of almost 1.0 but a very low precision.                                             and sizes. Second, we evaluate the approach with only one
+                When examining the flipped task, the recall decreases, while                                        embedding model and two LLMs. To mitigate this threat,
+             the precision increases substantially. Nevertheless, the results                                       we use state-of-the-art models. The third threat is the use of
+             vary on the projects. We assume that this is mainly caused                                             Closed Source Models for evaluation. Since we do not know
+             by the retrieval. The retrieval always tries to select the Top-                                        the training data of the models, we cannot ensure that there is
+             k most similar target elements. Considering M2D TLR, this                                              no data leakage. In order to mitigate this threat, we provide
+             means that for each component in the model, the approach                                               our code, the prompts, embeddings, and the responses of the
+             retrieves the Top-k most similar sentences. Nevertheless, the                                          LLMs in our replication package [37] to ensure transparency.
+             value k might depend on the project and also the direction of                                          The fourth threat is the non-determinism of the LLMs. To
+             the TLR task. Depending on the project, the assumption that a                                          mitigate this threat, we set a random seed for the LLMs and
+             component is described in at most k sentences can be fulfilled.                                        set their temperature to 0.
+
+
+                                                                                                                 1405
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                With the aforementioned evaluation on established datasets                                      VI. C ONCLUSION
+             using established metrics, we address the reliability of our
+                                                                                          This paper presents a novel approach for Traceability
+             research. Therefore, we do not introduce a threat regarding
+                                                                                       Link Recovery (TLR) using Large Language Models (LLMs)
+             the manual creation of the datasets. Nevertheless, the gold
+                                                                                       with Retrieval-Augmented Generation (RAG). The benefit of
+             standard might be imperfect, as they are manually created. To
+                                                                                       our RAG-based approach Linking Software System Artifacts
+             improve reliability, we also base our prompts on the literature.
+                                                                                       (LiSSA) is its applicability to various TLR tasks. LiSSA uses
+                            V. D ISCUSSION & F UTURE W ORK                             preprocessors to prepare artifacts according to their type to
+                                                                                       create traceable elements of the source and target artifacts.
+                In this section, we analyze our results on RAG-based TLR
+                                                                                       The approach then uses the embeddings of these elements to
+             concerning challenges, impediments, and implications in both
+                                                                                       retrieve similar target elements for each source element. LiSSA
+             research and practice. We also provide a brief overview of
+                                                                                       then generates prompts for the LLM to classify if source and
+             planned future improvements.
+                                                                                       target elements are related. If classified as related, the approach
+                One challenge is defining trace links so that LLMs can
+                                                                                       aggregates the elements to finally create the trace links.
+             effectively interpret them. Terms such as “related” or “trace-
+                                                                                          To answer our research questions, we evaluate LiSSA on es-
+             ability link” can be too ambiguous for LLMs and might need
+                                                                                       tablished datasets and compare it to state-of-the-art approaches
+             further refinement. Another challenge involves optimizing
+                                                                                       for three different TLR tasks.
+             the retrieval process, which sets the upper limit for recall.
+                                                                                          Regarding RQ1, which examines the performance of RAG-
+             A significant issue arises when a single sentence maps to
+                                                                                       based TLR compared to state-of-the-art, our evaluation shows
+             hundreds of code files, as observed in larger projects like
+                                                                                       that our RAG-based approach significantly outperforms state-
+             JabRef. In such cases, a high number of elements must be
+                                                                                       of-the-art approaches for requirements to code TLR. For
+             retrieved to ensure all relevant code files are included, pushing
+                                                                                       smaller projects, the RAG approach achieves significantly bet-
+             the retrieval process to its limits. To address this, we suggest
+                                                                                       ter F1 -scores than the state-of-the-art approach for documen-
+             focusing on improved retrieval techniques. Possible solutions
+                                                                                       tation to code TLR. However, the approach underperforms for
+             to enhance the process include dynamic thresholds, alternative
+                                                                                       larger projects. For TLR from documentation to architecture
+             data structures for retrieval, or artifact summarization.
+                                                                                       models, LiSSA does not outperform the state-of-the-art.
+                Our results show that the performance in F1 -score and
+             F2 -score of the proposed RAG-based TLR does not yet en-                     For RQ2 about the effectiveness of CoT prompting, we
+             able fully automated TLR in practical applications; even for              find that CoT prompting outperforms simple classification
+             semi-automated settings (F2 -score), the performance remains              prompts in F1 -score. This is consistent with the findings by
+             insufficient for practice [22]. Nevertheless, state-of-the-art            Rodriguez et al. [36].
+             approaches perform worse on code-related TLR tasks.                          Looking at the different preprocessing techniques and the
+                RAG presents several opportunities to improve perfor-                  impact of fine-grained mappings (RQ3), we show that the
+             mance: Future research could focus on prompt engineering,                 preprocessing of artifacts is, on average, not beneficial. In
+             on incorporating more context, and on exploring advanced                  particular, the preprocessing does not improve the performance
+             RAG techniques. Our framework, LiSSA, serves as a foun-                   of the TLR from requirements to code. However, the best-
+             dation here. LiSSA already outperforms code-related TLR ap-               performing approach is project-dependent.
+             proaches, though it does not yet address these future directions.            Regarding RQ4 that investigates the effects of the clas-
+             Therefore, we see significant potential for RAG in these tasks.           sification step, we showed that, on average, a LLM-based
+                In the future, we aim to expand our LiSSA approach in                  classification improves the performance over retrieval-only in
+             several ways. Our findings show that our current fine-grained             all considered TLR tasks for both scores.
+             mappings do not enhance performance, motivating us to ex-                    In summary, this research contributes to the field of trace-
+             plore more advanced aggregation techniques. For example, we               ability by providing a novel RAG-based approach for TLR
+             plan to adapt methods like majority voting from FTLR [13]                 tasks. We provide insights into how different prompt types
+             to improve the aggregation step. Moreover, there is a clear               and preprocessing techniques influence the performance. Our
+             need for more sophisticated preprocessing methods for code.               findings open up new research directions for the application of
+             Sentences in architecture documentation can map to hundreds               LLMs to TLR tasks. To ensure replicability, transparency, and
+             of code files, because they refer to higher-level structures              extensibility, we provide the source code of LiSSA, the used
+             such as packages. To address this, we intend to investigate               datasets, and our results as part of our replication package [37].
+             summarization techniques and clustering methods for code                  We aim to facilitate further research in this field and want to
+             preprocessing. Lastly, we aim to improve the classification               enable other researchers to build upon our work.
+             process during the prompting step. Currently, the decision to
+                                                                                                             ACKNOWLEDGEMENTS
+             create a trace link is based solely on the LLM’s classification.
+             In the future, we will explore incorporating the LLM’s reason-              This work was funded by Core Informatics at KIT (KiKIT)
+             ing into this decision-making process. We also plan to enhance            of the Helmholtz Assoc. (HGF) and the German Research
+             prompts by integrating additional contextual information, such            Foundation (DFG) - SFB 1608 - 501798263 and supported by
+             as project-specific or domain-specific knowledge.                         KASTEL Security Research Labs. Thanks to our textician.
+
+
+                                                                                   1406
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                                          R EFERENCES                                             Spain: IEEE Press, Nov. 2021, pp. 324–335. [Online]. Available:
+                                                                                                  https://doi.org/10.1109/ICSE43902.2021.00040
+              [1] D. Falessi, J. Roll, J. L. Guo, and J. Cleland-Huang, “Leveraging          [18] M. Rath, J. Rendall, J. L. C. Guo, J. Cleland-Huang, and P. Mäder,
+                  historical associations between requirements and source code to identify        “Traceability in the wild: automatically augmenting incomplete trace
+                  impacted classes,” IEEE Transactions on Software Engineering, vol. 46,          links,” in Proceedings of the 40th International Conference on Software
+                  no. 4, pp. 420–441, 2020.                                                       Engineering, ser. ICSE ’18. New York, NY, USA: Association for
+              [2] J. L. C. Guo, J.-P. Steghöfer, A. Vogelsang, and J. Cleland-Huang,             Computing Machinery, May 2018, pp. 834–845. [Online]. Available:
+                  “Natural Language Processing for Requirements Traceability,” May                https://doi.org/10.1145/3180155.3180207
+                  2024, arXiv:2405.10845 [cs]. [Online]. Available: http://arxiv.org/abs/    [19] L. Dong, H. Zhang, W. Liu, Z. Weng, and H. Kuang, “Semi-supervised
+                  2405.10845                                                                      pre-processing for learning-based traceability framework on real-world
+              [3] M. Rath, D. Lo, and P. Mäder, “Analyzing requirements and traceability         software projects,” in Proceedings of the 30th ACM Joint European
+                  information to improve bug localization,” in Proceedings of the 15th            Software Engineering Conference and Symposium on the Foundations
+                  International Conference on Mining Software Repositories, ser. MSR              of Software Engineering, ser. ESEC/FSE 2022. New York, NY,
+                  ’18. New York, NY, USA: Association for Computing Machinery,                    USA: Association for Computing Machinery, Nov. 2022, pp. 570–582.
+                  2018, p. 442–453. [Online]. Available: https://doi.org/10.1145/3196398.         [Online]. Available: https://doi.org/10.1145/3540250.3549151
+                  3196415                                                                    [20] M. Izadi, P. R. Mazrae, T. Mens, and A. van Deursen, “An
+                                                                                                  empirical study on data leakage and generalizability of link
+              [4] P. Mäder and A. Egyed, “Assessing the effect of requirements trace-
+                                                                                                  prediction models for issues and commits,” 2023. [Online]. Available:
+                  ability for software maintenance,” in 2012 28th IEEE International
+                                                                                                  https://arxiv.org/abs/2211.00381
+                  Conference on Software Maintenance, 2012.
+                                                                                             [21] P. R. Mazrae, M. Izadi, and A. Heydarnoori, “Automated recovery of
+              [5] ——, “Do developers benefit from requirements traceability when
+                                                                                                  issue-commit links leveraging both textual and non-textual data,” in 2021
+                  evolving and maintaining a software system?” Empirical Software
+                                                                                                  IEEE International Conference on Software Maintenance and Evolution
+                  Engineering, vol. 20, pp. 413–441, 2015.
+                                                                                                  (ICSME), 2021, pp. 263–273.
+              [6] J. Grundy, J. Hosking, and W. Mugridge, “Inconsistency management for
+                                                                                             [22] J. H. Hayes, A. Dekhtyar, and S. K. Sundaram, “Advancing Candidate
+                  multiple-view software development environments,” IEEE Transactions
+                                                                                                  Link Generation for Requirements Tracing: The Study of Methods,”
+                  on Software Engineering, vol. 24, no. 11, pp. 960–981, Nov.
+                                                                                                  IEEE Trans. Softw. Eng., vol. 32, no. 1, pp. 4–19, Jan. 2006.
+                  1998, conference Name: IEEE Transactions on Software Engineering.
+                                                                                             [23] J. Guo, J. Cheng, and J. Cleland-Huang, “Semantically Enhanced
+                  [Online]. Available: https://ieeexplore.ieee.org/document/730545
+                                                                                                  Software Traceability Using Deep Learning Techniques,” in 2017
+              [7] J. Keim, S. Corallo, D. Fuchß, and A. Koziolek, “Detecting inconsis-            IEEE/ACM 39th International Conference on Software Engineering
+                  tencies in software architecture documentation using traceability link          (ICSE), May 2017, pp. 3–14, iSSN: 1558-1225. [Online]. Available:
+                  recovery,” in 2023 IEEE 20th International Conference on Software               https://ieeexplore.ieee.org/abstract/document/7985645
+                  Architecture (ICSA), Mar. 2023, pp. 141–152.                               [24] A. Schlutter and A. Vogelsang, “Improving Trace Link Recovery Using
+              [8] G. Antoniol, G. Canfora, G. Casazza, A. De Lucia, and E. Merlo,                 Semantic Relation Graphs and Spreading Activation,” in Requirements
+                  “Recovering traceability links between code and documentation,” IEEE            Engineering: Foundation for Software Quality, F. Dalpiaz and P. Spole-
+                  Transactions on Software Engineering, vol. 28, no. 10, pp. 970–983, Oct.        tini, Eds. Cham: Springer International Publishing, 2021, pp. 37–53.
+                  2002. [Online]. Available: http://ieeexplore.ieee.org/document/1041053/    [25] Y. Shin, J. H. Hayes, and J. Cleland-Huang, “Guidelines for Benchmark-
+              [9] A. Marcus and J. Maletic, “Recovering documentation-to-source-                  ing Automated Software Traceability Techniques,” in 2015 IEEE/ACM
+                  code traceability links using latent semantic indexing,” in 25th                8th International Symposium on Software and Systems Traceability, May
+                  International Conference on Software Engineering, 2003. Proceedings.,           2015, pp. 61–67.
+                  May 2003, pp. 125–135, iSSN: 0270-5257. [Online]. Available:               [26] G. Antoniol, J. Cleland-Huang, J. H. Hayes, and M. Vierhauser, “Grand
+                  https://ieeexplore.ieee.org/document/1201194                                    Challenges of Traceability: The Next Ten Years,” arXiv:1710.03129
+             [10] H. U. Asuncion, A. U. Asuncion, and R. N. Taylor, “Software trace-              [cs], Oct. 2017. [Online]. Available: http://arxiv.org/abs/1710.03129
+                  ability with topic modeling,” in 2010 ACM/IEEE 32nd International          [27] X. Du, M. Liu, K. Wang, H. Wang, J. Liu, Y. Chen, J. Feng, C. Sha,
+                  Conference on Software Engineering, vol. 1, May 2010, pp. 95–104.               X. Peng, and Y. Lou, “Evaluating large language models in class-level
+             [11] M. Gethers, R. Oliveto, D. Poshyvanyk, and A. D. Lucia, “On inte-               code generation,” in Proceedings of the IEEE/ACM 46th International
+                  grating orthogonal information retrieval methods to improve traceability        Conference on Software Engineering, ser. ICSE ’24. New York, NY,
+                  recovery,” in 2011 27th IEEE International Conference on Software               USA: Association for Computing Machinery, 2024. [Online]. Available:
+                  Maintenance (ICSM), Sep. 2011, pp. 133–142.                                     https://doi.org/10.1145/3597503.3639219
+             [12] A. Mahmoud and N. Niu, “On the role of semantics in automated              [28] S. Gao, X.-C. Wen, C. Gao, W. Wang, H. Zhang, and M. R. Lyu, “What
+                  requirements tracing,” Requirements Eng, vol. 20, no. 3, pp. 281–300,           makes good in-context demonstrations for code intelligence tasks with
+                  Sep. 2015.                                                                      llms?” in 2023 38th IEEE/ACM International Conference on Automated
+             [13] T. Hey, F. Chen, S. Weigelt, and W. F. Tichy, “Improving Traceability           Software Engineering (ASE), 2023, pp. 761–773.
+                  Link Recovery Using Fine-grained Requirements-to-Code Relations,”          [29] F. Mu, L. Shi, S. Wang, Z. Yu, B. Zhang, C. Wang, S. Liu, and Q. Wang,
+                  in 2021 IEEE International Conference on Software Maintenance and               “Clarifygpt: A framework for enhancing llm-based code generation via
+                  Evolution (ICSME), 2021, pp. 12–22.                                             requirements clarification,” Proc. ACM Softw. Eng., vol. 1, no. FSE, jul
+             [14] H. Gao, H. Kuang, K. Sun, X. Ma, A. Egyed, P. Mäder, G. Rong,                  2024. [Online]. Available: https://doi.org/10.1145/3660810
+                  D. Shao, and H. Zhang, “Using Consensual Biterms from Text Structures      [30] A. Singha, B. Chopra, A. Khatry, S. Gulwani, A. Z. Henley, V. Le,
+                  of Requirements and Code to Improve IR-Based Traceability Recovery,”            C. Parnin, M. Singh, and G. Verbruggen, “Semantically aligned
+                  in Proceedings of the 37th IEEE/ACM International Conference on                 question and code generation for automated insight generation,” 2024.
+                  Automated Software Engineering, Oct. 2022, pp. 1–1.                             [Online]. Available: https://arxiv.org/abs/2405.01556
+             [15] J. Keim, S. Corallo, D. Fuchß, T. Hey, T. Telge, and A. Koziolek,          [31] D. Nam, A. Macvean, V. Hellendoorn, B. Vasilescu, and B. Myers,
+                  “Recovering Trace Links Between Software Documentation And                      “Using an llm to help with code understanding,” in Proceedings of the
+                  Code,” in Proceedings of the IEEE/ACM 46th International Conference             IEEE/ACM 46th International Conference on Software Engineering, ser.
+                  on Software Engineering, ser. ICSE ’24. New York, NY, USA:                      ICSE ’24. New York, NY, USA: Association for Computing Machinery,
+                  Association for Computing Machinery, 2024. [Online]. Available:                 2024. [Online]. Available: https://doi.org/10.1145/3597503.3639187
+                  https://doi.org/10.1145/3597503.3639130                                    [32] T. Ahmed, K. S. Pai, P. Devanbu, and E. Barr, “Automatic semantic
+             [16] D. Fuchß, H. Liu, T. Hey, J. Keim, and A. Koziolek, “Enabling                   augmentation of language model prompts (for code summarization),”
+                  Architecture Traceability by LLM-based Architecture Component Name              in Proceedings of the IEEE/ACM 46th International Conference
+                  Extraction,” in 22nd International Conference on Software Architecture          on Software Engineering, ser. ICSE ’24. New York, NY, USA:
+                  (ICSA). Institute of Electrical and Electronics Engineers (IEEE), 2025.         Association for Computing Machinery, 2024. [Online]. Available:
+             [17] J. Lin, Y. Liu, Q. Zeng, M. Jiang, and J. Cleland-Huang,                        https://doi.org/10.1145/3597503.3639183
+                  “Traceability Transformed: Generating more Accurate Links with             [33] M. Geng, S. Wang, D. Dong, H. Wang, G. Li, Z. Jin, X. Mao, and
+                  Pre-Trained BERT Models,” in Proceedings of the 43rd International              X. Liao, “Large language models are few-shot summarizers: Multi-intent
+                  Conference on Software Engineering, ser. ICSE ’21. Madrid,                      comment generation via in-context learning,” in Proceedings of the
+
+
+
+                                                                                         1407
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+                  IEEE/ACM 46th International Conference on Software Engineering, ser.       [45] H. Kuang, P. Mäder, H. Hu, A. Ghabi, L. Huang, J. Lü, and
+                  ICSE ’24. New York, NY, USA: Association for Computing Machinery,               A. Egyed, “Can method data dependencies support the assessment
+                  2024. [Online]. Available: https://doi.org/10.1145/3597503.3608134              of traceability between requirements and source code?” Journal of
+             [34] Q. Huang, Z. Wan, Z. Xing, C. Wang, J. Chen, X. Xu, and Q. Lu,                  Software: Evolution and Process, vol. 27, no. 11, pp. 838–866,
+                  “Let’s chat to find the apis: Connecting human, llm and knowledge graph         2015, eprint: https://onlinelibrary.wiley.com/doi/pdf/10.1002/smr.1736.
+                  through ai chain,” in 2023 38th IEEE/ACM International Conference on            [Online]. Available: https://onlinelibrary.wiley.com/doi/abs/10.1002/smr.
+                  Automated Software Engineering (ASE), 2023, pp. 471–483.                        1736
+             [35] P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal,         [46] J. Cleland-Huang, R. Settimi, C. Duan, and X. Zou, “Utilizing
+                  H. Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel, S. Riedel,                   supporting evidence to improve dynamic requirements traceability,”
+                  and D. Kiela, “Retrieval-augmented generation for knowledge-                    in 13th IEEE International Conference on Requirements Engineering
+                  intensive nlp tasks,” in Advances in Neural Information Processing              (RE’05), Aug. 2005, pp. 135–144, iSSN: 2332-6441. [Online].
+                  Systems, H. Larochelle, M. Ranzato, R. Hadsell, M. Balcan, and                  Available: https://ieeexplore.ieee.org/document/1531035
+                  H. Lin, Eds., vol. 33. Curran Associates, Inc., 2020, pp. 9459–
+                                                                                             [47] R. Lapena, F. Perez, C. Cetina, and O. Pastor, “Leveraging
+                  9474. [Online]. Available: https://proceedings.neurips.cc/paper files/
+                                                                                                  BPMN particularities to improve traceability links recovery among
+                  paper/2020/file/6b493230205f780e1bc26945df7481e5-Paper.pdf
+                                                                                                  requirements and BPMN models,” Requirements Engineering, vol. 27,
+             [36] A. D. Rodriguez, K. R. Dearstyne, and J. Cleland-Huang, “Prompts
+                                                                                                  no. 1, pp. 135–160, Mar. 2022. [Online]. Available: https://doi.org/10.
+                  matter: Insights and strategies for prompt engineering in automated
+                                                                                                  1007/s00766-021-00365-1
+                  software traceability,” in 2023 IEEE 31st International Requirements
+                  Engineering Conference Workshops (REW), 2023, pp. 455–464.                 [48] R. Lapena, F. Perez, O. Pastor, and C. Cetina, “Leveraging execution
+             [37] D. Fuchß, T. Hey, J. Keim, H. Liu, N. Ewald, T. Thirolf,                        traces to enhance traceability links recovery in BPMN models,”
+                  and A. Koziolek, “Replication Package: LiSSA: Toward Generic                    Information and Software Technology, vol. 146, p. 106873, Jun. 2022.
+                  Traceability Link Recovery through Retrieval-Augmented Generation,”             [Online]. Available: https://www.sciencedirect.com/science/article/pii/
+                  Jan. 2025. [Online]. Available: https://doi.org/10.5281/zenodo.14714706         S0950584922000398
+             [38] T. Dasgupta, M. Grechanik, E. Moritz, B. Dit, and D. Poshyvanyk,           [49] D. Fuchß, S. Corallo, J. Keim, J. Speit, and A. Koziolek, “Establishing
+                  “Enhancing Software Traceability by Automatically Expanding Corpora             a benchmark dataset for traceability link recovery between software
+                  with Relevant Documentation,” in 2013 IEEE International Conference             architecture documentation and models,” in Software Architecture. ECSA
+                  on Software Maintenance, Sep. 2013, pp. 320–329, iSSN: 1063-6773.               2022 Tracks and Workshops, T. Batista, T. Bureš, C. Raibulet, and
+                  [Online]. Available: https://ieeexplore.ieee.org/document/6676903               H. Muccini, Eds. Cham: Springer International Publishing, 2023, pp.
+             [39] H. Gao, H. Kuang, W. K. G. Assunção, C. Mayr-Dorn, G. Rong,                   455–464.
+                  H. Zhang, X. Ma, and A. Egyed, “Triad: Automated traceability              [50] T. Hey, “Fine-grained Traceability Link Recovery (FTLR),” Sep. 2023.
+                  recovery based on biterm-enhanced deduction of transitive links                 [Online]. Available: https://doi.org/10.5281/zenodo.8367392
+                  among artifacts,” in Proceedings of the IEEE/ACM 46th International
+                                                                                             [51] Center of Excellence for Software & Systems Traceability (CoEST)
+                  Conference on Software Engineering, ser. ICSE ’24. New York, NY,
+                                                                                                  Datasets. [Online]. Available: http://sarec.nd.edu/coest/datasets.html
+                  USA: Association for Computing Machinery, 2024. [Online]. Available:
+                  https://doi.org/10.1145/3597503.3639164                                    [52] J. Cleland-Huang, M. Vierhauser, and S. Bayley, “Dronology: an
+             [40] T. Hey, J. Keim, and S. Corallo, “Requirements Classification for Trace-        incubator for cyber-physical systems research,” in Proceedings of the
+                  ability Link Recovery,” in 2024 IEEE 32nd International Requirements            40th International Conference on Software Engineering: New Ideas
+                  Engineering Conference (RE), Jun. 2024, pp. 155–167.                            and Emerging Results, ser. ICSE-NIER ’18. New York, NY, USA:
+             [41] K. Moran, D. N. Palacio, C. Bernal-Cárdenas, D. McCrystal,                     Association for Computing Machinery, 2018, pp. 109–112. [Online].
+                  D. Poshyvanyk, C. Shenefiel, and J. Johnson, “Improving the                     Available: https://doi.org/10.1145/3183399.3183408
+                  effectiveness of traceability link recovery using hierarchical bayesian    [53] J. Keim, S. Corallo, D. Fuchß, T. Hey, T. Telge, and A. Koziolek,
+                  networks,” in Proceedings of the ACM/IEEE 42nd International                    “Replication Package for ICSE24 paper ”Recovering Trace Links
+                  Conference on Software Engineering, ser. ICSE ’20. New York, NY,                Between Software Documentation And Code”,” Jan. 2024. [Online].
+                  USA: Association for Computing Machinery, Jun. 2020, pp. 873–885.               Available: https://doi.org/10.5281/zenodo.10598371
+                  [Online]. Available: https://doi.org/10.1145/3377811.3380418               [54] J. Cleland-Huang, O. Gotel, A. Zisman et al., Software and systems
+             [42] K. Nishikawa, H. Washizaki, Y. Fukazawa, K. Oshima, and R. Mibe,                traceability. Springer, 2012, vol. 2, no. 3.
+                  “Recovering transitive traceability links among software artifacts,” in
+                                                                                             [55] T. Hey, “Automatische Wiederherstellung von Nachverfolgbarkeit zwi-
+                  2015 IEEE International Conference on Software Maintenance and
+                                                                                                  schen Anforderungen und Quelltext,” Ph.D. dissertation, Karlsruher
+                  Evolution (ICSME), Sep. 2015, pp. 576–580. [Online]. Available:
+                                                                                                  Institut für Technologie (KIT), 2023.
+                  https://ieeexplore.ieee.org/document/7332517
+             [43] A. D. Rodriguez, J. Cleland-Huang, and D. Falessi, “Leveraging in-         [56] P. Runeson and M. Höst, “Guidelines for conducting and reporting case
+                  termediate artifacts to improve automated trace link retrieval,” in 2021        study research in software engineering,” Empirical Software Engineer-
+                  IEEE International Conference on Software Maintenance and Evolution             ing, vol. 14, no. 2, p. 131, 2008.
+                  (ICSME), 2021, pp. 81–92.                                                  [57] J. Sallou, T. Durieux, and A. Panichella, “Breaking the silence:
+             [44] A. Panichella, C. McMillan, E. Moritz, D. Palmieri, R. Oliveto,                 the threats of using llms in software engineering,” in Proceedings
+                  D. Poshyvanyk, and A. D. Lucia, “When and How Using Structural                  of the 2024 ACM/IEEE 44th International Conference on Software
+                  Information to Improve IR-Based Traceability Recovery,” in 2013 17th            Engineering: New Ideas and Emerging Results, ser. ICSE-NIER’24.
+                  European Conference on Software Maintenance and Reengineering,                  New York, NY, USA: Association for Computing Machinery, 2024, p.
+                  Mar. 2013, pp. 199–208.                                                         102–106. [Online]. Available: https://doi.org/10.1145/3639476.3639764
+
+
+
+
+                                                                                         1408
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 08,2026 at 10:11:17 UTC from IEEE Xplore. Restriction
+

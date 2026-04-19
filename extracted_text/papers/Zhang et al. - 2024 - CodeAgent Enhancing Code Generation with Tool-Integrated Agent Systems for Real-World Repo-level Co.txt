@@ -1,0 +1,1028 @@
+         C ODE AGENT: Enhancing Code Generation with Tool-Integrated Agent
+                Systems for Real-World Repo-level Coding Challenges
+                              Kechi Zhang∗, Jia Li∗, Ge Li†, Xianjie Shi, Zhi Jin†
+                 Key Lab of High Confidence Software Technology (PKU), Ministry of Education
+                             School of Computer Science, Peking University, China
+                              {zhangkechi,lijiaa,lige}@pku.edu.cn,
+                                     2100013180@stu.pku.edu.cn,
+                                          zhijin@pku.edu.cn
+
+                               Abstract                            as Code Llama (Rozière et al., 2023), StarCoder
+                                                                   (Li et al., 2023), and DeepSeekCoder (DeepSeek,
+             Large Language Models (LLMs) have shown               2023). Many efforts have been performed (Zhang
+             promise in automated code generation but
+                                                                   et al., 2023b; Luo et al., 2023; Zheng et al., 2023)
+             typically excel only in simpler tasks such
+             as generating standalone code units. How-
+                                                                   and shown impressive code generation abilities.
+             ever, real-world software development often              Despite achieving satisfactory performances,
+             involves complex code repositories with com-          these studies mainly focus on simple generation
+             plex dependencies and extensive documenta-            scenarios including statement-level and function-
+             tion. To enable LLMs to handle these real-            level code generation. Statement-level code gener-
+             world repo-level code generation, we present
+                                                                   ation (Iyer et al., 2018; Athiwaratkun et al., 2022)
+             C ODE AGENT, a novel LLM-based agent frame-
+             work that employs external tools for effec-           aims to output statement-specific source codes.
+             tive repo-level code generation. C ODE AGENT          Function-level code generation (Chen et al., 2021;
+             integrates five programming tools, enabling           Austin et al., 2021; Hendrycks et al., 2021) pre-
+             interaction with software artifacts for infor-        dicts independent code that only invokes built-in
+             mation retrieval, code implementation, and            functions and APIs from third-party libraries. For
+             code testing. We implement four agent strate-         both scenarios, the length of the generated code
+             gies to optimize these tools’ usage. To the           is rather short, and they only generate standalone
+             best of our knowledge, C ODE AGENT is the
+             first agent framework specifically for repo-
+                                                                   code units. However, more than 70% functions in
+             level code generation. In order to measure            the open-source projects are non-standalone (Yu
+             the effectiveness of our method at the repos-         et al., 2023). Developers typically write programs
+             itory level, we design a repo-level benchmark         based on specific code environments, generally re-
+             C ODE AGENT B ENCH. The performance on                ferring to code repositories. These repo-level code
+             this benchmark shows a significant improve-           snippets usually have intricate contextual depen-
+             ment brought by our method, with improve-             dencies, which is too complex for existing LLMs
+             ments in pass rate ranging from 2.0 to 15.8.
+                                                                   to handle and generate (Li et al., 2024).
+             Further tests on the HumanEval benchmark
+             confirm C ODE AGENT’s adaptability and effi-             To enhance the efficacy of LLMs in repo-level
+             cacy across various code generation tasks. No-        code generation tasks, we draw inspiration from
+             tably, C ODE AGENT outperforms commercial             human programming practices. Developers typi-
+             products like GitHub Copilot, showcasing su-          cally employ a variety of tools to aid in complex
+             perior accuracy and efficiency. These results         programming. For instance, they might utilize
+             demonstrate C ODE AGENT’s robust capabilities
+                                                                   search engines to explore key concepts or static
+             in code generation, highlighting its potential
+             for real-world repo-level coding challenges.          analysis tools to identify pre-existing functions or
+                                                                   classes. These tools are instrumental in the de-
+     1       Introduction                                          velopment of code projects. Embracing this idea,
+                                                                   we propose a novel LLM-based agent framework
+     Code generation automatically generates programs              C ODE AGENT that leverages external tools to help
+     for the natural language (NL) requirement. Recent             LLMs in repo-level code generation. With five
+     years have seen a trend in tackling code generation           programming tools, C ODE AGENT is capable of
+     tasks with large language models (LLMs), such                 interacting with the software artifacts, including
+         * The two authors share equal contribution.               retrieving useful information, finding existing code
+         †
+             Corresponding authors.                                symbols in the repository, and handling essential
+                                                              13643
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 13643–13658
+                               August 11-16, 2024 ©2024 Association for Computational Linguistics
+code testing. To guide LLMs to efficiently use                  C ODE AGENT’s versatility and effectiveness
+tools, we draw on four agent strategies covering Re-            in diverse code generation tasks, highlight-
+Act, Tool-Planning, OpenAIFunc, and Rule-based                  ing its potential for resolving real-world repo-
+form. Based on agent strategies, LLMs can auto-                 level coding challenges.
+matically select suitable tools for each repo-level
+task, finally providing a comprehensive response.      2       Background
+   In order to measure the effectiveness of our        2.1       LLMs and Agents for Code Generation
+method at the code repository, we manually con-
+struct C ODE AGENT B ENCH, a benchmark specifi-        LLMs have shown impressive capabilities in code
+cally for repo-level code generation with a total      generation since they have billions of parameters
+of 101 functions and classes sourced from real         trained on a large amount of corpus with different
+code projects. It provides rich information about      training objectives. Recently, OpenAI 1 proposes
+the repository, such as documentation and con-         GPT-3.5 and GPT-4 series models (e.g., ChatGPT
+textual dependency, to help LLMs better under-         (Chat, 2022)), which have shown strong generation
+stand it. We further conduct extensive experi-         abilities in coding. There are also various open-
+ments for evaluation. We apply C ODE AGENT             soured work, such as CodeGen (Nijkamp et al.,
+to nine powerful open-source and closed-source         2022), StarCoder (Li et al., 2023), Code Llama
+LLMs with parameter sizes ranging from 13B to          (Rozière et al., 2023), WizardCoder (Luo et al.,
+175B to show the universality. Compared to di-         2023) and DeepSeekCoder (DeepSeek, 2023).
+rectly generating from LLMs, experimental results         Recent research has also increasingly shown that
+on C ODE AGENT B ENCH reveal that C ODE AGENT          LLMs can be instrumental in developing AI agents
+achieves significant improvements ranging from         (Palo et al., 2023; Wang et al., 2023a; Xi et al.,
+2.0 to an extraordinary 15.8 across various LLMs.      2023; Shen et al., 2023; Patil et al., 2023; Qin et al.,
+Further evaluations on well-known function-level       2023). Examples such as ToolFormer (Schick et al.,
+benchmark HumanEval (Chen et al., 2021) confirm        2023), Auto-GPT (AutoGPT, 2023), BabyAGI
+C ODE AGENT’s versatility in diverse code genera-      (BabyAGI, 2023), KwaiAgents (Pan et al., 2023)
+tion tasks. Remarkably, when compared to com-          and ToolCoder (Zhang et al., 2023a) demonstrate
+mercial products like GitHub Copilot (Dakhel et al.,   LLMs’ proficiency in tool utilization for complex
+2023), C ODE AGENT stands out, demonstrating su-       tasks. Some studies such as self-edit (Zhang et al.,
+perior accuracy. These findings highlight the robust   2023b) and self-debug (Chen et al., 2023) have
+practical capabilities of C ODE AGENT in the code      demonstrated that code models possess the capabil-
+generation community, underscoring its potential       ity for multi-round interaction and repair. Nowa-
+to evolve real-world repo-level coding challenges.     days, some work has also demonstrated the effec-
+We summarize our main contributions:                   tiveness of agent systems in complex code program-
+                                                       ming tasks, such as OpenDevin (OpenDevin, 2024),
+   • We make an attempt to investigate repo-level      SWE-Agent (Yang et al., 2024). In this paper, we
+     code generation, which has crucial worth for      select GPT-4 (GPT-4, 2023), GPT-3.5 (GPT-3.5,
+     understanding LLMs’ performance in practi-        2023), and other powerful LLMs to design cod-
+     cal code generation scenarios.                    ing agent systems for real-world repo-level code
+                                                       generation.
+   • We propose C ODE AGENT, an LLM-based
+     agent framework for repo-level code gener-        2.2       Code Generation Tasks
+     ation. It develops five external programming      Existing code generation tasks mainly focus
+     tools to help LLMs complete the whole gen-        on generating standalone code units, including
+     eration process and draw on four agent strate-    statement-level (Yin et al., 2018) and function-level
+     gies to automatically optimize tools’ usage.      generation (Hendrycks et al., 2021; Chen et al.,
+                                                       2021). The generated programs are usually short
+   • We construct C ODE AGENT B ENCH, a repo-
+                                                       and are independent of other codes. However, in
+     level code generation benchmark, which has
+                                                       software development, programmers mainly work
+     high-quality code repositories and covers di-
+                                                       within a code environment. They extend their func-
+     verse topics.
+                                                       tionalities based on the foundational code frame-
+   • Experimental results on nine LLMs show                1
+                                                               https://openai.com/
+
+                                                  13644
+work. Inspired by this, some studies (Yu et al.,        face (e.g., the input parameters). Thus, the docu-
+2023; Liao et al., 2023) introduce intricate pro-       mentation also provides the type and interpretation
+gramming tasks that are based on particular code        of input parameters and output values. In addi-
+environments such as projects and code reposito-        tion, considering that requirements usually contain
+ries. Nevertheless, these studies only provide lim-     domain-specific terminologies, the documentation
+ited constraint information to LLMs, containing the     explains these terms as well, such as mathematical
+requirements, signature information, and restricted     theorems. As shown in Figure 1, documentation of
+code dependencies, leading to a difference in pro-      the project contains rich information, where differ-
+gramming information needs from humans. Some            ent elements are highlighted with diverse colors.
+work targets real-world GitHub issues for code
+model to resolve, such as SWE-bench (Jimenez            Contextual Dependency A key distinction of
+et al., 2023). To get closer to realistic programming   our new task from other independent code genera-
+scenarios, we formalize the repo-level code genera-     tion tasks is its inclusion of contextual dependen-
+tion task and propose C ODE AGENT to help LLMs          cies. This aspect is crucial, as classes or functions
+handle this complex task. We construct a repo-level     typically interact with other code segments within
+code generation benchmark C ODE AGENT B ENCH            the repository, such as import statements or other
+to evaluate our method and provide an analysis of       user-defined classes and functions. These interac-
+benchmarks commonly used for these generation           tions may occur within the same file or across mul-
+tasks in Table 7. Compared with existing code gen-      tiple files. For instance, to implement the Random-
+eration tasks, repo-level code generation is more       Forest class in Figure 1, it is necessary to utilize
+consistent in real-world programming scenarios,         the bootstrap_sample function from rf.py and the
+fostering the evolvement of the code generation         DecisionTree class from dt.py, demonstrating the
+community.                                              intricate code contextual dependencies involved.
+
+                                                        Runtime Environment Different from natu-
+3   Repo-level Code Generation Task
+                                                        ral language, program language is executable.
+To fill the gap between existing code generation        Whether programs return target results after execu-
+tasks and practical coding scenarios, we formalize      tion is a crucial manner to verify the correctness
+the repo-level code generation task. Since a code       of generated programs. Developers typically de-
+repository generally contains intricate invocation      pend on the execution feedback to correct errors
+relationships, only with a deep understanding of        in programs. The runtime environment provides
+the code repository can LLMs generate satisfying        all configurations needed to run the code repos-
+programs that not only adhere to requirements but       itory and offers convenient interaction to ensure
+also seamlessly integrate with the current reposi-      an all-sided evaluation of LLMs’ performance on
+tory. Given a code repository, the repo-level code      repo-level code generation.
+generation task aims to generate code based on all
+the software artifacts included in the repository,      4   C ODE AGENT Method
+encompassing the documentation, code depen-
+                                                        We introduce a novel LLM-based agent framework
+dency, runtime environment, which form the task
+                                                        C ODE AGENT that leverages external tools to en-
+input. Here we give a detailed description of its
+                                                        hance the problem-solving abilities of LLMs in
+composition format. Figure 1 shows an illustration
+                                                        intricate repo-level code generation. C ODE AGENT
+of the repo-level code generation task.
+                                                        seamlessly pauses generation whenever tools are
+Documentation It describes the generation tar-          called and resumes generation by integrating their
+gets and is the main input component of repo-level      outputs. These tools can assist LLMs with the
+code generation. The documentation provides ad-         entire code generation process, including informa-
+ditional supporting information beyond the NL re-       tion retrieval, code implementation, and code test-
+quirements. It contains class-level (class name, sig-   ing as shown in Table 1, thus interacting with the
+nature, and member function) and function-level         software artifacts (Section 4.1). Providing LLMs
+(functional description, and params description) in-    with access to tools, C ODE AGENT explores four
+formation of targets. Typically, the correctness of     agent strategies to optimize these tools’ usage (Sec-
+generated programs is verified with the test suite.     tion 4.2). Figure 2 illustrates the overview of our
+The generated programs must conform to the inter-       C ODE AGENT.
+                                                   13645
+"RandomForest"                                  Class Name & Signature                             bandits             import numpy as np trees/rf.py
+**************                                                                                                         from .dt import DecisionTree
+                                                                                                   factorization       def bootstrap_sample(X, Y):
+class numpy_ml.trees.RandomForest(n_trees, max_depth, n_feats, classifier=True,
+criterion='entropy’)                                                                               utils                    N, M = X.shape
+                                                                                                                            idxs = np.random.choice(N, N,   class RandomForest:
+                                                           Functional Description                  trees               replace=True)
+-[ Description ]-                                                                                                                                                def __init__(self, n_trees, max_depth, n_feats,
+ An ensemble (forest) of decision trees where each split is calculated using a random                                       return X[idxs], Y[idxs]         classifier=True, criterion="entropy"):
+                                                                                                           rf.py
+subset of the features in the input.                                                                                                                                   self.trees = []
+-[ Notes ]-                                                                                                dt.py       import numpy as np trees/dt.py                  …
+The RandomForest class, denoted as 𝓡𝓕, comprises Theorem & Explanation                                                 class Node:                               def fit(self, X, Y):
+ntrees decision trees. Each tree Ti is built on a bootstrapped sample from the training                    gbdt.py          …                                          self.trees = []
+data 𝓓, with splits determined by a random subset of nfeats features.                                                  class DecisionTree:                             for _ in range(self.n_trees):
+                                                                                                           …
+                                                                                                                            …                                                X_samp, Y_samp = bootstrap_sample(X, Y)
+Parameters:                                                                                                                                                                  tree = DecisionTree(
+   * **n_trees** (*int*) -- The number of individual
+                                                           Params Description                                      Input Code Dependency                                           n_feats=self.n_feats,
+decision trees to use within the ensemble.                                                                                                                                         max_depth=self.max_depth
+                                           …                                                                                                                                 )
+                                                                                                   (Python Environment) >>>                                      …
+predict(X)                                                                                             Python 3.9.7
+                                                              Member Function                          Successfully installed numpy, scipy, …
+   Predict the target value for each entry in *X*.
+   Parameters:                                                                                                                                                                Output Code
+                                               …
+
+                               Input Documentation                                                                 Input Runtime Environment
+
+
+Figure 1: An illustrative example of the repo-level code generation. The task input contains complex descriptions,
+code dependencies, and runtime environment, which is more realistic than the existing benchmark.
+
+
+Code Repo                                                                                                               Tool Domain Tool Name                               Usage Pattern
+                                                     ReAct, OpenAIFunc*
+                                                         Thought: … I should search                                     Information         Website Search                  WebSearch(input_query)
+                                                                  “random forest” …
+                                                                                                                         Retrieval
+                                                         Action: WebSearch(“random forest”)                                                 Documentation Reading DocSearch(input_name)
+     Documentation         Runtime
+                                                                Tool output: …                                            Code                              SymbolSearch(module_path
+                           Environment
+                                                                                                                                     Code Symbol Navigation
+                                                                                                                      Implementation                             or input_name)
+                                                     Tool-Planning
+           Code Dependency                               Step 1. Seach the concept …                                                        Format Checker                  FormatCheck()
+                                                         Step 2. Define the class …                                    Code Testing
+            interact                                                                                                                        Code Interpreter                PythonREPL(input_code)
+                                                              (For each step, choose a tool
+Programming Tools                                             to help complete that step.)
+
+                                                                                                                      Table 1: Programming tool statistics in C ODE AGENT
+                                                     Rule-based Tool Usage
+ Website Search                                          Step 1. website search           2. DocSearch
+                       Code Interpreter
+
+                           …                             <Thought> + <Action>                 …
+         Code Navigation                                                                                             4.1.1         Information Retrieval Tools
+                                                3. SymbolSearch     4. FormatCheck        5. PythonREPL
+         Agent Strategy
+     LLMs                                                                                                            Information retrieval tools are responsible for ana-
+                                …
+                                             <Input Documentation> + <Tool Descriptions> + …                         lyzing repositories and collecting resources, which
+                                                                                                                     is pivotal in understanding the problem domain.
+                                                                                                                     We develop popular website search and documen-
+Figure 2: Left: Overview of C ODE AGENT. With
+                                                                                                                     tation reading as information retrieval tools.
+our designed programming tools and agent strategies,
+LLMs interact with code repositories and generate repo-
+level code. Right: Illustration of agent strategies in                                                               Website Search Programmers often share solu-
+C ODE AGENT. "OpenAIFunc" is similar to "ReAct" in                                                                   tions for various programming problems on web-
+the interaction mode, with some differences in the con-                                                              sites where search engines consider them as knowl-
+tent generated by LLMs and the format of tool callings.                                                              edge resources. When encountering similar prob-
+                                                                                                                     lems, developers only submit a question query
+                                                                                                                     to a search engine. The engine can provide use-
+                                                                                                                     ful programming suggestions. Inspired by this,
+4.1 Designed Programming Tools
+                                                                                                                     C ODE AGENT uses a popular search engine Duck-
+                                                                                                                     DuckGo2 to choose the most relevant websites, and
+Given a requirement, developers usually first gather                                                                 then apply LLMs to summarize the website con-
+relevant knowledge, then find and modify exist-                                                                      tent as the final tool output 3 . In the process, we
+ing programs to meet the requirement, and finally                                                                    block websites that may lead to data leakage. The
+verify programs with the assistance of tools. To                                                                     usage pattern of this tool is formatted as: Web-
+mimic this process, we develop several program-                                                                      Search(input_query), which will return the format-
+ming tools that are specifically designed for LLMs.                                                                  ted content searched from websites.
+C ODE AGENT incorporates these external tools
+                                                                                                                          2
+from three perspectives: information retrieval, code                                                                     https://duckduckgo.com/
+                                                                                                                          3
+                                                                                                                         We choose DuckDuckGo because it provides a cheaper
+implementation, and code testing, which are com-                                                                     and more convenient API than other search engines such as
+monly used by programmers in their daily work.                                                                       Google and Bing.
+
+                                                                                                           13646
+Documentation Reading Besides gathering in-               we develop Black 5 as the format checker. It can
+formation from websites, we also retrieve relevant        check format errors such as indentation misalign-
+knowledge from the documentation of the repos-            ment and missing keywords. Subsequently, it tries
+itory. To achieve this, C ODE AGENT leverages             to rectify these errors and reorganizes code state-
+BM25 (Robertson et al., 2009) as the documen-             ments, enhancing the correctness and readability of
+tation reading tool. Given a class name or function       generated codes. The usage pattern of this tool is:
+name, it can retrieve correlative content from the        FormatCheck(), which will automatically format
+documentation as its output. If the result is too long,   the most recently generated code and return the
+the tool will use the LLM to summarize it and then        formatted version.
+provide it to LLMs for code generation. This tool
+                                                          Code Interpreter The tool focuses on examining
+is designed in the format: DocSearch(input_name).
+                                                          the syntax and function of programs. It furnishes
+4.1.2 Code Implementation Tools                           a runtime environment so that LLMs can debug
+Code implementation tools aim to provide relevant         generated codes with execution feedback. The tool
+code items (i.e., pre-defined symbol names and            requires LLMs to provide a program to be executed,
+code snippets) in the code repository. LLMs mod-          and then runs the code in the repository environ-
+ify and integrate these items into the generation         ment. Meanwhile, LLMs generate some test cases
+process. It not only expedites the development pro-       to verify whether the output of the generated code
+cess but also encourages code reuse. We build a           meets the expected results. When occurring errors,
+code symbol navigation tool to help LLMs imple-           this tool will offer error information to facilitate
+ment code snippets.                                       LLMs to fix bugs until programs are error-free,
+                                                          which has been proven to be effective by many
+Code Symbol Navigation We use tree-sitter 4               existing works (Chen et al., 2022; Zhang et al.,
+to design the code symbol navigation tool. This           2023b) to correct output programs. The runtime
+tool explores code items from two types. The first        environment is prepared for each task, as described
+type is oriented to the file or module-oriented pars-     in Section B.1.1. This tool is designed in the for-
+ing, where the tool performs static analysis of a file    mat: PythonREPL(input_code), and the tool will
+or module and provides symbol names defined in            return the executed result of the input code.
+it, encompassing global variables, function names,
+                                                          4.2      Agent Strategy
+and class names. The other type is the class or
+function symbol navigation. Given a class or func-        To guide LLMs to leverage these powerful tools
+tion name, the tool finds its definition from the         properly, we develop four agent strategies for
+code repository. Combining the two types, this tool       repo-level code generation, including ReAct, Tool-
+can traverse predefined source code within a repos-       Planning, OpenAIFunc, and Rule-based Tool Us-
+itory, empowering LLMs to understand intricate            age. The interaction between LLMs and external
+dependencies and reuse codes. This tool is de-            tools is based on LangChain 6 .
+signed in the format: SymbolSearch(module_path
+                                                          ReAct This strategy (Yao et al., 2022) prompts
+or input_name). The tool will detect what the in-
+                                                          LLMs to generate reasoning traces and task-related
+put is and return the corresponding results (e.g.,
+                                                          actions in an interlaced fashion. Based on actions,
+all defined symbols in the given file path or the
+                                                          ReAct selects the proper external tools and invokes
+implementation code corresponding to the given
+                                                          them by providing input. The strategy then treats
+symbol name). When no parameters are provided,
+                                                          the output of tools as additional knowledge and
+the default value is the path of the current file.
+                                                          decides whether to generate a final code or invoke
+4.1.3 Code Testing Tools                                  other tools for further processing.
+After acquiring generated codes, we design code           Tool-Planning We propose a variant, i.e., Tool-
+testing tools to format and test them, enhancing          Planning, of Planning strategy (Wang et al., 2023b)
+their correctness and readability.                        that makes a plan before solving problems and has
+                                                          shown effectiveness in many studies (Zhang et al.,
+Format Checker The tool is built to check the             2022; Jiang et al., 2023). Different from Planning,
+format correctness of generated codes. Specifically,
+                                                             5
+                                                                 https://github.com/psf/black
+   4                                                         6
+       https://tree-sitter.github.io/tree-sitter/                https://python.langchain.com
+
+                                                     13647
+our strategy can invoke proper tools based on the          Name                  Domain            Samples   # Line   # DEP
+
+plan. Specifically, Tool-Planning first makes a plan       numpyml-easy
+                                                           numpyml-hard
+                                                                            Machine Learning
+                                                                            Machine Learning
+                                                                                                     22
+                                                                                                     35
+                                                                                                              10.9
+                                                                                                              85.4
+                                                                                                                       0.3
+                                                                                                                       2.6
+to divide an entire task into several subtasks and         container          Data Structure          4      130.3     8.0
+                                                           micawber       Information Extraction      7       19.7     4.3
+then performs subtasks according to the plan. For          tinydb               Database             21       36.7     2.7
+                                                           websockets          Networking            12      91.6      7.5
+complex subtasks, it will automatically choose an
+                                                           Total                                    101      57.0      3.1
+appropriate tool to assist LLMs in code generation.
+                                                        Table 2: Statistics of C ODE AGENT B ENCH. # Line:
+OpenAIFunc Recently, some models (e.g., GPT-
+                                                        average lines of code. # DEP: average number of code
+3.5 (GPT-3.5, 2023) and GPT-4 (GPT-4, 2023))            dependencies.
+have the function-calling ability provided by Ope-
+nAI (OpenAIFunc, 2023). The interaction mode is
+similar to that of "ReAct", with some differences       scribed in Section 3 and construct a new benchmark
+in the content generated by LLMs and the format         C ODE AGENT B ENCH. To make C ODE AGENT-
+of calling external tools.                              B ENCH diverse, we select five prevalent topics
+                                                        judged by ten developers and choose repositories
+Rule-based Tool Usage When faced with a com-            with high stars from GitHub. The selected topics
+plex problem, programmers often first learn related     contain machine learning, data structure, informa-
+knowledge, then write programs, and check the           tion extraction, database, and networking. To en-
+function of programs. Inspired by the workflow,         sure the quality, we only select repositories that
+we propose a rule-based strategy.                       use pytest 7 and unittest8 as the test framework
+   This strategy defines the order of tool usage and    and its documentation is generated by Sphinx9 tool.
+interlinks these tools by prompts. I) LLMs leverage     For writing standards of these test cases, since we
+website search to gather useful online information;     opted for projects utilizing the pytest and unittest
+II) LLMs then use documentation reading tool to         frameworks, these frameworks ensure consistency
+search relevant classes and functions; III) Code        in these testing codes. (for example, the pytest
+symbol navigation is required to select and view        framework requires all test functions to have "test_"
+the source codes of related classes and functions.      as a prefix in their function names and provides uni-
+Based on the above information, LLMs generate           form guidelines for test assertions). We also filter
+programs; IV) Subsequently, LLMs invoke the for-        out complex repositories that are hard to deploy
+mat checker to check the syntax and format of gen-      and test. Then, we extract all functions and classes
+erated programs; V) Finally, LLMs use the code          in code repositories and arrange two participants to
+interpreter to evaluate the functional correctness      sequentially execute them. Our construction costs
+of programs. Based on the feedback information,         approximately 600 person-hours. Each participant
+LLMs fix errors within programs. For each part,         possesses 2-5 years of Python programming expe-
+LLMs will autonomously cycle through the use of         rience. Finally, we get 101 functions and classes
+tools until it decides to move on to the next part or   collected from real code projects in Python. The
+the cycle reaches its limit number (e.g., 3).           statistics of C ODE AGENT B ENCH are shown in Ta-
+                                                        ble 2.
+5   Experiment
+                                                           The final C ODE AGENT B ENCH contains 101
+We perform extensive experiments to answer              samples, and for each task, LLMs are provided with
+three research questions: (1) How much can              documentation containing the requirements needed
+C ODE AGENT improve the advanced code gener-            to be implemented, along with a set of tools we
+ation LLMs on repo-level code generation (Sec-          designed, as well as full access permissions to code
+tion 5.2); (2) What is the improvement of our           files in the repository. We use the self-contained
+C ODE AGENT on classical code generation such           test suite in each code repository to evaluate the
+as HumanEval (Section 5.3); (3) To what extent          correctness of generated programs.
+do our selected tools in the agent system help for         In addition, to evaluate the generalization abil-
+repo-level coding (Section 5.4).                        ity of C ODE AGENT, we also perform experiments
+                                                        on function-level code generation. In this paper,
+5.1 Experimental Setup
+                                                             7
+                                                               https://docs.pytest.org/
+Benchmarks To evaluate our method on repo-                   8
+                                                               https://docs.python.org/3/library/unittest.html
+level code generation, we follow the format de-              9
+                                                               https://www.sphinx-doc.org/
+
+                                                   13648
+   from typing import List                       Function Signature & Description            improvements of other LLMs range from 2.0 to
+   def has_close_elements(numbers: List[float], threshold: float) -> bool:
+        """ Check if in given list of numbers, are any two numbers closer to each other      an impressive 15.8, underscoring the effectiveness
+   than given threshold. >>> has_close_elements([1.0, 2.0, 3.0], 0.5) False >>>
+   has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3) True """                          of our proposed approach. This demonstrates that
+                Input Description                                                            the tools integrated within C ODE AGENT provide
+ def has_close_elements(numbers: List[float], threshold: float):
+                                                                                             useful information, aiding LLMs in producing ac-
+      for idx, elem in enumerate(numbers):
+            …
+                                                                                             curate code solutions and effectively tackling com-
+      return False                                                                           plex repo-level coding challenges.
+                Output Code
+                                                                                                Across different LLMs, a notable trend is that
+Figure 3: An illustrative example of existing benchmark                                      more advanced LLMs exhibit greater improve-
+HumanEval.                                                                                   ments with the application of C ODE AGENT. How-
+                                                                                             ever, for Vicuna-13B model (Chiang et al., 2023),
+                                                                                             performance on C ODE AGENT B ENCH is notably
+we use a widely-used function-level benchmark                                                poor, showing no appreciable enhancement with
+HumanEval (Chen et al., 2021). It contains 164                                               the agent strategy. In contrast, the improvement
+programming problems with the function signature,                                            is quite pronounced for other high-capacity LLMs.
+docstring, body, and unit tests. In Figure 3, we give                                        Furthermore, we find that different agent strate-
+an illustrative example of HumanEval.                                                        gies yield varying levels of enhancement. Among
+Base LLMs We apply C ODE AGENT to nine most                                                  these strategies, Rule-based and ReAct strategies
+powerful LLMs, including GPT-3-davinci (GPT-                                                 are more effective, whereas Tool-Plannig strategy
+3, 2022), GPT-3.5-turbo (GPT-3.5, 2023), GPT-                                                appears less suited for the task.
+4-turbo (GPT-4, 2023), Claude-2 (Claude, 2023),                                              5.3   Function-level Coding Performance
+Llama2-70B-chat (Llama, 2023), Code Llama-34B
+                                                                                             We further apply our C ODE AGENT to function-
+(Rozière et al., 2023), WizardCoder-34B (Luo
+                                                                                             level code generation with the well-known Hu-
+et al., 2023), DeepSeek-33B (DeepSeek, 2023) and
+                                                                                             manEval benchmark (Chen et al., 2021). We adapt
+Vicuna-13B (Chiang et al., 2023). Additional de-
+                                                                                             our approach to this scenario by omitting the docu-
+scriptions are provided as a part of Table 3.
+                                                                                             mentation reading tool and code symbol navigation.
+Metrics Following previous works (Zan et al.,                                                The adjustment is necessitated as these tools are not
+2022; Zheng et al., 2023), we use the pass rate as                                           applicable to the standalone code generation task.
+the metric, where we treat the generated program                                             For this task, we strategically selected a range of
+correctly only if its output is consistent with all                                          representative LLMs for evaluation, constrained by
+ground truths of the test suite. Specifically, we are                                        our available resources and computational capacity.
+mainly concerned with Pass@1 (Chen et al., 2021),                                            The pass rate results are detailed in Table 4.
+which is a representative of the Pass@k family,                                                 The results once again highlight the efficacy of
+because in real-world scenarios, we usually only                                             C ODE AGENT in enhancing the performance of
+consider the single generated code.                                                          code LLMs across all metrics. Notably, the maxi-
+                                                                                             mum improvements observed for each model span
+5.2 Repo-level Coding Performance                                                            from 6.1 to 9.7 on Pass@1. These findings un-
+In our experiments, we utilized our specially                                                derscore the versatility and effectiveness of our
+designed repo-level benchmark, C ODE AGENT-                                                  C ODE AGENT in augmenting the capabilities of
+B ENCH, to assess the efficacy of C ODE AGENT                                                LLMs across a variety of code generation tasks.
+in enhancing the performance of nine prominent
+code LLMs. The results are presented in Table 3.                                             5.4   Ablation Study
+   Our proposed C ODE AGENT B ENCH proves to                                                 To investigate the influence of tools incorporated in
+be substantially more challenging than existing                                              C ODE AGENT, we conduct an ablation study focus-
+benchmarks, as evidenced by the relatively lower                                             ing on tool utilization in repo-level code generation.
+pass rates. On all base LLMs with various sizes,                                             We choose GPT-3.5-turbo with ReAct as the base
+C ODE AGENT consistently delivers significant per-                                           model, named GPT-3.5-ReAct. We meticulously
+formance improvements. Specifically, for GPT-4                                               track the usage frequency of each tool during code
+model (GPT-4, 2023), we observe a maximum in-                                                generation processes, with the statistics presented
+crease of 15.8, equating to a 72.7% relative en-                                             in Table 5 under the column # Usage. Subsequently,
+hancement over the baseline, i.e., NoAgent. The                                              we exclude one tool at a time from our approach,
+                                                                                          13649
+  Models                                  Scales    NoAgent      Rule-based           ReAct          Tool-Planning         OpenAIFunc
+  Closed source LLM
+  GPT-3-davinci (GPT-3, 2022)             175B          16.8     24.8 ( ↑ 7.9)     22.8 ( ↑ 5.9)       18.8 ( ↑ 2.1)              -
+  GPT-3.5-turbo (GPT-3.5, 2023)             -           19.8     31.7 ( ↑ 11.9)    30.7 ( ↑ 10.8)      21.8 ( ↑ 2.0)        28.7 ( ↑ 8.9)
+  GPT-4-turbo (GPT-4, 2023)                 -           21.8     37.6 ( ↑ 15.8)    34.7 ( ↑ 12.9)      25.7 ( ↑ 4.0)        34.7 ( ↑ 12.9)
+  Claude-2 (Claude, 2023)                   -           8.9      10.9 ( ↑ 2.0)      9.9 ( ↑ 1.0)        9.9 ( ↑ 1.0)              -
+  Open source LLM
+  Llama2-70B-chat (Llama, 2023)            70B          10.9     12.9 ( ↑ 2.0)     11.9 ( ↑ 1.1)       11.9 ( ↑ 1.1)                -
+  Code Llama-34B (Rozière et al., 2023)    34B          2.0       5.0 ( ↑ 3.0)     4.0 ( ↑ 2.0)         4.0 ( ↑ 2.0)                -
+  WizardCoder-34B (Luo et al., 2023)       34B          2.0       6.9 ( ↑ 5.0)     5.0 ( ↑ 2.7)         4.0 ( ↑ 2.0)                -
+  DeepSeek-33B (DeepSeek, 2023)            33B          13.9     24.8 ( ↑ 10.9)    20.8 ( ↑ 6.9)       15.8 ( ↑ 2.0)                -
+  Vicuna-13B (Chiang et al., 2023)         13B          1.0          1.0               0.0                 0.0                      -
+
+Table 3: The Pass@1 results of different agent strategies on C ODE AGENT B ENCH. “NoAgent” refers to the baseline
+where LLMs generate code solely based on the provided documentation.
+
+     Models                                        NoAgent      Rule-based          ReAct              Plan            OpenAIFunc
+     GPT-3.5-turbo (GPT-3.5, 2023)                  72.6        82.3 ( ↑ 9.7)     79.3 ( ↑ 6.7)     73.8 ( ↑ 1.2)       81.1 ( ↑ 8.5)
+     CodeLLaMA-34B (Rozière et al., 2023)           51.8        59.7 ( ↑ 7.9)     58.2 ( ↑ 6.4)     54.1 ( ↑ 2.3)            -
+     WizardCoder-34B (Luo et al., 2023)             73.2        79.4 ( ↑ 6.2)     77.6 ( ↑ 4.4)     75.6 ( ↑ 2.4)            -
+     DeepSeek-33B (DeepSeek, 2023)                  78.7        84.8 ( ↑ 6.1)     83.5 ( ↑ 4.8)     81.1 ( ↑ 2.4)            -
+
+              Table 4: The Pass@1 results of different agent strategies on the HumanEval benchmark.
+
+
+                              # Usage     Ablation Result                                           NumpyML-easy         NumpyML-hard
+                                                                       Our Agent
+  GPT-3.5-ReAct                    -             30.7                  GPT-3.5                             14                   3
+  Website Search                  0.30      27.7 ( ↓ 3.0)              GPT-4                               17                   5
+  Documentation Reading           0.84      26.7 ( ↓ 4.0)              IDE Product
+  Code Symbol Navigation          2.45      22.8 ( ↓ 7.9)              GitHub Copilot                      7                    1
+  Format Check                    0.17      29.7 ( ↓ 1.0)              Amazon CodeWhisperer                5                    0
+  Code Interpreter                0.22      29.7 ( ↓ 1.0)              Agent Product
+                                                                       AutoGPT (with GPT-4)                2                    0
+  GPT-3.5-NoAgent                  -             19.8
+                                                                   Table 6: Performance compared with commercial pro-
+Table 5: Average tool usage number and ablation result             gramming products (the number of solved problems).
+on C ODE AGENT B ENCH for GPT-3.5-ReAct.
+
+                                                                   6     Discussion
+allowing us to isolate and understand the individ-                 6.1     Compared with Commercial Products
+ual contribution of each tool. The performances
+                                                                   Nowadays, a lot of mature commercial products
+of these ablation scenarios are shown in Table 5,
+                                                                   are available to support complex code generation
+categorized under the column Ablation Result.
+                                                                   tasks. It is essential to compare C ODE AGENT with
+   Our findings reveal that the code symbol naviga-                these established products. We categorize them
+tion tool is particularly pivotal in our agent system.             into two distinct groups: (1) IDE Products are
+On average, C ODE AGENT utilizes this tool approx-                 AI-powered autocomplete-style suggestion tools
+imately 2.45 times per code generation, a frequency                integrated within IDE software. Notable examples
+higher than the counterpart of other tools. Notably,               are GitHub Copilot (Copilot, 2023) and Amazon
+the performance significantly declines when this                   CodeWhisperer (CodeWhisperer, 2023). (2) Agent
+tool is omitted, underscoring its critical role in en-             Products encompass autonomous agents driven by
+hancing the effectiveness of our approach. Further-                GPT-4 (GPT-4, 2023). They are capable of execut-
+more, the ablation results confirm that each tool                  ing a variety of tasks, including coding, such as
+in our agent system contributes positively to the                  well-known AutoGPT (AutoGPT, 2023).
+overall improvement. This evidence not only val-                      Considering that IDE products are primarily de-
+idates the effectiveness of our strategy design but                signed as completion systems, we limit human in-
+also highlights the utility of programming tools in                teractions to less than three times per task to ensure
+addressing the repo-level coding task.                             a fair comparison. The evaluation is conducted on
+                                                               13650
+the numpyml subset of C ODE AGENT B ENCH man-           of our C ODE AGENT, we construct C ODE AGENT-
+ually by an experienced Python developer. Table 6       B ENCH, a new benchmark for repo-level code gen-
+shows the number of solved problems on different        eration that includes rich information about the
+products and our C ODE AGENT.                           code repository. Experiments on nine LLMs show
+   The results demonstrate that C ODE AGENT             that C ODE AGENT achieves a significant improve-
+works better than existing products on complex          ment on diverse programming tasks, highlighting
+coding scenarios. In addition, despite both             its potential in real-world coding challenges.
+C ODE AGENT and AutoGPT being agent-based
+approaches, C ODE AGENT exhibits numerous op-           8   Acknowledgments
+timizations tailored for repo-level coding tasks,       This research is supported by the National Nat-
+thereby making it better than AutoGPT in the task.      ural Science Foundation of China under Grant
+Compared to IDE products that can also analyze          No.62192733, 61832009, 62192731, 62192730,
+complex code dependencies, our method benefits          62072007, the Major Program (JD) of Hubei
+from the flexibility inherent in the agent system,      Province (No.2023BAA024).
+resulting in a substantial lead over IDE products.
+                                                        Limitation
+6.2 Qualitative Analysis
+We explore generated cases to assess C ODE AGENT        Although our work is a very early exploration of
+(e.g., GPT-3.5-ReAct) and the baseline model (e.g.,     this area, there are several limitations on our work
+GPT-3.5-NoAgent). The comparative analysis is           that we aim to address as quickly as possible:
+shown in Figure 4 and Figure 5.                            Firstly, we propose a new task format for
+   C ODE AGENT typically begins with examin-            the repo-level code generation task and release
+ing the code dependencies in the repository, sub-       C ODE AGENT B ENCH. Our preliminary experi-
+sequently refining its code generation strategy         ments prove that the impact of LLMs’ memoriza-
+through a step-by-step process known as “chain-         tion on pre-training data is slight for fair evaluation.
+of-thought”. As in Figure 4, the input documen-         However, it still needs further experiments to elimi-
+tation specifies the need for a class with member       nate this hidden danger. We will follow the relevant
+functions set_params and summary. C ODE AGENT,          research to further understand its influence on our
+assisting with the symbol navigation tool, finds the    proposed benchmark.
+base class and identifies the member function _ker-        Secondly, we only incorporate simple tools to
+nel as a key component for implementation. This         C ODE AGENT. Some advanced programming tools
+is reflected in the generated thought process:          are not explored. The limitation may restrict the
+                                                        agent’s ability in some challenging scenarios.
+     "The set_params and summary methods                   Thirdly, in Section 6.1, the comparison with
+     can be inherited from the base class               commercial products is not rigorous since exper-
+     without modifications ... The ‘_kernel’            iments are done manually. We will study how to
+     method needs to be overridden ..."                 evaluate IDE products more standardly.
+     (Generated by C ODE AGENT-GPT-3.5-ReAct)
+                                                           Finally, since LLMs are very sensitive to input
+                                                        prompts, it is very important to optimize prompts in
+On the contrary, GPT-3.5-NoAgent lacks access to        the agent system. We will continue to explore better
+detailed information on code structures, resulting      agent strategies based on the current approach.
+in incorrect code solutions, as depicted in Figure 5.
+                                                        Ethics Consideration
+7   Conclusion
+                                                        CodeAgent and its benchmark are inspired and
+We formalize the repo-level code generation task to     collected from real-world code repositories. We
+evolve real-world coding challenges. To enhance         manually check all samples in our benchmark. We
+LLMs to handle repo-level code generation, we           ensure all samples do not contain private informa-
+propose C ODE AGENT, a novel LLM-based agent            tion or offensive content. Throughout our experi-
+framework. C ODE AGENT develops five program-           ments, we diligently annotated the sources of all
+ming tools, enabling LLMs to interact with soft-        used data, ensuring compliance with the respective
+ware artifacts, and designs four agent strategies to    license specifications.
+optimize tools’ usage. To evaluate the effectiveness
+                                                   13651
+References                                                   DeepSeek. 2023. https://huggingface.co/
+                                                               deepseek-ai.
+Rie Kubota Ando and Tong Zhang. 2005. A framework
+  for learning predictive structures from multiple tasks     Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+  and unlabeled data. Journal of Machine Learning              Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng
+  Research, 6:1817–1853.                                       Sha, Xin Peng, and Yiling Lou. 2023. Classe-
+                                                               val: A manually-crafted benchmark for evaluating
+Galen Andrew and Jianfeng Gao. 2007. Scalable train-
+                                                               llms on class-level code generation. arXiv preprint
+  ing of L1-regularized log-linear models. In Proceed-
+                                                               arXiv:2308.01861.
+  ings of the 24th International Conference on Machine
+  Learning, pages 33–40.                                     GPT-3. 2022. https://platform.openai.
+Ben Athiwaratkun, Sanjay Krishna Gouda, Zijian Wang,           com/docs/models/gpt-base.
+  Xiaopeng Li, Yuchen Tian, Ming Tan, Wasi Uddin             GPT-3.5. 2023. https://platform.openai.
+  Ahmad, Shiqi Wang, Qing Sun, Mingyue Shang, et al.           com/docs/models/gpt-3-5.
+  2022. Multi-lingual evaluation of code generation
+  models. arXiv preprint arXiv:2210.14868.                   GPT-4.  2023.       https://platform.
+                                                               openai.com/docs/models/
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten
+                                                               gpt-4-and-gpt-4-turbo.
+   Bosma, Henryk Michalewski, David Dohan, Ellen
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. 2021.   Dan Hendrycks, Steven Basart, Saurav Kadavath, Man-
+   Program synthesis with large language models. arXiv         tas Mazeika, Akul Arora, Ethan Guo, Collin Burns,
+   preprint arXiv:2108.07732.                                  Samir Puranik, Horace He, Dawn Song, et al. 2021.
+AutoGPT. 2023. https://agpt.co.                                Measuring coding challenge competence with apps.
+                                                               arXiv preprint arXiv:2105.09938.
+BabyAGI. 2023.    https://github.com/
+  yoheinakajima/babyagi.                                     Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and
+                                                                Luke Zettlemoyer. 2018. Mapping language to
+Chat. 2022. https://chat.openai.com/.                           code in programmatic context. arXiv preprint
+                                                                arXiv:1808.09588.
+Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan,
+  Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. 2022.           Xue Jiang, Yihong Dong, Lecheng Wang, Qiwei
+  Codet: Code generation with generated tests. arXiv           Shang, and Ge Li. 2023. Self-planning code gen-
+  preprint arXiv:2207.10397.                                   eration with large language model. arXiv preprint
+                                                               arXiv:2303.06689.
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+ Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-           Carlos E Jimenez, John Yang, Alexander Wettig,
+ plan, Harri Edwards, Yuri Burda, Nicholas Joseph,             Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R
+ Greg Brockman, et al. 2021. Evaluating large                  Narasimhan. 2023. Swe-bench: Can language mod-
+ language models trained on code. arXiv preprint               els resolve real-world github issues? In The Twelfth
+ arXiv:2107.03374.                                             International Conference on Learning Representa-
+                                                               tions.
+Xinyun Chen, Maxwell Lin, Nathanael Schärli, and
+  Denny Zhou. 2023. Teaching large language models           Jia Li, Ge Li, Yunfei Zhao, Yongmin Li, Zhi Jin,
+  to self-debug. CoRR, abs/2304.05128.                          Hao Zhu, Huanyu Liu, Kaibo Liu, Lecheng Wang,
+                                                                Zheng Fang, Lanshen Wang, Jiazheng Ding, Xuan-
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng,
+                                                                ming Zhang, Yihong Dong, Yuqi Zhu, Bin Gu, and
+ Zhanghao Wu, Hao Zhang, Lianmin Zheng, Siyuan
+                                                                Mengfei Yang. 2024. Deveval: Evaluating code
+ Zhuang, Yonghao Zhuang, Joseph E Gonzalez, et al.
+                                                                generation in practical software projects. CoRR,
+ 2023. Vicuna: An open-source chatbot impressing
+                                                                abs/2401.06401.
+ gpt-4 with 90%* chatgpt quality. See https://vicuna.
+ lmsys. org (accessed 14 April 2023).                        Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas
+Claude. 2023. https://www.anthropic.com/                       Muennighoff, Denis Kocetkov, Chenghao Mou, Marc
+  index/claude-2.                                              Marone, Christopher Akiki, Jia Li, Jenny Chim, et al.
+                                                               2023. Starcoder: may the source be with you! arXiv
+CodeWhisperer. 2023. https://aws.amazon.                       preprint arXiv:2305.06161.
+  com/codewhisperer/.
+                                                             Yujia Li, David Choi, Junyoung Chung, Nate Kushman,
+Copilot. 2023.    https://github.com/                          Julian Schrittwieser, Rémi Leblond, Tom Eccles,
+  features/copilot.                                            James Keeling, Felix Gimeno, Agustin Dal Lago,
+                                                               et al. 2022. Competition-level code generation with
+Arghavan Moradi Dakhel, Vahid Majdinasab, Amin                 alphacode. Science, 378(6624):1092–1097.
+  Nikanjam, Foutse Khomh, Michel C Desmarais, and
+  Zhen Ming Jack Jiang. 2023. Github copilot ai pair         Dianshu Liao, Shidong Pan, Qing Huang, Xiaoxue Ren,
+  programmer: Asset or liability? Journal of Systems           Zhenchang Xing, Huan Jin, and Qinying Li. 2023.
+  and Software, 203:111734.                                    Context-aware code generation framework for code
+
+                                                        13652
+  repositories: Local, global, and third-party library   Timo Schick, Jane Dwivedi-Yu, Roberto Dessì, Roberta
+  awareness. arXiv preprint arXiv:2312.05772.              Raileanu, Maria Lomeli, Luke Zettlemoyer, Nicola
+                                                           Cancedda, and Thomas Scialom. 2023. Toolformer:
+Llama. 2023.  https://huggingface.co/                      Language models can teach themselves to use tools.
+  meta-llama/Llama-2-70b-chat.                             arXiv preprint arXiv:2302.04761.
+
+Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xi-           Yongliang Shen, Kaitao Song, Xu Tan, Dongsheng Li,
+  ubo Geng, Wenxiang Hu, Chongyang Tao, Jing Ma,           Weiming Lu, and Yueting Zhuang. 2023. Hugging-
+  Qingwei Lin, and Daxin Jiang. 2023. Wizardcoder:         gpt: Solving AI tasks with chatgpt and its friends in
+  Empowering code large language models with evol-         huggingface. CoRR, abs/2303.17580.
+  instruct. arXiv preprint arXiv:2306.08568.
+                                                         Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao
+Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan      Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang,
+  Wang, Yingbo Zhou, Silvio Savarese, and Caiming          Xu Chen, Yankai Lin, Wayne Xin Zhao, Zhewei
+  Xiong. 2022. Codegen: An open large language             Wei, and Ji-Rong Wen. 2023a. A survey on large
+   model for code with multi-turn program synthesis.       language model based autonomous agents. CoRR,
+   arXiv preprint arXiv:2203.13474.                        abs/2308.11432.
+OpenAIFunc.      2023.              https: Lei Wang, Wanyu Xu, Yihuai Lan, Zhiqiang Hu,
+  //openai.com/blog/                         Yunshi Lan, Roy Ka-Wei Lee, and Ee-Peng Lim.
+  function-calling-and-other-api-updates. 2023b. Plan-and-solve prompting: Improving zero-
+                                             shot chain-of-thought reasoning by large language
+OpenDevin. 2024.       https://github.com/   models. arXiv preprint arXiv:2305.04091.
+  OpenDevin/OpenDevin.
+                                                         Zhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yiwen
+Norman Di Palo, Arunkumar Byravan, Leonard Hasen-          Ding, Boyang Hong, Ming Zhang, Junzhe Wang,
+  clever, Markus Wulfmeier, Nicolas Heess, and Mar-        Senjie Jin, Enyu Zhou, Rui Zheng, Xiaoran Fan,
+  tin A. Riedmiller. 2023. Towards A unified agent         Xiao Wang, Limao Xiong, Yuhao Zhou, Weiran
+  with foundation models. CoRR, abs/2307.09668.            Wang, Changhao Jiang, Yicheng Zou, Xiangyang
+                                                           Liu, Zhangyue Yin, Shihan Dou, Rongxiang Weng,
+Haojie Pan, Zepeng Zhai, Hao Yuan, Yaojia Lv, Ruiji
+                                                           Wensen Cheng, Qi Zhang, Wenjuan Qin, Yongyan
+  Fu, Ming Liu, Zhongyuan Wang, and Bing Qin.
+                                                           Zheng, Xipeng Qiu, Xuanjing Huan, and Tao Gui.
+  2023. Kwaiagents: Generalized information-seeking
+                                                           2023. The rise and potential of large language model
+  agent system with large language models. CoRR,
+                                                           based agents: A survey. CoRR, abs/2309.07864.
+  abs/2312.04889.
+
+Shishir G. Patil, Tianjun Zhang, Xin Wang, and           John Yang, Carlos E Jimenez, Alexander Wettig, Kil-
+  Joseph E. Gonzalez. 2023. Gorilla: Large lan-            ian Lieret, Shunyu Yao, Karthik Narasimhan, and
+  guage model connected with massive apis. CoRR,           Ofir Press. 2024. Swe-agent: Agent-computer inter-
+  abs/2305.15334.                                          faces enable automated software engineering. arXiv
+                                                           preprint arXiv:2405.15793.
+Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan
+  Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang,      John Yang, Akshara Prabhakar, Karthik Narasimhan,
+  Bill Qian, Sihan Zhao, Runchu Tian, Ruobing Xie,         and Shunyu Yao. 2023. Intercode: Standardizing
+  Jie Zhou, Mark Gerstein, Dahai Li, Zhiyuan Liu,          and benchmarking interactive coding with execution
+  and Maosong Sun. 2023. Toolllm: Facilitating large       feedback. arXiv preprint arXiv:2306.14898.
+  language models to master 16000+ real-world apis.
+  CoRR, abs/2307.16789.                                  Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+                                                           Shafran, Karthik Narasimhan, and Yuan Cao. 2022.
+Mohammad Sadegh Rasooli and Joel R. Tetreault. 2015.       React: Synergizing reasoning and acting in language
+ Yara parser: A fast and accurate dependency parser.       models. arXiv preprint arXiv:2210.03629.
+ Computing Research Repository, arXiv:1503.06733.
+ Version 2.                                              Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan
+                                                           Vasilescu, and Graham Neubig. 2018. Learning to
+Stephen Robertson, Hugo Zaragoza, et al. 2009. The         mine aligned code and natural language pairs from
+   probabilistic relevance framework: Bm25 and be-         stack overflow. In Proceedings of the 15th interna-
+  yond. Foundations and Trends® in Information Re-         tional conference on mining software repositories,
+   trieval, 3(4):333–389.                                  pages 476–486.
+
+Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten   Hao Yu, Bo Shen, Dezhi Ran, Jiaxin Zhang, Qi Zhang,
+  Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,         Yuchi Ma, Guangtai Liang, Ying Li, Tao Xie, and
+  Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.        Qianxiang Wang. 2023. Codereval: A benchmark
+  Code llama: Open foundation models for code. arXiv       of pragmatic code generation with generative pre-
+  preprint arXiv:2308.12950.                               trained models. arXiv preprint arXiv:2302.00288.
+
+                                                    13653
+Daoguang Zan, Bei Chen, Dejian Yang, Zeqi Lin,
+  Minsu Kim, Bei Guan, Yongji Wang, Weizhu Chen,
+  and Jian-Guang Lou. 2022. Cert: Continual pre-
+  training on sketches for library-oriented code genera-
+  tion. arXiv preprint arXiv:2206.06888.
+Kechi Zhang, Ge Li, Jia Li, Zhuo Li, and Zhi Jin. 2023a.
+  Toolcoder: Teach code generation models to use apis
+  with search tools. arXiv preprint arXiv:2305.04032.
+Kechi Zhang, Zhuo Li, Jia Li, Ge Li, and Zhi Jin. 2023b.
+  Self-edit: Fault-aware code editor for code genera-
+  tion. In Proceedings of the 61st Annual Meeting of
+  the Association for Computational Linguistics (Vol-
+  ume 1: Long Papers), ACL 2023, Toronto, Canada,
+  July 9-14, 2023, pages 769–787.
+Zhuosheng Zhang, Aston Zhang, Mu Li, and Alex
+  Smola. 2022. Automatic chain of thought prompt-
+  ing in large language models. arXiv preprint
+  arXiv:2210.03493.
+Qinkai Zheng, Xiao Xia, Xu Zou, Yuxiao Dong, Shan
+  Wang, Yufei Xue, Zihan Wang, Lei Shen, Andi Wang,
+  Yang Li, et al. 2023. Codegeex: A pre-trained model
+  for code generation with multilingual evaluations on
+  humaneval-x. arXiv preprint arXiv:2303.17568.
+
+
+
+
+                                                      13654
+A     Details of Case Study                             self-contained test suite, and canonical solution,
+                                                        which form the input and output.
+Here we show the illustration of the case study
+for C ODE AGENT (GPT-3.5-ReAct) and GPT-3.5-            B.1.1 Benchmark Input
+NoAgent in Figures 4 and 5.                             Documentation Documentations are the main in-
+   We can find a distinct operational pattern in        put component of our benchmark and describe the
+ C ODE AGENT in Figure 4. Through meticulous            generation targets. We follow the code documen-
+analysis, C ODE AGENT leverages code symbol nav-        tation format used in a popular documentation cre-
+igation tool to scrutinize information within the       ation tool Sphinx 10 . Figure 1 illustrates an example
+‘utils.kernels’ module, where the target class for      of documentation in C ODE AGENT B ENCH, where
+implementation resides. Our custom-designed tool        different elements are highlighted with diverse col-
+proficiently navigates to the module, offering in-      ors. When accomplishing a new task, our prepared
+sights into its contents, including package details,    documentation can provide LLMs with all-sided
+defined functions and classes, through a static anal-   details that need to be considered to ensure that
+ysis process. Importantly, C ODE AGENT discovers        the generation target has been well-defined and
+a crucial class named ‘KernelBase’ and obtains          constrained.
+detailed information about it with another use of
+the tool. Within ‘KernelBase’, there is an abstract     Contextual Dependency Contextual depen-
+method named ‘_kernel’ that needs to be imple-          dency is an important role in our benchmark. To
+mented. C ODE AGENT recognizes this method as           accurately identify these dependencies, we devel-
+essential for the development process, highlight-       oped a static analysis tool using tree-sitter 11 . Our
+ing its importance. Compared with the NoAgent           designed tool allows us to extract all user-defined
+in Figure 5, our approach accurately captures this      elements (such as class names, function names,
+content hidden in the complex information in the        constants, and global variables) and public library
+code repository, and precisely implements the final     names from each file. These elements are then
+code.                                                   stored in a knowledge base. For any given function,
+   We also notice that during the third tool invoca-    we use this knowledge base to locate its source file,
+tion, C ODE AGENT calls the code interpreter tool       parse the file to identify all user-defined symbols
+and execute a piece of code that appears insignifi-     and public libraries, and finally determine its con-
+cant. We have observed similar situations in other      textual dependencies by exact matching of symbol
+cases as well. We attribute this to LLMs still lack-    names and scopes. On average, each sample in
+ing proficient mastery of some complex program-         C ODE AGENT B ENCH involves around 3.1 code de-
+ming tools. This insight directs our future research    pendencies, thereby closely simulating real-world
+towards enhancing LLMs’ ability to more effec-          programming conditions. Detailed information is
+tively use complex programming tools.                   shown in Table 2.
+                                                        Runtime Environment Developers often use
+B     Details of C ODE AGENT B ENCH
+                                                        feedback from running programs to find and fix
+In this section, we introduce the details of our        mistakes. In C ODE AGENT B ENCH, we build a
+C ODE AGENT B ENCH benchmark. We describe its           sandbox environment for each task. The sandbox
+composition format (Section B.1), the construction      environment provides all configurations needed to
+process (Section 5.1), and provide a detailed com-      run the repository and offers convenient interaction
+parison with existing benchmarks (Section B.2).         to ensure an all-sided evaluation of LLMs’ perfor-
+                                                        mance on repo-level code generation.
+B.1    Benchmark Composition
+                                                        B.1.2 Benchmark Ground-truth Output
+Code repository contains intricate invocation re-
+lationships. Only with a deep understanding of          Canonical Solution We use the answers included
+code repository can LLMs generate satisfying pro-       in the repository as the initial solutions and invite
+grams that not only adhere to requirements but          three participants to manually refine them. The
+also seamlessly integrate with the current reposi-      first participant checks surface errors of solutions
+tory. Inspired by this, each task of our benchmark      based on the repository information. The second
+provides rich information, encompassing the docu-          10
+                                                                https://www.sphinx-doc.org/
+mentation, code dependency, runtime environment,           11
+                                                                https://tree-sitter.github.io/tree-sitter/
+
+                                                   13655
+      Input
+      "PolynomialKernel"
+      ******************
+      class numpy_ml.utils.kernels.PolynomialKernel(d=3, gamma=None, c0=1)
+            The degree-*d* polynomial kernel.
+
+      -[ Notes ]-
+      For input vectors \mathbf{x} and \mathbf{y}, the polynomial kernel is:
+      k(\mathbf{x}, \mathbf{y}) = (\gamma \mathbf{x}^\top \mathbf{y} + c_0)^d
+      In contrast to the linear kernel, the polynomial kernel also computes similarities *across* dimensions of the **x** and **y** vectors, allowing it to account for interactions between features.
+      As an instance of the dot product family of kernels, the polynomial kernel is invariant to a rotation of the coordinates about the origin, but *not* to translations.
+
+      Parameters:
+      * **d** (*int*) -- Degree of the polynomial kernel. Default is 3.
+      * **gamma** (*float** or **None*) -- A scaling parameter for the dot product between *x* and *y*, determining the amount of smoothing/resonlution of the kernel. Larger values result in
+      greater smoothing. If None, defaults to 1 / *C*. Sometimes referred to as the kernel bandwidth. Default is None.
+      * **c0** (*float*) -- Parameter trading off the influence of higher-order versus lower-order terms in the polynomial. If *c0* = 0, the kernel is said to be homogenous. Default is 1.
+
+      set_params(summary_dict)
+      Set the model parameters and hyperparameters using the settings in *summary_dict*.
+      Parameters:
+           **summary_dict** (*dict*) -- A dictionary with keys 'parameters' and 'hyperparameters', structured as would be returned by the "summary()" method. If a particular (hyper)parameter is not
+           included in this dict, the current value will be used.
+      Returns:
+           **new_kernel** (Kernel instance) -- A kernel with parameters and hyperparameters adjusted to those specified in *summary_dict*.
+
+      summary()
+      Return the dictionary of model parameters, hyperparameters, and ID
+
+
+
+
+      Tool-1 (Code Symbol Navigation)
+      SymbolSearch(numpy_ml.utils.kernels)
+      =>
+      import_package_or_function: re, np, ABC, abc, abstractmethod
+      mannual_defined_function: pairwise_l2_distances, kernel_checks
+      mannual_defined_class: LinearKernel, KernelInitializer, KernelBase, RBFKernel
+
+      Tool-2 (Code Symbol Navigation)
+      SymbolSearch(KernelBase)
+      =>
+      The code is:
+      ```python
+      class KernelBase(ABC):
+          def __init__(self):
+            …
+          @abstractmethod
+          def _kernel(self, X, Y):
+            …
+          def __call__(self, X, Y=None):
+            …
+          def __str__(self):
+            …
+          def summary(self):
+            …
+          def set_params(self, summary_dict):
+            …
+      ```
+
+      Tool-3 (Code Interpreter)
+      PythonREPL(……)                                The input code:
+      =>                                            import numpy as np
+      The output is empty.                          from numpy_ml.utils.kernels import KernelBase
+
+      CodeAgent (GPT-3.5-ReAct) Output
+      Let's continue with the implementation of the PolynomialKernel class. The kernel function for this class involves a dot product of the input vectors, raised to a specified degree, and optionally
+      scaled and shifted. This can be implemented using numpy's dot product function and basic arithmetic operations.
+
+      The set_params and summary methods can be inherited from the base class without modifications, as they should work the same for any kernel. The `_kernel` method needs to be overridden
+      to implement the polynomial kernel function.
+
+      Here is the completed implementation:
+
+      ```python
+      class PolynomialKernel(KernelBase):
+            def __init__(self, d=3, gamma=None, c0=1):
+                super().__init__()
+                self.parameters = {"d": d, "c0": c0, "gamma": gamma if gamma is not None else 1.0}
+                self.hyperparameters = {"id": "PolynomialKernel"}
+
+            def _kernel(self, X, Y):
+                gamma = self.parameters["gamma"]
+                c0 = self.parameters["c0"]
+                d = self.parameters["d"]
+                result = (gamma * np.dot(X, Y.T) + c0) ** d
+                return result
+      ```
+
+      In this class, the `__init__` method sets up the degree, gamma, and c0 parameters, with defaults as specified. If gamma is not provided (None), it's default value is set to 1.
+
+      The `_kernel` method implements the polynomial kernel function. It first retrieves the parameters from the class' attribute `parameters`. It then computes the polynomial kernel function as
+      `(gamma * dot_product(X, Y) + c0) ** d` and returns the result. Note that `np.dot(X, Y.T)` is used to compute the dot product of X and Y. The transpose of Y (`Y.T`) is used since in numpy, the dot
+      function computes dot product along the last axis of the input arrays, so we need to make sure the vectors in X and Y align correctly.
+
+
+
+Figure 4: Case study of our proposed C ODE AGENT (GPT-3.5-ReAct) on C ODE AGENT B ENCH. We omit some
+input prompts and LLM’s thoughts for viewing convenience.
+
+
+person runs the solutions to identify and fix execu-                                                         B.1.3            Benchmark Evaluation
+tion bugs. The last participant is responsible for
+executing solutions with the test suite, aiming to                                                           Self-Contained Test Suite To evaluate the cor-
+ensure its functional correctness. Through the it-                                                           rectness of generated programs, C ODE AGENT-
+erative process, we can ensure the robustness and                                                            B ENCH furnishes a self-contained test suite for
+reliability of solutions as much as possible.                                                                each task. We first analyze and extract test cases
+                                                                                                             contained in the repository. We then invite two
+                                                                                                             participants to manually add test cases to enhance
+                                                                                                  13656
+      GPT-3.5-NoAgent Output
+      Here is the implementation of the `PolynomialKernel` class in the `numpy_ml.utils.kernels` module:
+
+      ```python
+      class PolynomialKernel:
+          def __init__(self, d=3, gamma=None, c0=1):
+            self.d = d
+            self.gamma = gamma
+            self.c0 = c0
+
+            def set_params(self, summary_dict):
+              if 'parameters' in summary_dict:
+                  self.d = summary_dict['parameters'].get('d', self.d)
+                  self.gamma = summary_dict['parameters'].get('gamma', self.gamma)
+                  self.c0 = summary_dict['parameters'].get('c0', self.c0)
+              if 'hyperparameters' in summary_dict:
+                  self.d = summary_dict['hyperparameters'].get('d', self.d)
+                  self.gamma = summary_dict['hyperparameters'].get('gamma', self.gamma)
+                  self.c0 = summary_dict['hyperparameters'].get('c0', self.c0)
+
+            def summary(self):
+              return {
+                 'parameters': {'d': self.d, 'gamma': self.gamma, 'c0': self.c0},
+                 'hyperparameters': {'d': self.d, 'gamma': self.gamma, 'c0': self.c0},
+                 'ID': id(self)
+              }
+      ```
+
+      Note that the `PolynomialKernel` class has three parameters in its constructor: `d`, `gamma`, and `c0`. The `set_params` method allows updating the parameters of the kernel using a dictionary,
+      and the `summary` method returns a dictionary containing the current parameters, hyperparameters, and the ID of the kernel instance. ...
+
+
+
+Figure 5: Case study of the baseline GPT-3.5-NoAgent on C ODE AGENT B ENCH. Compared with Figure 4, GPT-
+3.5-NoAgent generates the incorrect programs.
+
+
+its coverage as much as possible. In C ODE AGENT-
+B ENCH, each task has at least one unit test case.
+Whereafter, another participant manually checks
+the correctness of the test suite. Given a new task,
+we run the corresponding unit test code to verify
+the generated programs based on our sandbox envi-
+ronment. We treat the generated program correctly
+only if its output aligns with all ground truths of
+the test suite. For fairness, LLMs can not access
+the test suite during code generation.
+
+B.2    Compared with Existing Benchmarks
+We perform a detailed analysis of existing code gen-
+eration benchmarks in Table 7. Compared to the
+previous benchmarks, our C ODE AGENT B ENCH
+has two main advantages. On the one hand, it
+is closer to real-world code generation scenarios.
+On the other hand, C ODE AGENT B ENCH provides
+pretty complex information that is related to the
+code repository, including documentation, contex-
+tual dependency, runtime environments, and test
+suites.
+
+
+
+
+                                                                                                13657
+ Benchmark                           Language          Source            Task          Samples     # Tests   # Line   # Tokens        # Input
+
+ CoNaLA (Yin et al., 2018)            Python       Stack Overflow   Statement-level      500         ✖         1        4.6             NL
+ Concode (Iyer et al., 2018)           Java            Github        Function-level      2000        ✖         -        26.3            NL
+ APPS (Hendrycks et al., 2021)        Python        Contest Sites     Competitive        5000        ✔       21.4       58           NL + IO
+ HumanEval (Chen et al., 2021)        Python          Manual         Function-level      164         ✔       11.5       24.4      NL + SIG + IO
+ MBXP (Athiwaratkun et al., 2022)   Multilingual      Manual         Function-level      974         ✔        6.8       24.2            NL
+ InterCode (Yang et al., 2023)      SQL, Bash         Manual         Function-level    200, 1034     ✔         -         -          NL + ENV
+ CodeContests (Li et al., 2022)     Python, C++     Contest Sites     Competitive        165         ✔       59.8      184.8         NL + IO
+ ClassEval (Du et al., 2023)          Python          Manual          Class-level        100         ✔       45.7      123.7        NL + CLA
+ CoderEval (Yu et al., 2023)        Python, Java       Github        Project-level       230         ✔       30.0      108.2         NL + SIG
+ RepoEval (Liao et al., 2023)         Python           Github       Repository-level     383         ✖         -         -           NL + SIG
+                                                                                                                                 Software Artifacts
+ C ODE AGENT B ENCH                   Python           Github       Repository-level     101         ✔       57.0      477.6        (NL + DOC
+                                                                                                                                  + DEP + ENV)
+
+
+Table 7: The statistics of existing widely-used code generation benchmarks. # Tests: whether a benchmark has the
+test suite. # Line: average lines of code. # Tokens: average number of tokens. # Input: Input information of LLMs.
+NL: Natural language requirement. IO: Input and output pairs. SIG: Function signature. CLA: Class skeleton as
+described in Section 2.2. ENV: Runtime environment. DOC: Code documentation. DEP: Code dependency.
+
+
+
+
+                                                                    13658
+

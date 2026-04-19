@@ -1,0 +1,916 @@
+                                                                                                                                                                                      2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE)
+
+
+
+                                                                                                                                                                     An LLM-Based Agent-Oriented Approach for
+                                                                                                                                                                      Automated Code Design Issue Localization
+                                                                                                                                                                              Fraol Batole                              David OBrien                             Tien N. Nguyen
+                                                                                                                                                                     Computer Science Department               Computer Science Department                Computer Science Department
+                                                                                                                                                                          Tulane University                       Iowa State University                  The University of Texas at Dallas
+                                                                                                                                                                       New Orleans, LA, USA                          Ames, IA, USA                               Dallas, TX, USA
+                                                                                                                                                                         fbatole@tulane.edu                        davidob@iastate.edu                      tien.n.nguyen@utdallas.edu
+
+                                                                                                                                                                                                Robert Dyer                                           Hridesh Rajan
+   2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) | 979-8-3315-0569-1/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSE55347.2025.00100
+
+
+
+
+                                                                                                                                                                                    Computer Science Department                              Computer Science Department
+                                                                                                                                                                                    University of Nebraska-Lincoln                                Tulane University
+                                                                                                                                                                                          Lincoln, NE,USA                                      New Orleans, LA, USA
+                                                                                                                                                                                            rdyer@unl.edu                                         hrajan@tulane.edu
+
+
+
+                                                                                                                                                                Abstract—Maintaining software design quality is crucial for         reduce development costs and promote developer productivity.
+                                                                                                                                                             the long-term maintainability and evolution of systems. However,       With recent advancements in code intelligence tasks since
+                                                                                                                                                             design issues such as poor modularity and excessive complexity         these prior works, the next logical step towards automated
+                                                                                                                                                             often emerge as codebases grow. Developers rely on external tools,
+                                                                                                                                                             such as program analysis techniques, to identify such issues. This     refactoring is design issue localization.
+                                                                                                                                                             work leverages Large Language Models (LLMs) to develop an                 Large Language Models (LLMs) have demonstrated signifi-
+                                                                                                                                                             automated approach for analyzing and localizing design issues.         cant capabilities in code-related tasks [3, 4]. However, their po-
+                                                                                                                                                                Large language models have demonstrated significant perfor-         tential for recognizing software design issues remains largely
+                                                                                                                                                             mance on coding tasks, but directly leveraging them for design         unexplored. Our rationale of leveraging LLMs is based on the
+                                                                                                                                                             issue localization is challenging. Large codebases exceed typical
+                                                                                                                                                             LLM context windows, and program analysis tool outputs in              fact that LLMs have been trained on a vast amount of source
+                                                                                                                                                             non-textual modalities (e.g., graphs or interactive visualizations)    code and demonstrated strong capabilities in several code-
+                                                                                                                                                             are incompatible with LLMs’ natural language inputs.                   semantics reasoning tasks involving intricate relationships in
+                                                                                                                                                                To address these challenges, we propose L OCALIZE AGENT, a          a codebase. We hypothesize that they can identify flawed
+                                                                                                                                                             novel multi-agent framework for effective design issue localiza-       relationships among components, such as misplaced methods
+                                                                                                                                                             tion. L OCALIZE AGENT integrates the specialized agents that (1)
+                                                                                                                                                             analyze code to identify potential code design issues, (2) transform
+                                                                                                                                                                                                                                    or other irregular code structures, and suggest refactoring
+                                                                                                                                                             program analysis outputs into abstraction-aware LLM-friendly           changes, e.g., moving methods to more appropriate locations
+                                                                                                                                                             natural language summaries, (3) generate context-aware prompts         without using thresholds or hard-coded rules.
+                                                                                                                                                             tailored to specific refactoring types, and (4) leverage LLMs to          However, LLM-based approaches face key limitations in
+                                                                                                                                                             locate and rank the localized issues based on their relevance.         this domain. First, source code is complex, and its inher-
+                                                                                                                                                                Our evaluation using diverse real-world codebases demon-
+                                                                                                                                                                                                                                    ent structure makes it difficult for LLMs to correctly parse
+                                                                                                                                                             strates significant improvements over the baseline approaches,
+                                                                                                                                                             with L OCALIZE AGENT achieving 138%, 166%, and 206% rela-              and leverage effectively [5]. These struggles arise from the
+                                                                                                                                                             tive improvements in exact-match accuracy for localizing infor-        misalignment between the structured nature of programming
+                                                                                                                                                             mation hiding, complexity, and modularity issues, respectively.        languages and the non-structured natural-language (NL) texts
+                                                                                                                                                                                                                                    that LLMs are primarily trained on. Second, our preliminary
+                                                                                                                                                               Index Terms—Large Language Models (LLMs), Multi-Agent,               experiments indicate that LLMs tend to generate incorrect re-
+                                                                                                                                                             Static Program Analysis, Code Design Issue Localization
+                                                                                                                                                                                                                                    sults when dealing with program semantics across abstractions.
+                                                                                                                                                                                                                                    Thus, a more appropriate representation for LLMs should be
+                                                                                                                                                                                    I. I NTRODUCTION
+                                                                                                                                                                                                                                    both natural language-friendly and abstraction-aware.
+                                                                                                                                                                Software design quality is crucial for the long-term main-             This paper presents L OCALIZE AGENT, a novel agent-based
+                                                                                                                                                             tainability, extensibility, and evolution of systems. As a project     framework that bridges this gap and explore LLMs’ capabil-
+                                                                                                                                                             evolves, design issues such as poor modularity, tight coupling,        ities in improving software design. Inspired by recent works
+                                                                                                                                                             and excessive complexity often emerge, hindering developer             on LLM-based frameworks for other tasks [6, 7], L OCAL -
+                                                                                                                                                             productivity and system quality. These issues, if left unad-           IZE AGENT focuses on design issues identifiable within a single
+                                                                                                                                                             dressed, lead to the accumulation of technical debt, resulting         class (e.g., god classes and feature envy). It leverages the
+                                                                                                                                                             in increased development costs and decreased software relia-           results of program analysis tasks to synthesize NL summaries
+                                                                                                                                                             bility [1, 2]. Thus, an approach that automatically addresses          of system designs fitting for LLMs. Our key insight is that
+                                                                                                                                                             these design issues could be widely beneficial and adopted to          by combining multi-agent design, context-aware prompting,
+
+
+                                                                                                                                                             1558-1225/25/$31.00 ©2025 IEEE                                     1320
+                                                                                                                                                             DOI 10.1109/ICSE55347.2025.00100
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+             and LLM-friendly code representations, we can overcome                         refactoring activities, and program analysis tasks.
+             the limitations of current LLM-based approaches and enable                   • A natural language-based representation of program anal-
+             more effective design issue localization. We design L OCAL -                   ysis output that enhances LLMs’ abilities to handle
+             IZE AGENT with the following major ideas:                                      software design input more effectively than traditional
+                First, Multi-Agent Collaborative Framework: Recent                          static analysis-based representations.
+             works have started to investigate LLM-based agents that                      • Experiments on a real-world dataset of refactorings re-
+             prepare task-specific data for LLMs [8, 9]. Motivated by such                  solving design issues demonstrate our tool’s effectiveness
+             works, we introduce a novel multi-agent system consisting of                   and provide an evaluation benchmark for future research.
+             LLM-based and program analysis-based agents responsible for
+             collaborative tasks to predict future refactoring activity. This                                   II. BACKGROUND
+             framework comprises of (1) a “Design Issue Analysis Agent”                   Large Language Models (LLMs) have emerged as powerful
+             that leverages program analysis tools to identify potential               tools for various code intelligence tasks, demonstrating re-
+             design anomalies, (2) a “Program Analysis Agent” that ex-                 markable capabilities in code understanding and generation
+             tracts relevant context from the codebase using established and           [3, 14, 15]. The application of LLMs has expanded rapidly
+             lightweight program analysis techniques, (3) a “Context-aware             across the software engineering domain, encompassing tasks
+             Prompt-building Agent” that dynamically constructs prompts                such as code translation [16], automated program repair [8],
+             based on previous analysis results, and (4) an “LLM-based                 code review [17], and fuzzing [18]. Pomian et al. [19] gener-
+             Ranking Agent” that prioritizes localized design issues based             ates and ranks extracted method refactorings.
+             on their impact and relevance. This ranking agent is inspired                Recent advances in large language models introduce the
+             by the work on LLM-based software activity ranking [10].                  concept of “agents”, which are components that enhance the
+                Second, LLM-Friendly Code Context Representation:                      LLM’s capabilities by providing the additional contexts for
+             Inspired by NExT [11], on representing execution traces                   specific tasks. These interconnected agents enable LLMs to in-
+             in a natural language, we propose a novel representation                  teract with external tools, effectively expanding their problem-
+             of program analysis outputs tailored for LLMs. Traditional                solving abilities beyond the confines of their initial training
+             program analysis output often comprises of massive amounts                data. For instance, researchers have developed agents that
+             of program dependency graphs (PDGs) or full Abstract Syntax               allow LLMs to explore codebases [8, 20], execute and validate
+             Trees (ASTs), which are difficult or infeasible representations           patches [8], and formulate plans for complex tasks [8].
+             for LLMs to effectively process [11, 12]. Our approach ad-
+                                                                                                                III. M OTIVATION
+             dresses this by (1) summarizing complex source code data
+             into concise NL descriptions and (2) preserving code structure            A. Motivating Example
+             through NL contextual summaries. In brief, program analysis                  Let us use a real-world example to motivate our solution.
+             can effectively summarize the heavily involved abstractions               Consider the example in Fig. 1. We have a real-world Java
+             into a natural-language format more suitable for LLMs.                    class that violates the separation of concerns design principle.
+                Third, Context-Aware Prompt Generation: L OCAL -                       The class handles multiple responsibilities, such as error han-
+             IZE AGENT introduces a prompt generation module that dy-                  dling and progress monitoring, leading to increased complexity
+             namically synthesizes prompts based on the specific refactor-             and reduced maintainability. As a result, a software quality
+             ing context and code analysis summaries. Since our approach               evaluation tool, named PMD [21], reports a high cyclomatic
+             is designed as a framework, it is extensible to accommodate               complexity score for the code before refactoring (Listing 1).
+             additional refactoring scenarios and program analysis tasks.              Note that such a traditional software design evaluation tool,
+                To evaluate L OCALIZE AGENT, we conduct an experiment                  like PMD [21], is primarily used to detect high-level code
+             on a diverse set of real-world codebases from a refactor-                 smells using code metrics and rules (e.g., god classes). It
+             ing dataset [13]. Our results demonstrate that our approach               cannot provide actionable suggestions on methods and classes
+             achieves a 206% relative improvement in accuracy for lo-                  such as code refactoring including splitting a god class or
+             calizing design issues, a 166% improvement for complexity                 moving a method to another class, etc.
+             issues, and a 138% improvement for information-hiding issues                 One of our primary objectives is to bridge the critical gap
+             compared to the baseline LLM-based techniques. Moreover,                  between high-level issue detection and actionable feedback.
+             our approach demonstrates significant gains across different              In our work, actionable feedback for fixing design issues
+             refactoring types, with the best models outperforming the                 and refactoring changes are treated as distinct tasks. Because
+             baselines by an average of 75% to 184% in Exach-Match@1.                  refactoring may include changes that do not directly address
+                In brief, the main contributions of this paper are as follows:         design issues, some of them may also remain unresolved
+                • To our knowledge, L OCALIZE AGENT is the first work                  through refactoring (which falls beyond our scope). In brief,
+                   proposing to leverage program analysis tasks to synthe-             our focus is specifically on design issues that can be effectively
+                   size natural language summaries of relationships between            resolved through refactoring.
+                   system abstractions to facilitate design issue localization.           Localizing and fixing such design issues can be challenging
+                • We introduce a multi-agent, LLM-agnostic framework                   for developers, as it requires identifying the specific parts
+                   L OCALIZE AGENT, that is adaptable for future LLMs,                 of the code that need to be changed. We hypothesize that
+
+
+                                                                                   1321
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+               1 ...
+               2 static void initialiseAndInstallRepository(        IConfigurationElement remoteRepositoryElem
+                       , RepositoryPlugin localRepo,
+               3      MultiStatus status, IProgressMonitor monitor) {
+               4     SubMonitor progress = SubMonitor.convert(monitor, 3);
+               5     - String implicitStr = remoteRepositoryElem.getAttribute("implicit");
+               6     - String repoName = remoteRepositoryElem.getAttribute("name");
+               7     - if (repoName == null) repoName = "<unknown>";
+               8     - if ("true".equalsIgnoreCase(implicitStr))
+               9      try {
+              10        - RemoteRepository repo = (RemoteRepository)remoteRepositoryElem.createExecutableExtension("class");
+              11        repo.initialise(progress.newChild(1));
+              12        installRepository(repo, localRepo, status, progress.newChild(2));
+              13      } catch (CoreException e) {
+              14        String message = MessageFormat.format("Failed to initialise remote repository {0}.", repoName);
+              15        if (status != null)
+              16          status.add(new Status(IStatus.ERROR, Plugin.PLUGIN_ID, 0, message, e));
+              17        Plugin.logError(message, e);
+              18      }
+              19      - else {
+              20          - progress.worked(1);
+              21      - }
+              22   } ...                                      Listing (1) Code Before Refactoring
+
+              1 ...
+              2 static void initialiseAndInstallRepository( RemoteRepository repo, String repoName,                             RepositoryPlugin localRepo,
+              3    MultiStatus status, IProgressMonitor monitor) {
+              4 // Function body omitted for brevity
+              5 ...                                         Listing (2) Code After Refactoring
+
+                                      Fig. 1: A Real-World Refactoring Instance Demonstrating Variable Parameterization
+               Note: In Listing 1, red lines indicate code removed after refactoring. Yellow highlighting in Listing 1 shows the parameters that were removed, and the
+                                                           green highlighting in Listing 2 shows the parameterized variables.
+
+
+
+             the Large Language Models (LLMs) are able to identify                          a multi-agent learning framework in which specialized agents
+             flawed relations among software components and program                         collaborate to achieve the tasks. We break down the problem
+             elements, such as misplaced methods and other irregular code                   into different subtasks, each handled by specialized agents
+             structures, and suggest refactoring changes to fix those issues.               designed to process information to identify and fix the issues.
+             However, our preliminary experiment with LLMs (e.g., GPT-
+                                                                                               2) Key Idea 2 [LLM-Friendly Code Context Representa-
+             4o) using naive prompts reveals their limitations in effectively
+                                                                                            tion]: To enable LLMs to analyze design issues effectively, we
+             identifying and localizing design issues in (Listing 2) [22].
+                                                                                            introduce a novel code context representation that is tailored
+                Observation 1 [Limitations of Current LLM-based Ap-
+                                                                                            to their strengths. Based on observation 2, traditional code
+             proaches]. LLMs’ ability to recognize and fix design issues is
+                                                                                            representations, such as program dependence graphs (PDGs),
+             limited. Naive prompting techniques often fail to capture the
+                                                                                            are complex and can exceed the context window of LLMs,
+             nuances of design principles, leading to ineffective localization
+                                                                                            hindering their ability to process and understand the entire
+             of design issues in existing codebases [22].
+                                                                                            codebase. Thus, we propose a lightweight analysis technique
+                Observation 2 [Challenges in Processing Complex Code
+                                                                                            that generates the concise natural language summaries of
+             Representations]. LLMs require global contextual informa-
+                                                                                            code metrics and dependencies. These summaries capture key
+             tion to understand and analyze design issues in codebases
+                                                                                            project’s structure, making it understandable for LLMs.
+             effectively. However, the use of complex code representations,
+             such as call graphs and program dependency graphs, can pose                       3) Key Idea 3 [Context-Aware Prompt Generation]: The ef-
+             challenges for LLMs due to their limited understanding of                      fectiveness of LLMs heavily relies on the quality and relevance
+             programming languages [12] and the potential for inconsistent                  of the prompts [23, 24]. Generic or poorly constructed prompts
+             output due to unfamiliar input structure [11]. These limitations               often lead to suboptimal results, as they fail to capture the
+             hinder LLMs’ ability to make informed decisions based on the                   specific nuances and requirements of different scenarios. To
+             complex relations and dependencies in source code.                             address this limitation, we introduce a context-aware prompt
+                                                                                            generation technique that dynamically adapts the prompts
+             B. Key Ideas                                                                   based on the unique characteristics of each refactoring context.
+               From the observations, we have the following key ideas                       By leveraging the information obtained from our agents, we
+             when designing L OCALIZE AGENT:                                                generate prompts that are tailored to the specific design issues
+               1) Key Idea 1 [Multi-Agent Collaborative Design Issue                        and refactoring opportunities present within the codebase. For
+             Detection and Fixing Suggestions]: Recognizing design issues                   instance, as the above example requires a “parameterizing
+             and deciding refactoring fixes is a complex task that requires                 variable” refactoring, the LLM is prompted to identify both
+             analyzing various aspects of the codebase. Thus, we introduce                  the variable and functions that need to be changed.
+
+
+                                                                                        1322
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                4) Key Idea 4 [LLM-based Ranking Agent]: While local-                                                Design Issue Analysis                                                                                Ranking
+             izing design issues is crucial, prioritizing and ranking these               Input Source Code
+                                                                                                                     Agent                                                   Design Issue Localization
+                                                                                                                                                                                       6                   7
+                                                                                                                                                                                                                          Agent
+                                                                                                                       Run a static analysis tool to identify the
+             suggestions is equally important. Without a proper ranking                                                design issues                                           LLM
+                                                                                                                                                                                                                                  C
+
+                                                                                                                                                                                           Localization
+                                                                                                                       Run ML-based predictive tool to identify
+             mechanism, developers may waste valuable time and resources                                               the refactoring needed to fix the issues
+                                                                                                                                                                                             Report
+                                                                                                                                                                                                                                LLM
+
+
+             addressing irrelevant or low-impact suggestions. We introduce                                    2
+                                                                                                                       Design Issues Identification                             Design Issue                        Ranked Suggestion
+                                                                                                                                                                             Localization Prompt
+             an LLM-based Ranking Agent that leverages the collective                                                                                                                                 5
+
+
+                                                                                                                     Planning Agent                                                        Context-aware
+             knowledge and analyzing capabilities of LLMs and static                                 1                                                                  4                  Prompt Building Agent
+                                                                                                                    A Check design issue
+             analysis tools to prioritize the localized design issues.                                              B Get the refactoring type needed
+                                                                                                                                                                                    Prompt:{
+                                                                                                                                                                                      Query: Tailored based on B
+                                                                                                                                                                                      Code Snippet: Input source code
+                                                                                          Source                    C Extract relevant context to                                     Context: Based on B select relevant
+                                                                                                                      localize the design issues                                       information from C ’s analysis output
+                                                                                           Code
+             C. Problem Formulation                                                                           3
+                                                                                                                                                                                    }
+
+
+                                                                                                                     Program Analysis Agents
+                We formulate the design issue localization using LLMs as                                                                                                Extract Relevant
+                                                                                                                                                                                               Natural language outputs:
+                                                                                                                                                                                                   1. Fan-In / Fan-Out
+                                                                                                                                Parse the code
+             follows. Given a codebase CB with potential design issues,                                                                                                   Information              2. Method Call Dependency
+                                                                                                                                                                                                   3. Variable Usage Analysis
+             we aim to leverage LLMs to identify the specific functions                   Input Source Code
+                                                                                                                  Source Code                    Abstract Syntax Tree
+                                                                                                                                                                                                   4. Class Coupling Metrics
+
+             or methods that should undergo refactoring to resolve these
+                                                                                                    Fig. 2: L OCALIZE AGENT: Architecture Overview
+             issues. By localizing the design issues at the function level,
+             we aim to provide developers with actionable insights into
+             which parts of the code require attention and improvement.
+                                                                                       these issues, we employ PMD [21], a widely recognized static
+             Formally, let CB be a codebase having a set of functions
+                                                                                       analysis tool to detect potential design issues in source code.
+             F = {f1 , f2 , . . . , fn }. The goal is to identify a subset of
+                                                                                          A comprehensive review of PMD rules [21] was conducted
+             functions F ′ ⊆F that exhibit design issues that can be fixed via
+                                                                                       to ensure alignment with the design categories listed in [25].
+             refactoring. The LLMs are tasked with analyzing the codebase
+                                                                                       Multiple authors engaged in rigorous discussions to catego-
+             CB and generating a set of locations L={l1 , l2 , . . . , lm }, where
+                                                                                       rize the PMD’s rules based on their descriptions. A specific
+             each location li refers to a function fj ∈ F ′ to be refactored.
+                                                                                       evaluation scheme was implemented to ensure objectivity and
+                             IV. L OCALIZE AGENT A PPROACH                             reliability in the categorization process. Our criteria are the
+                                                                                       rule’s primary focus, its impact on reuse and maintenance, and
+             A. Overview                                                               its relation to the design principles. This process yielded eleven
+                Figure 2 illustrates our approach for localizing design issues         PMD rules corresponding to the design categories. However,
+             in source code. It uses a cooperative communication paradigm,             the abstraction and system structure issues were not addressed
+             where agents work together towards the shared goal of identi-             via refactoring. Thus, our analysis does not focus on three
+             fying design issues. The communication structure is centered              categories, resulting in a final set of eight PMD rules.
+             around the Planning Agent serving as the central authority                   These eight rules address three crucial aspects of software
+             that manages the information flow and delegates tasks to the              design: modularity, information hiding, and complexity.
+             other agents. As seen in Fig. 2, the Planning Agent begins                Modularity, which promotes the separation of concerns, is
+             by invoking the Design Issue Analysis Agent to run a static               assessed through rules detecting God Class, Coupling Between
+             analysis tool on the input code, identifying potential design             Objects, and Data Class [21]. Information hiding, essential for
+             issues. Using this information, the Planning Agent then gets              encapsulation and reducing dependencies, is evaluated using
+             the Program Analysis Agents to extract relevant code context              rules for Law of Demeter and Excessive Parameter List [21].
+             by using lightweight analysis tools. These tools are used to cre-         Complexity, which significantly impacts understandability and
+             ate short summaries in natural language that capture important            maintainability, is measured using rules for Too Many Meth-
+             details about the code’s structure, dependencies, metrics, and            ods, Excessive Public Count, and Cyclomatic Complexity [21].
+             design attributes. Next, the Context-aware Prompt Building
+             Agent creates customized prompts based on these summaries                 C. Refactoring Types
+             and types of refactoring identified by the Planning Agent.                   Developers address the design issues through various mech-
+             These prompts are given to an LLM to find specific design                 anisms, e.g., architectural restructuring, design pattern solu-
+             issues in the codebase and suggest refactorings. Finally, LLM-            tions, or code refactoring. In our study, we focus on the
+             based Ranking Agent reviews the code, its context, and                    historical refactoring changes that specifically address design
+             suggestions to prioritize the important issues.                           issues. We combine refactoring with static analysis to ensure
+                                                                                       we study the cases where refactoring demonstrably resolved
+             B. Design Issues                                                          design issues, rather than considering all refactoring instances.
+                Design issues in software systems manifest as structural                  Our filtering on design issues in Section VIII-A2 resulted in
+             problems that impede maintainability, extensibility, and code             the identification of four refactoring types that resolved those
+             quality, typically emerging when code violates fundamental                issues. That also ensures the ground truth for our experiments:
+             principles such as separation of concerns, information hid-                  • Parameterize Variable (PV-Ref): This refactoring extracts
+             ing, and modularity [25]. The design issues in our study is                    a variable as a parameter, reducing coupling and increas-
+             grounded in the seminal work of Hans Van Vliet [25]. For                       ing flexibility in design.
+
+
+                                                                                   1323
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                • Inline Method (IM-Ref): Inline Method replaces a method                    b) Call Relationships Analysis (ACR ): By identifying
+                  call with the method’s contents, eliminating the need for            direct call dependencies between methods, this analysis helps
+                  a separate method and potentially reducing complexity.               detect potential coupling and cohesion issues.
+                • Inline Variable (IV-Ref): This refactoring replaces vari-                  c) Variable Usage Analysis (AV U ): This tracks variable
+                  able references with the variable’s initializer expression,          usage patterns, which can indicate opportunities for refactoring
+                  simplifying the code structure.                                      that involve variables, such as parameter introduction.
+                • Move Method (MM-Ref): Move Method moves a method                           d) Class Coupling Analysis (ACC ): By assessing class
+                  to another class where it is more closely related, improv-           dependencies, this analysis provides insights into system mod-
+                  ing cohesion and reducing coupling between classes.                  ularity and potential areas for improving design quality.
+                                                                                          2) Integration with L OCALIZE AGENT: The Program Anal-
+                        V. P LANNING AND A NALYSIS AGENTS
+                                                                                       ysis agents form an integral part of the L OCALIZE AGENT
+                The Planning agent consists of two main components: the                framework, bridging the gap between raw code and LLM-
+             Design Issues Analysis agent and the Program Analysis agent,              based analysis. The process works as follows:
+             which work in tandem to identify design issues and extract
+                                                                                         1) Code Parsing: The agents parse the input codebase to
+             relevant context for issue localization.
+                                                                                             construct an AST.
+             A. Design Issues Analysis Agent                                             2) Analysis Application: Each lightweight analysis tech-
+               The Design Issues Analysis agent is a specialized entity                      nique (Ai ) is applied to the AST.
+             within our approach tasked with identifying design issues and               3) Summary Generation: The analyses produce natural lan-
+             the refactoring needed for a given codebase.                                    guage summaries (S) of relevant code properties.
+               First, the agent leverages static analysis tools, such as                 4) LLM Integration: The Context-aware Prompt Building
+             PMD [21], to scan codebases and detect potential design                         agent uses S to generate targeted prompts for the LLM.
+             anomalies. We use a set of rules from PMD for the tasks.                     These tools generate concise, natural language summaries,
+             For instance, PMD can detect coupling between objects and                 capturing key code structure and relationship aspects. Despite
+             god classes, as shown in the example output below:                        our current implementation, our approach is flexible, allowing
+                                                                                       the integration of additional analysis techniques for various
+             CouplingBetweenObjects: High amount of different
+               objects as members denotes a high coupling                              design issues in the future. We use AST-based analysis to
+                                                                                       ensure accuracy and maintain code structural integrity.
+             GodClass: Possible God Class (WMC=78, ATFD=36,
+               TCC=8.000%)                                                                       VI. C ONTEXT- AWARE P ROMPTING AGENT
+                                                                                          The Context-aware Prompting agent bridges the gap be-
+                Second, we integrate Aniche et al. [13], which trained a               tween code analysis and LLM capabilities. It leverages the
+             random forest algorithm on a dataset to predict the refactoring           outputs from the Design Issue Analysis and Program Analysis
+             needs for a codebase. It takes the source code and predicts the           agents to generate tailored prompts that guide the LLM in
+             refactoring types (e.g., inline method). For instance, for the            ranking design issues effectively. By incorporating relevant
+             example in Fig. 1, the tool would return that a parameterizing            context into the prompts, we aim to enhance the LLM’s ability
+             variable is needed to fix the issue.                                      to identify and suggest appropriate refactorings.
+                The information gathered from this analysis is then used in
+                                                                                          The Planning agent orchestrates the interaction between
+             the context-aware prompt-building phase (Fig. 2).
+                                                                                       different components of our system. It triggers the Context-
+             B. Context Extraction via Program Analysis Agents                         aware Prompting agent after receiving inputs from the Design
+                The Program Analysis agents utilize static analysis tools to           Issues Analysis agent (identifying design issues and required
+             extract the relevant context from the codebase to aid LLMs                refactoring types) and the Program Analysis agent (extracting
+             in design issue localization. We propose a novel approach                 relevant code context). This sequential process ensures that the
+             using lightweight analysis techniques as tools to generate                prompts are informed by comprehensive code analysis.
+             concise, natural language summaries of key code metrics,                       a) Prompt Generation: Formally, let R={r1 , r2 , . . . , rn }
+             dependencies, and design attributes.                                      be the set of identified refactoring types, and A = {a1 , a2 , . . .,
+                1) Lightweight Code Analysis Tools: We utilize the fol-                am } be the set of analysis tools, each providing a summary si
+             lowing analysis techniques to demonstrate the effectiveness of            of code metrics and attributes. For a refactoring type rj ∈ R,
+             using LLM-friendly program analysis outputs. The selection                we define a prompt generation function f :
+             of these specific tools is based on their relevance to assist in                                    prj = f (rj , Srj )                      (1)
+             identifying design issues that affect reuse and maintenance:
+                  a) Fan-in and Fan-out Analysis (AF I/F O ): Fan-in de-               Srj = {si | ai is relevant to rj } represents the relevant analysis
+             notes the number of times a method is called, and fan-out                 summaries. The function f is implemented as a template-based
+             denotes the number of methods that are being called within a              system, augmented with heuristics that determine which code
+             method [26]. Motivated by Schwanke et al. [26] and Layman                 attributes are most relevant for each refactoring type. This
+             et al. [27], we hypothesize that including a summary of this              approach allows for flexibility in prompt construction while
+             analysis task can indicate the coupling and complexity issues.            maintaining consistency across different refactoring scenarios.
+
+
+                                                                                   1324
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                                                  TABLE I: Program Analysis Tools Used for Each Refactoring Type
+                   Refactoring Type     Tools                                                          Rationale
+                     Parameterize      ACR          Methods with high dependency on specific variables can be extracted as parameters to reduce coupling.
+                       Variable        AV U         Usage patterns of variables across functions indicate candidates for parametrization.
+                                       AF I/F O     Methods with low fan-in/out can be inlined to reduce unnecessary abstraction and simplify the code.
+                       Inline
+                       Method          ACR          Direct call dependencies can help to identify methods that can be inlined to eliminate redundant calls.
+                                       ACC          Interdependencies between classes can indicate popular methods whose inlining can effectively reduce coupling.
+                        Inline
+                                       AV U         Code can be simplified by inlining variables which are found to be frequently initialized.
+                       Variable
+                                        AF I/F O     Methods with a high fan-out could reduce coupling by relocating them to a more relevant class.
+                        Move
+                       Method           A CR         Methods that are closely related to a different class should be moved to reduce cross-class dependencies.
+                                        ACC          Methods that contribute to high coupling should be relocated to more appropriate classes.
+               Note: These tools serve as a proof-of-concept for L OCALIZE AGENT’s capabilities. Our approach can be extended to incorporate additional analysis tools.
+
+
+
+                   b) Example of Prompt Generation: To illustrate this pro-                 and relevant summaries Sr . The LLM, denoted as M, takes
+             cess, consider the prompt generated for Parameterize Variable                  the prompt as an input. It then generates a set of locations
+             shown in Listing 3. To aid the localization procedure, the                     Lr = {l1 , l2 , . . . , lk } that correspond to the design issues:
+             prompt incorporates the contexts from the variable usage and
+                                                                                                                           Lr = M(pr )                               (2)
+             call relationship summaries to guide the LLM.
+                                                                                            Each location li ∈ Lr represents a function name in the
+                  Listing 3: Example of a prompt for issue localization                     codebase where a design issue related to the refactoring type
+                  Query: Analyze the code snippet to identify                               r has been identified. The LLM achieves this by analyzing the
+                      variables that should be parameterized to                             code structure, dependencies, and metrics given in the context.
+                      reduce coupling.
+                                                                                            B. Prompting to Rank the Localized Design Issues
+                  Output Formatting: Don’t use ‘ or * on the
+                      response. Return the output using the
+                      following format only: Function:                                             Listing 4: Prompt template for ranking suggestions
+                      <func_name>, Variable: <var_name>.                                         Given the following context and source code,
+                                                                                                     rank the suggested functions in order of
+                  Few-shot E.g: Function: get_user, Variable:                                        relevance. Don’t remove any functions from
+                      user                                                                           the list except for duplicates.
+                  Code Base: {Source Code}                                                       Context: {context}
+                  Context: {                                                                     Source Code: {Codebase}
+                     Variable Usage Analysis (A_{VU})
+                     Class Coupling Analysis (A_{CC})                                            Suggested Functions: {localized functions}
+                  }
+                                                                                                 Return the ranked function as a list
+                The context-aware prompt builder is performed for each                           Ranked functions:
+             refactoring type rj ∈ R, generating a set of prompts P ={pr1 ,
+             pr2 , . . ., prn } that cover the various design issues identified                While our localization process identifies potential areas for
+             in the codebase. Table I presents the analysis tools used for                  improvement, not all issues are equally significant or urgent.
+             each refactoring type. The mapping of these tools is based on                  Thus, the prioritization of the identified design issues is crucial
+             the characteristics of each refactoring type and the specific                  for efficient refactoring. This enables developers to optimize
+             contextual information each analysis tool extracts (Table I).                  their limited time and resources by focusing on the most
+                                                                                            impactful refactorings. To address this need, we introduce an
+                  VII. D ESIGN I SSUE L OCALIZATION AND R ANKING                            LLM-based ranking approach that leverages contextual code
+               This section details how we leverage LLMs to identify the                    understanding to prioritize the identified design issues.
+             specific locations of design issues and prioritize them.                          The motivation behind using an LLM for ranking stems
+                                                                                            from its ability to understand code relationships and recent
+             A. Design Issue Localization                                                   success in ranking code fix suggestions [10]. Unlike rule-based
+                The localization process utilizes the context-aware prompts                 systems, an LLM can potentially capture subtle interactions
+             generated in the previous stage to guide an LLM in identifying                 that influence the importance of a refactoring suggestion.
+             specific functions or methods that exhibit design issues. This                    The ranking process begins by extracting the code context
+             approach combines the strengths of static analysis tools with                  from the source code using the tools described in Section V-B.
+             the contextual understanding capabilities of LLMs. Let CB be                   This context, along with the original code and the localized
+             the original codebase, and A = {a1 , a2 , . . . , an } be the set              functions suggested for refactoring, is then used to create the
+             of code analysis tools, where each technique ai generates a                    prompt. The prompt instructs the LLM to rank the suggested
+             summary Si . Given a refactoring type rj ∈ R, we generate                      functions based on their relevance for refactoring. The ranking
+             the prompt pr , which contains the instruction, codebase CB ,                  process is guided by the prompt in Listing 4.
+
+
+                                                                                        1325
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                                     VIII. E VALUATION                                 D = {modularity, inf ormation hiding, complexity}. We
+                To evaluate L OCALIZE AGENT, we seek to answer the                     then apply the following criteria:
+             following research questions:                                               1) Remove duplicate code and code with longer lines than
+                   a) RQ1 (§ VIII-B) How effective is L OCALIZE AGENT                       the LLMs context window to maintain dataset quality.
+             on localizing design issues?: We assess the ability of L O -                2) For each commit C, run PMD on Cbef ore and Caf ter to
+             CALIZE AGENT to localize design issues in two scenarios:                       obtain the sets of design issues I(Cbef ore ) and I(Caf ter ).
+             (A) Localizing a single design issue: We evaluate L OCAL -                  3) Select commit C if and only if both:
+                   IZE AGENT ’s effectiveness in identifying the specific lo-             • ∃i ∈ I(Cbef ore ) ∩ D: There exists at least one issue i in
+                   cation of a single design issue within a codebase.                       Cbef ore that belongs to any of the design categories D.
+              (B) Localizing multiple design issues: We investigate its                   • ∃i ∈ I(Cbef ore ) \ I(Caf ter ): There exists at least one
+                   performance in localizing multiple design issues.                        issue i in I(Cbef ore ) that is not in I(Caf ter ). Thus, the set
+                   b) RQ2 (§ VIII-C) How sensitive is L OCALIZE AGENT                       of issues in Caf ter is a proper subset of those in Cbef ore ,
+             under different API settings when suggesting design issues                     meaning the refactoring has resolved at least one issue.
+             refactoring?: We perform a sensitivity analysis to evaluate                  Note that the combination of RefactoringMiner and PMD
+             how its performance varies under different settings.                      cannot predict design issues in source code (because no change
+                   c) RQ3 (§ VIII-D) (Ablation Study) How does each                    is provided in our design issue detection problem). They can
+             component in L OCALIZE AGENT contribute to the perfor-                    only recover the past activities to build our oracle. PMD cannot
+             mance of localizing issues?: We investigate the contribution              be used on its own to solve our problem either as it detects only
+             of each key component in L OCALIZE AGENT, namely the                      high-level code smells without fixing suggestions (Section III).
+             multi-agent learning framework, the natural language-based
+             code analysis representation, and context-aware prompting.                          TABLE II: Statistics of the Evaluation Dataset
+                   d) RQ4 (§ VIII-D) What is the time and budget                                                             Design Issues
+                                                                                          Refactoring
+                                                                                                                      Information
+             to localize design issues?: We evaluate L OCALIZE AGENT’s                      Types        Modularity
+                                                                                                                         Hiding
+                                                                                                                                    Complexity      Total
+             efficiency by measuring the time and financial cost to localize                             Single Multi Single Multi Single Multi Single Multi
+             issues in the codebases of varying sizes.                                    Parameterize
+                                                                                                            18     1      9    12     11      5      38    18
+                                                                                            Variable
+             A. Experimental Methodology                                                     Inline
+                                                                                                           237    43     48    83    409    102    694    228
+                                                                                            Method
+                1) Dataset: We used the refactoring dataset released by                      Inline
+                                                                                                            66    11     21    31    100     24    187     66
+                                                                                            Variable
+             Aniche et al. [13]. The dataset contains 11K diverse projects
+                                                                                             Move
+             from Fdroid, Apache, and GitHub repositories. Following a                                     459   424    119   338    519    580   1,097 1,342
+                                                                                            Method
+             similar methodology as NatGen [14], we randomly sampled                         Total         780   479    197   464   1,039   711   2,016 1,654
+             only 6K projects due to the cost. These projects can contain
+             multiple commits. Each commit contains the source code                       3) Dataset Statistics: Table II presents the statistics of our
+             before and after refactoring, the refactoring types applied, and          dataset that satisfies our filtering criteria in Section VIII-A2.
+             the function that changed, including its line number.                     We categorize the dataset based on the number of refactoring
+                The authors used a static analysis tool, RefactoringMiner              operations performed to address design issues in each code
+             [28], to extract ground truth information on the refactoring              instance. If only a single refactoring operation (e.g., one
+             types applied and the names of the refactored methods.                    “Move Method”) is applied to fix the design issues in a
+                Note that RefactoringMiner does not identify the design                codebase, we consider it a single issue. Conversely, if multiple
+             issues. Instead, it serves as a mining tool that, when provided           refactoring operations of the same type (e.g., more than one
+             with the code before and after modifications, detects the                 “Move Method”) are applied to a single codebase to resolve
+             types of refactorings applied with +90% precision on most                 design issues, we classify it as having multiple issues.
+             refactoring types. Moreover, those refactoring changes might                 4) Models: We leverage three widely used LLMs: GPT-
+             contain fixes that are unrelated to design issues. Thus, we used          4o, Claude 3, and Gemini 1.0. We chose them based on
+             RefactoringMiner along with the PMD tool to collect a dataset             their accessibility through public APIs, cost-effectiveness, and
+             of PMD-reported code smells connected to RefactoringMiner-                demonstrated proficiency in coding tasks [29, 30]. GPT-4o,
+             identified refactoring types which resolved them as follows.              developed by OpenAI, offers enhanced reasoning capabilities
+                2) Rule-Based Design Issues Filtering: Specifically, we                with a 128K input token limit. Google’s Gemini 1.0 pro pro-
+             used the PMD tool to filter our dataset and ensure that the               vides improved reasoning within a 32K token limit. Claude 3.0
+             refactoring addresses the design issues. Formally, let C be               (Haiku) from Anthropic offers an extended 200K token limit,
+             a commit representing a refactoring, and let Cbef ore and                 allowing for the processing of larger code segments. We utilize
+             Caf ter be the code snapshots before and after the refactor-              Python and the JavaLang parsers to implement lightweight
+             ing, respectively. The set of design issues identified by the             static analysis techniques, generating concise natural language
+             PMD tool [21] in a codebase Cb is denoted as I(Cb ). Each                 summaries from ASTs. We employ the PMD tool [21] to
+             issue i ∈ I(Cb ) belongs to one of the design categories                  identify design issues and verify refactoring effectiveness.
+
+
+                                                                                   1326
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                                       TABLE III: Results for Design Issue Localization per Design Issue Category (RQ1)
+                                                    Claude 3               ChatGPT 4o                      Gemini 1.0                  Baseline-LLM
+                   Design Issues
+                                        EM@1        EM@5 EM@10      EM@1     EM@5 EM@10            EM@1     EM@5 EM@10           EM@1 EM@5 EM@10
+                             Single      24.6        56.0    66.0    28.5     59.3    66.2          22.9     44.7     50.9        10.7     42.5   54.3
+               Complexity
+                             Multi                   48.6    55.4             60.3    69.8                   45.7     56.0                 37.9   47.4
+               Information   Single      30.3        52.8    58.4     40.3    61.0    62.8          32.9     47.6     48.9        16.9     48.5   53.7
+                  Hiding     Multi                   58.9    66.1             56.5    62.3                   50.0     54.5                 50.8   60.2
+                             Single      16.0        50.2    59.0     24.5    54.0    62.9          19.8     51.0     61.6         8.0     34.8   49.2
+               Modularity
+                             Multi                   40.3    48.2             43.2    50.9                   34.8     41.9                 32.7   45.8
+
+                                         TABLE IV: Results for Design Issue Localization per Refactoring Type (RQ1)
+                    Refactoring                     Claude 3                 ChatGPT 4o                     Gemini 1.0                 Baseline-LLM
+                       Types            EM@1        EM@5 EM@10        EM@1     EM@5 EM@10           EM@1     EM@5 EM@10           EM@1 EM@5 EM@10
+               Parameterize Single      16.2        51.4     54.1     24.3     51.4    56.8         13.5     37.8      51.4       10.8   35.1     48.7
+                 Variable     Multi                 35.7     50.0              35.7    35.7                  35.7      57.1              28.6     57.1
+                  Inline      Single    21.2        54.9     65.4     23.6     56.5    63.6         18.1     40.7      48.1       8.4    39.6     51.9
+                 Method       Multi                 55.9     62.9              59.2    67.1                  46.0      50.7              39.9     50.2
+                  Inline      Single    47.7        74.4     84.6     43.6     70.8    73.8         44.6     78.5      88.7       27.2   64.6     69.7
+                 Variable     Multi                 44.4     54.0              49.2    60.3                  49.2      66.7              57.1     66.7
+                  Move        Single    19.3        54.0     62.6     25.0     60.0    64.9         22.6     51.7      60.5       8.8    36.7     49.7
+                 Method       Multi                 47.6     54.9              44.0    51.2                  36.2      42.3              32.1     43.5
+
+
+
+                5) Metrics: We use the Exact-Match@K metric (EM@K)                     output for the reproducibility purpose. We present our results
+             to measure the accuracy of the first K results in detection.              from two perspectives: 1) design issue categories (Table III) to
+                Let L = {l1 , l2 , . . . , lK } be the ranked set of the first K       assess L OCALIZE AGENT’s performance on broader software
+             suggestions generated by a model for a given design issue,                quality aspects, and 2) refactoring types (Table IV) to evaluate
+             and let gt be the ground truth localization of the design issue.          its effectiveness on specific code transformation tasks.
+             We define the Exact-Match@K metric as follows:                                  c) Empirical Results: As seen in Tables III and IV,
+                                                                                       L OCALIZE AGENT achieves high-performance gains over the
+                                   EM@K = 1(∃l ∈ L : l = gt )                    (3)
+                                                                                       baseline across all design issue categories and refactoring
+             where 1(·) is the indicator function that returns 1 if the                types. For complexity, information hiding, and modularity is-
+             condition inside the parentheses is true and 0 otherwise. That            sues, L OCALIZE AGENT with GPT-4o outperforms the baseline
+             is, EM@K=1 if at least one of the first K suggestions exactly             on EM@1 by 166%, 138%, and 206%, respectively. This
+             matches with a design issue in the ground truth.                          improvement highlights the better effectiveness of our multi-
+                The total Exact-Match@K (EM@K) across all design                       agent learning framework and context-aware prompting.
+             issues or refactoring types in the dataset is computed as:                   Table IV shows L OCALIZE AGENT’s effectiveness for dif-
+                                                N                                      ferent refactoring types. Notably, it shows good performance
+                                         1 X                                           on the IV-Ref refactoring type, with EM@1 scores surpassing
+                                               EM@K i                            (4)
+                                         N i=1                                         the baseline by 60% to 75% across all LLMs. This suggests
+             where N is the total number of design issues or specific                  that the proposed approach is particularly adept at handling
+             refactoring types. We compute EM@K for different K values.                inline variable refactorings, possibly due to the specific code
+                Note that the LLM outputs the function name and additional             context and patterns associated with this refactoring type.
+             refactoring-specific information, such as variable names or                  The results also highlight some areas for improvement.
+             rationale. While other information provides context for devel-            The Parameterize Variable refactoring type exhibits lower
+             opers, our evaluation focuses solely on correctly identifying             performance compared to others, with EM@1 scores ranging
+             the specific function name due to ground truth limitations.               from 13.5% to 24.3%. Despite this, L OCALIZE AGENT still
+                                                                                       outperforms the baseline from 25% to 125% for Parameterize
+             B. Effectiveness on Localizing Design Issues (RQ1)                        Variable refactoring, indicating the potential for further im-
+                1) Localizing Single Design Issues (RQ1-A):                            provement with additional context or refined prompts.
+                  a) Baseline: We used GPT-4o API (named as Baseline-                     Comparing the results in Tables III and IV, we can observe
+             LLM in Tables III and IV) with a naive prompt, i.e., prompt               the trends in the relative performance among the LLMs. GPT-
+             the model to suggest refactoring changes without additional               4o consistently outperforms the other models across both de-
+             context. The reason is that GPT-4o has consistently shown                 sign issue categories and refactoring types. In contrast, Gemini
+             better performance in our evaluation than other models. Thus,             1.0 shows the lowest performance among the LLMs used with
+             the naive prompt can be fairly compared with others.                      L OCALIZE AGENT. However, even the least performing LLM
+                  b) Procedure: To evaluate the models’ effectiveness in               with L OCALIZE AGENT surpasses the baseline in all types of
+             localizing design issues, we conduct experiments on the                   refactoring, demonstrating its robustness across all the fixing
+             dataset in Section VIII-A3. All APIs are run with temperature             changes. The Baseline-LLM only exhibits better results than
+             0 and nucleus sampling (top p) as 1 to get a deterministic                Gemini 1.0 in the Parameterize Variable refactoring type, while
+
+
+                                                                                   1327
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+             L OCALIZE AGENT with Gemini 1.0 outperforms the baseline
+             in all the remaining refactoring types.
+                Furthermore, our experiments reveal significant gains when
+             K increases from 1 to 10, with EM scores improving by up to
+             43% (i.e., for Modularity, from 16% to 59%), demonstrating
+             that L OCALIZE AGENT captures correct issues within its top
+             recommendations. While this validates the framework’s detec-
+             tion capabilities, enhancing the ranking mechanism remains
+             important for prioritizing the most critical suggestions.
+                   d) A Case Study: We evaluate our approach using the
+             motivating example in Section III that needs Parameterize
+             Variable refactoring. Our result shows an improved perfor-
+             mance by incorporating the relevant context, i.e., ACR and
+             AV U . L OCALIZE AGENT successfully identified the function
+             initialiseAndInstallRepository within the top five sug-
+             gestions, indicating that the function requires parameterizing
+             variables. In contrast, the naive prompt approach failed to
+             localize the issue within the top 10 suggestions [22].                    Fig. 3: Model Temperatures and Exact-Match Accuracy (RQ2)
+                2) Localizing multiple design issues (RQ1-B):
+                   a) Baseline: We used the same baseline as RQ1-A.
+                   b) Procedure: To measure correctness, we check if all                  Notably, an increase in temperature from T-0.5 to T-0.9
+             the ground truth issues are within the top K results. Since               typically decreases the EM scores across most settings, sug-
+             evaluating multiple suggestions with EM@1 would be infea-                 gesting that higher randomness might dilute the precision of
+             sible, we used only EM@5 and EM@10 for evaluation.                        the suggestions. For instance, the Gemini model for the Inline-
+                   c) Empirical Results: The results in Tables III and IV              Method refactoring experienced a sharp decrease in EM@1,
+             show that localizing multiple design issues is more challenging           highlighting its particular sensitivity to increased temperature.
+             than single issues, with the consistently lower EM@5 scores.              Conversely, some refactoring types, such as the Inline-Variable
+             However, the Inline Method refactoring is an exception. The               refactoring with the Openai model, show a slight improvement
+             model exhibits a comparative or even better accuracy for                  with a higher temperature. This indicates that some refactoring
+             multi-issue localization. Interestingly, the baseline approach            types might benefit from the increased exploration, enabling
+             demonstrates a smaller performance gap between the single-                the model to capture broader solution patterns. These findings
+             issue and multiple-issue localization scenarios compared to               illustrate the nuanced impact of temperature on model perfor-
+             L OCALIZE AGENT. While GPT-4o dominated for single-issue                  mance and underscore the necessity of tuning this parameter.
+             localization, Claude-3 showed better performance for multiple-
+                                                                                       D. Ablation Study (RQ3)
+             issue localization, with 2.4 and 3.8 percentage points increas-
+             ing in the information hiding category. Despite the challenges,                 a) Procedure: To assess the contribution of each com-
+             L OCALIZE AGENT still outperforms the baseline in most de-                ponent in L OCALIZE AGENT, we conduct an ablation study by
+             sign issue categories and refactoring types.                              evaluating the performance under different settings, focusing
+                                                                                       on (1) the Program Analysis Agent and (2) the Ranking agent.
+             C. Sensitivity Analysis (RQ2)                                             First, we evaluate the effectiveness of L OCALIZE AGENT with-
+                  a) Procedure: To assess the sensitivity of L OCAL -                  out including any context (i.e., without AF I/F O , ACR , AV U ,
+             IZE AGENT to different API settings, we sampled 37 codebases              ACC ). Next, we study the contribution of the Ranking Agent.
+             from each refactoring category in our dataset. We varied the                    b) Empirical Results: Table 5 presents our ablation study
+             temperature parameter, which controls the randomness in the               results. In the case of the Parameterize-Variable and Inline-
+             LLM’s output. While our main experiments used temperature                 Variable refactorings, our context-aware prompting signifi-
+             0 to ensure reproducible results, we also evaluated the tem-              cantly contributes to performance across all LLMs. For in-
+             peratures of 0.5 (T-0.5) and 0.9 (T-0.9) to analyze how output            stance, the EM@1 scores drop from 2.9 to 11 percentage
+             diversity affects performance. These values were chosen as                points for Parameterize-Variable refactoring for Claude 3 and
+             they represent common settings: T-0.5 balances creativity with            GPT-4o. For the Inline-Variable refactoring, without context,
+             consistency, while T-0.9 maximizes exploration of solutions.              the results show 1.6–10.2 percent decrease across all mod-
+                  b) Empirical Results: Fig. 3 shows the heatmap of the                els. Moreover, the ranking component also shows a positive
+             differences in EM scores between the temperature settings of              contribution, with EM@1 improvements ranging from 4.6 to
+             T-0.5 and T-0.9 for three LLMs and four refactoring types. The            10.2 percentage points for Inline-Variable. GPT-4o benefits the
+             heatmap visually represents these differences; red indicates              most from context and ranking, achieving the highest EM@1
+             a performance decrease, and blue signifies a performance                  scores of 24.3% and 43.6% for the Parameterize-Variable
+             increase when changing from T-0.5 to T-0.9.                               refactoring and the Inline Variable refactoring, respectively.
+
+
+                                                                                   1328
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                                     TABLE V: Ablation Study for Localizing Design Issues per Refactoring Type (RQ3)
+                                                             Claude 3                       ChatGPT 4o                        Gemini 1.0
+                             Refactoring Type
+                                                    EM@1     EM@5       EM@10       EM@1      EM@5     EM@10          EM@1     EM@5      EM@10
+                          Parameterize Variable     16.2     51.4       54.1        24.3      51.4     56.8           13.5     37.8      51.4
+                            ,→ w/o context          13.3     38.3       40.0        13.3      35.7     43.3           21.7     33.3      41.7
+                            ,→ w/o ranking          18.9     45.9       51.4        27.0      45.9     56.8           13.5     35.1      48.6
+                          Inline Method             21.2     54.9       65.4        23.6      56.5     63.6           18.1     40.7      48.1
+                            ,→ w/o context          23.4     54.6       61.0        21.7      45.6     51.0           21.7     45.7      51.0
+                            ,→ w/o ranking          28.8     54.6       64.2        27.0      51.3     62.9           17.4     36.5      43.3
+                          Inline Variable           47.7     74.4       84.6        43.6      70.8     73.8           44.6     78.5      88.7
+                            ,→ w/o context          38.0     57.4       61.0        42.0      63.6     71.7           34.4     45.6      48.2
+                            ,→ w/o ranking          38.0     61.5       70.8        39.0      63.6     67.7           34.4     60.5      67.7
+                          Move Method               19.3     54.0       62.6        25.0      60.0     64.9           22.6     51.7      60.5
+                            ,→w/o context           28.4     54.6       61.4        29.1      61.5     66.8           28.5     54.6      61.3
+                            ,→ w/o ranking          20.3     51.8       59.9        27.3      60.6     65.3           24.3     52.0      59.6
+
+
+
+                In contrast, the impact of context-aware prompting is less                                 Claude        GPT-4o         Gemini 1.0
+                                                                                           6
+             substantial for the Inline-Method and Move-Method refactor-
+             ings. For Inline-Method, Claude 3 and Gemini 1.0 show slight
+             improvements in EM@1 without context, while GPT-4o’s
+             performance drops by 3.4 points, suggesting that the provided                 4
+             context might be excessive in some cases. For the Move-
+             Method refactoring, which relies the least on context, i.e.,
+             AF I/F O , ACR , ACC summary, context removal results in the
+                                                                                           2
+             smallest impact on EM@1, with the drop from 1 to 2.3 points.
+             Our ranking shows the mixed impact, with the improvements
+             for Claude 3 and Gemini 1.0 but a slight decrease for GPT-4o.
+                The model’s effectiveness is tied to the complexity of the                 0
+                                                                                                  PV-Ref            IM-Ref        IV-Ref             MM-Ref
+             refactoring type and the LLM’s understanding of the associ-
+                                                                                                           (a) Time Complexity (in seconds)
+             ated design principles. For refactoring tasks that involve meth-
+             ods like the Inline Method and Move Method refactorings,                                      Claude        GPT-4o         Gemini 1.0
+             the LLMs can rely on inherent patterns and simpler rules,                    $0.60
+             reducing the necessity for detailed contextual information. In
+             these cases, excessive context might introduce noise, leading
+             to a slight decline in performance. This is observed with the                $0.40
+             Inline-Method refactoring for Claude 3 and Gemini 1.0, where
+             removing context even slightly improves performance, indicat-
+             ing these models’ efficiency in handling common refactoring                  $0.20
+             tasks without additional context. This limitation indicates
+             that our approach may not be universally optimal across all
+             refactoring scenarios. Future work should explore adaptive                   $0.00
+             context mechanisms that can dynamically adjust the amount                              PV-Ref           IM-Ref        IV-Ref            MM-Ref
+             of the context based on the complexity of the refactoring task.                                        (b) Costs of APIs
+                                                                                          Fig. 4: Time Complexity and LLM Costs per Refactoring
+             E. Time Complexity and Cost of APIs (RQ4)
+                  a) Procedure: We assessed the time complexity and cost
+             of LLM APIs for each refactoring type by sampling 37 code-                most efficient for quick feedback and budget-limited scenarios.
+             bases from each category. This approach maintains consistency             GPT-4o offered a balanced performance in speed but was more
+             for fair comparisons. Time complexity was gauged by the                   expensive and suitable where trade-offs between speed and
+             end-to-end duration—from sending the request to receiving                 expense are acceptable. Gemini 1.0, while slowest, maintained
+             LLM-generated refactoring suggestions. Costs were calculated              a moderate cost, fitting for balancing multiple factors.
+             considering the number of API calls, input/output sizes, and                 MM-Ref refactoring consistently shows higher time com-
+             the pricing plans of each provider. The total cost was derived            plexity and costs across all LLMs. This might be expected as it
+             from these factors according to the respective pricing models.            uses three different contexts (AF I/F O , ACR ,ACC ), increasing
+                  b) Empirical Results: As seen in Fig. 4, the results                 processing time. Yet, the Inline-Method refactoring, also using
+             highlight the differences in time complexity and cost among               three contexts, has lower time complexity, suggesting other
+             LLM APIs for design issue localization. Claude 3 (Haiku)                  factors influence processing speeds. The Inline-Variable refac-
+             displays the lowest time complexity and API cost, proving the             toring, despite its smallest input size, has high time complexity.
+
+
+                                                                                   1329
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+             This indicates that the inherent complexity of refactoring types                      XI. D ISCUSSION AND F UTURE W ORK
+             and the efficiency of the LLMs in handling certain contexts                     Large Language Model: The effectiveness of L OCAL -
+             significantly impact the overall performance.                             IZE AGENT relies on the code generation capabilities of the
+                    IX. L IMITATIONS AND T HREATS TO VALIDITY                          underlying LLM. While we use generic LLMs like GPT-4,
+                   Data leakage: We could face the risk of data leakage                Claude, and Gemini, which outperform code-specific mod-
+             in the evaluation dataset. If the LLMs were pre-trained on                els [29, 30], evaluating other LLMs provides good insights.
+             the same or similar projects as those used in our evaluation,             Moreover, we use an LLM-based refactoring-agnostic rank-
+             it could lead to an inflated performance metric. To mitigate              ing algorithm. Future research could also explore developing
+             this risk, we carefully selected a diverse set of real-world              ranking algorithms tailored to specific refactoring types as
+             codebases from the refactoring dataset in Aniche et al. [13].             in Pomian et al. [19]. Our agent-based framework allows
+                   Non-determinism of LLMs: LLMs exhibit non-determini-                researchers to easily adapt and improve it.
+             stic behaviors, which can lead to variability in the gener-                     IDE Integration: We could enhance developer tools and
+             ated refactoring suggestions. This non-determinism affects the            workflows by integrating with IDEs. Similar to recent advance-
+             reproducibility and consistency of our results. The lack of               ments in IDE-integrated AI assistants [19, 35], future research
+             explainability further compounds this issue, as it makes it               could focus on embedding our output into IDEs to provide
+             difficult to understand why different suggestions are made                developers with context-aware, prioritized suggestions.
+                                                                                             Expanding Design Issue Coverage: We currently target
+             across runs. For mitigation, we used a temperature setting of
+                                                                                       three design categories: modularity, information hiding, and
+             0 for more stable predictions. We experimented with different
+                                                                                       complexity. Expanding this scope to include additional design
+             settings in RQ2 (Section VIII-C).
+                   Rule-based filtering criteria: We applied rule-based fil-           principles, such as abstraction and system structure, would
+             tering criteria using PMD [21] to focus on specific refactoring           broaden the range of design issues our tool can identify. Future
+             types that successfully resolved design issues and contained              work should explore alternative static analysis tools beyond
+             the necessary ground truth. While these criteria help us eval-            PMD to identify a wider range of design issues.
+                                                                                             Supporting More Refactoring Types: We currently focus
+             uate the effectiveness in a controlled setting, they may limit
+                                                                                       on local design issues within a class. Extending to han-
+             the generalizability of our findings to other refactoring types or
+                                                                                       dle global refactoring issues across multiple classes/modules
+             design issues and introduce false positives. To address this, we
+                                                                                       presents challenges, such as developing techniques to capture
+             plan to use ML filtering techniques and expand our approach
+                                                                                       inter-class relations and dependencies. Additionally, the lack
+             to a broader range of refactoring types and design issues.
+                                                                                       of comprehensive benchmarks for project-level refactoring is
+                                  X. R ELATED W ORK                                    an obstacle. Creating benchmarks through collaborative efforts
+             A. LLM for Code Generation and Understanding                              or by mining large repositories is essential for future research.
+                Researchers explored LLMs for code understanding and                                        XII. C ONCLUSION
+             generation tasks [3, 14, 15]. Recent works leverage emergent                 This paper introduces L OCALIZE AGENT, a novel approach
+             capabilities of LLMs, such as In-Context Learning for code                that leverages LLMs to effectively localize design issues in
+             intelligence tasks [11, 16, 17, 18, 31], while others explore the         evolving codebases. Its key innovations include the leverage of
+             use of multi-agents and LLMs [8]. Dilhara et al. [32] combines            multi-agent learning for collaborative refactoring, generating
+             static analysis and LLM to improve the effectiveness of trans-            natural-language summaries of code metrics and dependencies
+             formation by example. For refactoring tasks, Pomian et al. [19]           to reduce input data loads and overcome the LLMs’ context
+             proposes a technique to query and rank LLM-suggested extract              window limitations, and employing context-aware prompt-
+             method refactorings. Shirafuji et al. [33] introduces a few shot-         ing tailored to specific refactoring types. Evaluated on real-
+             learning technique to apply refactoring fixes on code snippets.           world codebases, L OCALIZE AGENT achieves 206%, 166%,
+             In contrast, our work explores how static analysis agents                 and 138% relative improvements in accuracy for identifying
+             can supplement LLMs to suggest refactorings that improve                  design issues compared to baseline LLM techniques.
+             software design [34]. Towards detecting and fixing software
+             design issues, previous works have explored approaches for                                  XIII. DATA AVAILABILITY
+             predicting refactoring activity, often at the function level [13].          A replication package, including the source code and
+             B. LLM-based Agents for Software Engineering                              dataset, is available at [36].
+                Bouzenia et al. [8] presents an approach where an LLM,                                     ACKNOWLEDGMENT
+             tasked with program repair, is augmented with “agents” that                  This work was supported by the National Science Founda-
+             utilize external tools to explore the codebase, test patches, and         tion under Grants: 25-12857, 25-12858, 15-18897, 15-13263,
+             plan goals. Zhang et al. [20] helps an LLM agent explore a                21-20448, 19-34884, and 22-23812. The third author was
+             codebase via provided code search APIs to resolve an issue au-            supported in part by 21-20386 and the National Security
+             tonomously. To our knowledge, our work is the first to leverage           Agency grant NCAE-C-002-2021. All opinions are those of
+             a multi-agent framework to detect design issues with LLM-                 the authors and do not reflect the views of sponsors. Generative
+             friendly code analysis summary, and context-aware prompts.                AI was used to revise sections of this paper.
+
+
+                                                                                   1330
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+                                         R EFERENCES                                   [11] A. Ni, M. Allamanis, A. Cohan, Y. Deng, K. Shi,
+              [1] N. Brown, Y. Cai, Y. Guo, R. Kazman, M. Kim,                              C. Sutton, and P. Yin, “Next: Teaching large language
+                  P. Kruchten, E. Lim, A. MacCormack, R. Nord,                              models to reason about code execution,” in International
+                  I. Ozkaya, R. Sangwan, C. Seaman, K. Sullivan, and                        Conference on Machine Learning (ICML’24). PMLR,
+                  N. Zazworka, “Managing technical debt in software-                        2024.
+                  reliant systems,” in Proceedings of the FSE/SDP                      [12] A. Hooda, M. Christodorescu, M. Allamanis, A. Wilson,
+                  Workshop on Future of Software Engineering Research,                      K. Fawaz, and S. Jha, “Do large code models understand
+                  ser. FoSER ’10. New York, NY, USA: Association                            programming concepts? Counterfactual analysis for code
+                  for Computing Machinery, 2010, p. 47–52. [Online].                        predicates,” in Proceedings of the 41st International
+                  Available: https://doi.org/10.1145/1882362.1882373                        Conference on Machine Learning (ICML’24), vol. 235.
+              [2] A. Ampatzoglou, A. Ampatzoglou, A. Chatzigeorgiou,                        PMLR, Jul 2024, pp. 18 738–18 748. [Online]. Available:
+                  and P. Avgeriou, “The financial aspect of managing                        https://proceedings.mlr.press/v235/hooda24a.html
+                  technical debt,” Inf. Softw. Technol., vol. 64, no. C, p.            [13] M. Aniche, E. Maziero, R. Durelli, and V. H. S. Durelli,
+                  52–73, aug 2015. [Online]. Available: https://doi.org/10.                 “ The Effectiveness of Supervised Machine Learning
+                  1016/j.infsof.2015.04.001                                                 Algorithms in Predicting Software Refactoring ,” IEEE
+              [3] Y. Wang, H. Le, A. Gotmare, N. Bui, J. Li, and                            Transactions on Software Engineering, vol. 48, no. 04,
+                  S. Hoi, “CodeT5+: Open code large language models                         pp. 1432–1450, Apr. 2022. [Online]. Available: https://
+                  for code understanding and generation,” in Proceedings                    doi.ieeecomputersociety.org/10.1109/TSE.2020.3021736
+                  of the 2023 Conference on Empirical Methods in                       [14] S. Chakraborty, T. Ahmed, Y. Ding, P. T. Devanbu,
+                  Natural Language Processing, H. Bouamor, J. Pino, and                     and B. Ray, “NatGen: generative pre-training by
+                  K. Bali, Eds. Singapore: Association for Computational                    “naturalizing” source code,” in Proceedings of the 30th
+                  Linguistics, Dec. 2023, pp. 1069–1088. [Online].                          ACM Joint European Software Engineering Conference
+                  Available: https://aclanthology.org/2023.emnlp-main.68                    and Symposium on the Foundations of Software
+              [4] “OpenAI,” https://openai.com/.                                            Engineering, ser. ESEC/FSE 2022. New York, NY,
+              [5] D. Guo, S. Ren, S. Lu, Z. Feng, D. Tang, L. Shu-                          USA: ACM Press, 2022, p. 18–30. [Online]. Available:
+                  jie, L. Zhou, N. Duan, A. Svyatkovskiy, S. Fu et al.,                     https://doi.org/10.1145/3540250.3549162
+                  “Graphcodebert: Pre-training code representations with               [15] E. Nijkamp, B. Pang, H. Hayashi, L. Tu, H. Wang,
+                  data flow,” in International Conference on Learning                       Y. Zhou, S. Savarese, and C. Xiong, “Codegen: An
+                  Representations, 2021.                                                    open large language model for code with multi-turn
+              [6] F. Mu, L. Shi, S. Wang, Z. Yu, B. Zhang,                                  program synthesis,” in The Eleventh International
+                  C. Wang, S. Liu, and Q. Wang, “ClarifyGPT: A                              Conference on Learning Representations (ICLR’23),
+                  Framework for Enhancing LLM-Based Code Generation                         2023. [Online]. Available: https://openreview.net/forum?
+                  via Requirements Clarification,” Proc. ACM Softw.                         id=iaYcJKpY2B
+                  Eng., vol. 1, no. FSE, jul 2024. [Online]. Available:                [16] R. Pan, A. R. Ibrahimzada, R. Krishna, D. Sankar,
+                  https://doi.org/10.1145/3660810                                           L. P. Wassi, M. Merler, B. Sobolev, R. Pavuluri,
+              [7] R. Bairi, A. Sonwane, A. Kanade, V. D. C., A. Iyer,                       S. Sinha, and R. Jabbarvand, “Lost in translation:
+                  S. Parthasarathy, S. Rajamani, B. Ashok, and S. Shet,                     A study of bugs introduced by large language
+                  “CodePlan: Repository-Level Coding using LLMs and                         models while translating code,” in Proceedings of
+                  Planning,” Proc. ACM Softw. Eng., vol. 1, no. FSE,                        the IEEE/ACM 46th International Conference on
+                  jul 2024. [Online]. Available: https://doi.org/10.1145/                   Software Engineering, ser. ICSE ’24. New York,
+                  3643757                                                                   NY, USA: ACM Press, 2024. [Online]. Available:
+              [8] I. Bouzenia, P. Devanbu, and M. Pradel, “Repairagent:                     https://doi.org/10.1145/3597503.3639226
+                  An autonomous, llm-based agent for program repair,”                  [17] Q. Guo, J. Cao, X. Xie, S. Liu, X. Li, B. Chen,
+                  in Proceedings of the IEEE/ACM 47th International                         and X. Peng, “Exploring the Potential of ChatGPT
+                  Conference on Software Engineering, April 27-May 3,                       in Automated Code Refinement: An Empirical Study,”
+                  2025 2025.                                                                in Proceedings of the IEEE/ACM 46th International
+              [9] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge,                     Conference on Software Engineering, ser. ICSE ’24.
+                  J. Pan, Y. Song, B. Li, J. Singh et al., “OpenDevin: An                   New York, NY, USA: ACM Press, 2024. [Online].
+                  Open Platform for AI Software Developers as Generalist                    Available: https://doi.org/10.1145/3597503.3623306
+                  Agents,” arXiv preprint arXiv:2407.16741, 2024.                      [18] C. S. Xia, M. Paltenghi, J. Le Tian, M. Pradel,
+             [10] N. Wadhwa, J. Pradhan, A. Sonwane, S. P. Sahu,                            and L. Zhang, “Fuzz4All: Universal Fuzzing with
+                  N. Natarajan, A. Kanade, S. Parthasarathy, and S. Ra-                     Large Language Models,” in Proceedings of the
+                  jamani, “CORE: Resolving Code Quality Issues using                        IEEE/ACM 46th International Conference on Software
+                  LLMs,” Proceedings of the ACM on Software Engineer-                       Engineering, ser. ICSE ’24. New York, NY, USA:
+                  ing, vol. 1, no. FSE, pp. 789–811, 2024.                                  ACM Press, 2024. [Online]. Available: https://doi.org/
+                                                                                            10.1145/3597503.3639121
+
+
+                                                                                   1331
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+             [19] D. Pomian, A. Bellur, M. Dilhara, Z. Kurbatova,                           refactoring detection in commit history,” in Proceedings
+                  E. Bogomolov, T. Bryksin, and D. Dig, “Together                           of the 40th International Conference on Software
+                  We Go Further: LLMs and IDE Static Analysis for                           Engineering, ser. ICSE ’18.           New York, NY,
+                  Extract Method Refactoring,” 2024. [Online]. Available:                   USA: ACM, 2018, pp. 483–494. [Online]. Available:
+                  https://arxiv.org/abs/2401.15298                                          http://doi.acm.org/10.1145/3180155.3180206
+             [20] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury,                      [29] W.-L. Chiang, L. Zheng, Y. Sheng, A. N. Angelopoulos,
+                  “Autocoderover: Autonomous program improvement,” in                       T. Li, D. Li, B. Zhu, H. Zhang, M. I. Jordan, J. E.
+                  Proceedings of the 33rd ACM SIGSOFT International                         Gonzalez, and I. Stoica, “Chatbot arena: An open
+                  Symposium on Software Testing and Analysis, ser. ISSTA                    platform for evaluating llms by human preference,” in
+                  2024. New York, NY, USA: ACM Press, 2024, p.                              ICML, 2024. [Online]. Available: https://openreview.net/
+                  1592–1604. [Online]. Available: https://doi.org/10.1145/                  forum?id=3MW8GKNyzI
+                  3650212.3680384                                                      [30] “Chatbot arena leaderboard,” 2024, https://huggingface.
+             [21] PMD,       “PMD       Static   Analysis    Tool,”   https:                co/spaces/lmsys/chatbot-arena-leaderboard.
+                  //docs.pmd-code.org/latest/pmd rules java design.html,               [31] M. Geng, S. Wang, D. Dong, H. Wang, G. Li,
+                  Accessed 2024.                                                            Z. Jin, X. Mao, and X. Liao, “Large language
+             [22] annonymous, “ChatGPT Prompt of the Motivating                             models are few-shot summarizers: Multi-intent comment
+                  Example,”           2024,       https://chatgpt.com/share/                generation via in-context learning,” in Proceedings
+                  2986fa56-357d-4ea9-a821-9e8607389d9b.                                     of the IEEE/ACM 46th International Conference on
+             [23] J. Shin, C. Tang, T. Mohati, M. Nayebi, S. Wang,                          Software Engineering, ser. ICSE ’24. New York,
+                  and H. Hemmati, “Prompt engineering or fine tuning:                       NY, USA: ACM Press, 2024. [Online]. Available:
+                  An empirical assessment of large language models in                       https://doi.org/10.1145/3597503.3608134
+                  automated software engineering tasks,” arXiv preprint                [32] M. Dilhara, A. Bellur, T. Bryksin, and D. Dig, “Unprece-
+                  arXiv:2310.10508, 2023.                                                   dented code change automation: The fusion of llms and
+             [24] T. Ahmed, K. S. Pai, P. Devanbu, and E. Barr,                             transformation by example,” Proceedings of the ACM
+                  “Automatic semantic augmentation of language model                        on Software Engineering, vol. 1, no. FSE, pp. 631–653,
+                  prompts (for code summarization),” in Proceedings                         2024.
+                  of the IEEE/ACM 46th International Conference on                     [33] A. Shirafuji, Y. Oda, J. Suzuki, M. Morishita, and
+                  Software Engineering, ser. ICSE ’24. New York,                            Y. Watanobe, “Refactoring programs using large lan-
+                  NY, USA: ACM Press, 2024. [Online]. Available:                            guage models with few-shot examples,” in 2023 30th
+                  https://doi.org/10.1145/3597503.3639183                                   Asia-Pacific Software Engineering Conference (APSEC).
+             [25] H. Van Vliet, H. Van Vliet, and J. Van Vliet, Software                    IEEE, 2023, pp. 151–160.
+                  engineering: principles and practice. John Wiley &                   [34] Y. Liu, T. Le-Cong, R. Widyasari, C. Tantithamthavorn,
+                  Sons Hoboken, NJ, 2008, vol. 13.                                          L. Li, X.-B. D. Le, and D. Lo, “Refining ChatGPT-
+             [26] R. Schwanke, L. Xiao, and Y. Cai, “Measuring archi-                       Generated Code: Characterizing and Mitigating Code
+                  tecture quality by structure plus history analysis,” in                   Quality Issues,” ACM Trans. Softw. Eng. Methodol.,
+                  Proceedings of the 35th International Conference on                       vol. 33, no. 5, Jun. 2024. [Online]. Available: https:
+                  Software Engineering (ICSE’13), 2013, pp. 891–900.                        //doi.org/10.1145/3643674
+             [27] L. Layman, G. Kudrjavets, and N. Nagappan,                           [35] D. Pomian, A. Bellur, M. Dilhara, Z. Kurbatova,
+                  “Iterative identification of fault-prone binaries using                   E. Bogomolov, A. Sokolov, T. Bryksin, and D. Dig,
+                  in-process metrics,” in Proceedings of the Second ACM-                    “EM-Assist: Safe Automated ExtractMethod Refactoring
+                  IEEE International Symposium on Empirical Software                        with LLMs,” in Companion Proceedings of the 32nd
+                  Engineering and Measurement, ser. ESEM ’08. New                           ACM International Conference on the Foundations of
+                  York, NY, USA: ACM Press, 2008, p. 206–212. [Online].                     Software Engineering, ser. FSE 2024. New York,
+                  Available: https://doi.org/10.1145/1414004.1414038                        NY, USA: ACM Press, 2024, p. 582–586. [Online].
+             [28] N. Tsantalis, M. Mansouri, L. M. Eshkevari,                               Available: https://doi.org/10.1145/3663529.3663803
+                  D. Mazinanian, and D. Dig, “Accurate and efficient                   [36] anonymous, “LocalizeAgent Reproducibility Package,”
+                                                                                            2024, https://github.com/fraolBatole/LocalizeAgent.
+
+
+
+
+                                                                                   1332
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:07:55 UTC from IEEE Xplore. Restriction
+

@@ -1,0 +1,423 @@
+                                              Context Engineering for AI Agents in Open-Source Software
+                                                             Seyedmoein Mohsenimofidi                                                                Matthias Galster
+                                                                 Heidelberg University                                                             University of Bamberg
+                                                                       Germany                                                                           Germany
+                                                           s.mohsenimofidi@uni-heidelberg.de                                                        mgalster@ieee.org
+
+                                                                      Christoph Treude                                                               Sebastian Baltes
+                                                            Singapore Management University                                                       Heidelberg University
+                                                                       Singapore                                                                        Germany
+                                                                  ctreude@smu.edu.sg                                                       sebastian.baltes@uni-heidelberg.de
+
+                                        Abstract                                                                                1   Introduction
+arXiv:2510.21413v4 [cs.SE] 5 Feb 2026
+
+
+
+
+                                        GenAI-based coding assistants have disrupted software develop-                          The launches of GitHub Copilot in 2021 and ChatGPT in 2022 have
+                                        ment. The next generation of these tools is agent-based, operating                      started to transform how software is developed. Today, genera-
+                                        with more autonomy and potentially without human oversight.                             tive AI (GenAI) tools built around large language models (LLMs)
+                                        Like human developers, AI agents require contextual information                         support software engineers throughout the software development
+                                        to develop solutions that are in line with the standards, policies,                     lifecycle (SDLC)—although most published work focuses on code
+                                        and workflows of the software projects they operate in. Vendors of                      and test generation [7, 15, 17, 34, 36, 41]. The Devin AI demo pub-
+                                        popular agentic tools (e.g., Claude Code) recommend maintaining                         lished in March 2024 fueled the first hype around agent-based
+                                        version-controlled Markdown files that describe aspects such as the                     software development [18], but it took until 2025 for agent-based
+                                        project structure, code style, or building and testing. The content                     software development to reach considerable adoption. In February
+                                        of these files is then automatically added to each prompt. Recently,                    2025, Anthropic released Claude Code, a “command line tool for
+                                        AGENTS.md has emerged as a potential standard that consolidates ex-                     agentic coding” [1], which represents a further step toward more au-
+                                        isting tool-specific formats. However, little is known about whether                    tonomous AI-assisted software development, enabling developers
+                                        and how developers adopt this format. Therefore, in this paper, we                      to assign coding tasks to AI agents via a terminal interface. Human
+                                        present the results of a preliminary study investigating the adop-                      oversight is still built-in, but can be turned off by the developer.
+                                        tion of AI context files in 466 open-source software projects. We                       This brings GenAI assistants closer to the inherent meaning of an
+                                        analyze the information that developers provide in AGENTS.md files,                     agent that operates autonomously, adapts to change, and creates
+                                        how they present that information, and how the files evolve over                        and pursues goals (from the Latin ‘agere’, ‘to do’ in English) [27].
+                                        time. Our findings indicate that there is no established content                            Context engineering is the deliberate process of designing, struc-
+                                        structure yet and that there is a lot of variation in terms of how                      turing, and providing task-relevant information to LLMs [22, 29].
+                                        context is provided (descriptive, prescriptive, prohibitive, explana-                   While prompt engineering focuses on how a task is described to
+                                        tory, conditional). Our commit-level analysis provides first insights                   the model (e.g., instructions and output indicators) [6, 28], context
+                                        into the evolution of the provided context. AI context files provide                    engineering focuses on what task-relevant information the model
+                                        a unique opportunity to study real-world context engineering. In                        has access to, including relevant guidelines, configuration files, doc-
+                                        particular, we see great potential in studying which structural or                      umentation, and exemplary code snippets [22, 29]. An advantage
+                                        presentational modifications can positively affect the quality of the                   of agent-based tools compared to conversational tools is that they
+                                        generated content.                                                                      allow persistent, structured, and task-specific context to be pro-
+                                                                                                                                vided in a more fine-grained and targeted manner [14]. One way
+                                        Keywords                                                                                to “engineer” context is to add machine-readable AI context files to
+                                                                                                                                source code repositories. The AI agents then automatically add the
+                                        Software Engineering, Generative AI, AI Agents, Open Source
+                                                                                                                                content of these files to their prompts. While traditional README
+                                        ACM Reference Format:                                                                   files are written for humans, AI context files are explicitly designed
+                                        Seyedmoein Mohsenimofidi, Matthias Galster, Christoph Treude, and Se-                   for AI agents, providing a central machine-readable source of con-
+                                        bastian Baltes. 2026. Context Engineering for AI Agents in Open-Source                  textual information. Their content can include everything from
+                                        Software. In 23rd International Conference on Mining Software Repositories              the required terminal commands to build and test the project over
+                                        (MSR ’26), April 13–14, 2026, Rio de Janeiro, Brazil. ACM, New York, NY,                documentation links, common workflows, coding conventions, to
+                                        USA, 5 pages. https://doi.org/10.1145/3793302.3793350                                   instructions for creating pull requests.
+                                                                                                                                    AGENTS.md was introduced as an open tool-agnostic convention
+                                                                                                                                for such AI context files [19], and it was recently announced as a
+                                                                                                                                project in the Agentic AI Foundation. OpenAI’s Codex tool relies on
+                                        This work is licensed under a Creative Commons Attribution 4.0 International License.   this format [26], while Claude Code by default searches for a file
+                                        MSR ’26, Rio de Janeiro, Brazil                                                         named CLAUDE.md. Anthropic’s best-practice guide recommends
+                                        © 2026 Copyright held by the owner/author(s).
+                                        ACM ISBN 979-8-4007-2474-9/2026/04                                                      teams to put that file into version control so that all team members
+                                        https://doi.org/10.1145/3793302.3793350
+MSR ’26, April 13–14, 2026, Rio de Janeiro, Brazil                                                                           Mohsenimofidi et al.
+
+
+benefit from consistent AI behavior [2]. GitHub introduced a similar    started investigating AI context files as novel software artifacts [4].
+AI context file for Copilot named copilot-instructions.md [13].         However, a holistic analysis across tools and formats has, to the
+    Since prompts are only rarely preserved after content has been      best of our knowledge, not been published yet.
+generated [33], AI context files offer a unique opportunity to study
+how developers customize AI agents to their needs, what informa-        3   Data Collection
+tion they consider relevant to include, how they present it, and how    To answer our research questions, we collected AI context files from
+instructions and contextual descriptions evolve. To our knowledge,      OSS projects on GitHub. Since GitHub hosts not only “engineered’
+we present the first holistic empirical study that analyzes context     software projects, we needed to develop a strategy for selecting
+files used to guide different AI agents in open-source software (OSS)   repositories [24]. Many popular repositories on GitHub are not
+projects. We addressed the following research questions:                software projects [11], which complicates sampling.
+    RQ1 How widely have OSS projects adopted AI context files?             Our starting point for selecting true software projects was the
+    RQ2 What information do open-source developers provide in AI        SEART GitHub search tool [5, 30]. We selected non-fork repositories
+        context files and how do they present it?                       that have at least two contributors, have a license, and were created
+    RQ3 How do AI context files evolve over time?                       before 1st January 2024 with commits since 1st June 2024. We then
+                                                                        excluded archived, disabled, or locked repositories, resulting in a
+    An initial search in October 2025 suggested that tens of thou-
+                                                                        first sample of 228,890 repositories. In the next step, we selected
+sands of GitHub repositories already contained AI context files [12].
+                                                                        repositories with an OSI-compliant open-source license [25] and
+However, there was no systematic analysis focusing on “engineered”
+                                                                        then manually filtered out licenses not intended for software and
+software projects. This paper provides a first step toward filling
+                                                                        licenses with low adoption, i.e., used in fewer than 261 repositories
+this gap by mining GitHub repositories to study how AI context
+                                                                        (median). We focused on the ten most popular languages (Python,
+files are adopted, structured, and maintained, with the overarching
+                                                                        TypeScript, JavaScript, Go, Java, C++, Rust, PHP, C#, and C) and
+goal of understanding how software teams engage in context engi-
+                                                                        excluded repositories with fewer than 271 commits (median) or
+neering in practice. The results of our preliminary study are based
+                                                                        fewer than 7 watchers (median). This resulted in a final sample
+on data collected from 10,000 GitHub repositories (RQ1). For RQ2
+                                                                        of 48,795 repositories. The purpose of this filtering process was
+and RQ3, we performed a detailed qualitative analysis of relevant
+                                                                        to select repositories that represent actively maintained software
+repository data, including file content, commits, and issues. As the
+                                                                        projects with a sufficiently long development history, written in one
+first study that explores the above aspects, we follow an exploratory
+                                                                        of the major programming languages. For this paper, our goal was
+bottom-up approach to build an initial understanding of AI context
+                                                                        to start with mature popular repositories. Thus, we selected 10,000
+files as novel software artifacts. We will extend our study in the
+                                                                        repositories based on a ranking approach that balances popularity
+future to answer the research questions more holistically.
+                                                                        (#stars, #watchers, #contributors) and maturity (#commits to default
+                                                                        branch, project age, LOC).
+2    Related Work
+                                                                           Figure 1 outlines our data collection process for these 10,000
+Agentic GenAI tools promise to introduce autonomous decision-           repositories. We cloned them and scanned their default branch to
+making and proactive problem-solving along the SDLC [16, 32].           find all types of context files that GitHub Copilot supports: Copilot
+Advances in LLMs, reinforcement learning, and multi-agent frame-        instructions, CLAUDE.md, AGENTS.md, and GEMINI.md [10]. We then
+works enabled the implementation of software agents that go be-         manually checked all repositories to exclude non-English and non-
+yond simple prompt-response interactions [38]. One of the first         software projects. We used the resulting data to answer RQ1 (see
+agent-based software development tools was Devin AI [37], which         Section 4.1). Since AGENTS.md is the only format that serves as an
+allowed agents to search the web, edit files, and execute commands      open tool-agnostic convention, we decided to focus on it to answer
+to complete tasks iteratively and independently. In the academic        RQ2 and RQ3 (see Sections 4.2 and 4.3). Our data collection and
+community, SWE-agent [39] allowed LLM-based agents to com-              analysis scripts and the analyzed data are available online [23].
+municate with the repository environment by reading, modify-
+ing, and executing bash commands [39]. Another example is Au-           4 Results
+toCodeRover [40], which enabled agents to access code search APIs
+to help them find methods within specific classes for bug loca-         4.1 Adoption (RQ1)
+tion identification [40]. Suri et al. showcased the potential of au-    Only 466 (5%) of the repositories that we scanned had already
+tonomous agents, particularly Auto-GPT, in software engineering         adopted at least one of the formats we considered, reflecting that
+tasks and demonstrates the importance of context-specific prompts       we are still in an early stage of adoption. One limitation is our focus
+in complex frameworks [32]. However, they also revealed that Auto-      on four selected tools. We consider extending the analysis to cover
+GPT [31], despite performing well on simpler tasks, struggles with      more tools (and more repositories) an important direction for our
+ambiguity and complexity, underscoring the need for accurate con-       future work. It will also be interesting to study trends over time,
+text. Although context plays a critical role in guiding autonomous      e.g., whether projects converge toward one file format or whether
+agents, prompts are typically treated as temporary artifacts and are    tool-specific formats persist.
+rarely preserved or reused [20, 21, 35]. This lack of prompt man-          The distribution of languages was roughly aligned with the lan-
+agement limits reproducibility [3] and underscores the importance       guages’ general representation in our sample, although Go was
+of making prompt and context information explicit and manage-           slightly overrepresented. We found AI context files in 135 reposito-
+able by using versioned AI context files. Recently, researchers have    ries with TypeScript as main language, 58 Go, 58 Python, 56 C#, 36
+Context Engineering for AI Agents in Open-Source Software                                                    MSR ’26, April 13–14, 2026, Rio de Janeiro, Brazil
+
+
+
+
+                                                            Figure 1: Data collection process.
+
+
+Java, 34 JavaScript, 32 C++, 29 Rust, 19 PHP, and 9 C. Certain file                We also noticed differences in writing style when analyzing the
+types were more prevalent in certain programming languages. C#,                files. To examine these differences more closely, we analyzed all
+for example, had a strong focus on Copilot, while Claude Code was              50 sections labeled Conventions, the most common category in
+very popular for TypeScript. We also investigated which files most             our dataset. We found that the writing style can be characterized
+commonly co-occurred, finding that (AGENTS.md, CLAUDE.md) was                  along five stylistic dimensions: descriptive, prescriptive, prohibitive,
+the most common pair (25 repositories).                                        explanatory, and conditional. Some sections were descriptive, docu-
+                                                                               menting existing conventions without giving explicit instructions,
+                                                                               e.g., “This project uses the Linux Kernel Style Guideline.” Such state-
+4.2     Information and Structure (RQ2)                                        ments summarize current practices or configurations that the AI
+                                                                               agent should be aware of, rather than prescribing behavior. Others
+Before we dive into our answer to RQ2, we briefly characterize
+                                                                               were prescriptive, written as direct imperatives that instruct how
+the content of AI context files. Copilot instruction files were on
+                                                                               to act, e.g., “Follow the existing code style and conventions.” This
+average the longest (𝑀 = 310 lines, 𝑆𝐷 = 127 lines), followed by
+                                                                               style provides explicit behavioral rules and was often formatted
+CLAUDE.md files (𝑀 = 287, 𝑆𝐷 = 112); GEMINI.md files were the
+                                                                               as concise bullet points. Prohibitive statements were also common,
+shortest (𝑀 = 106, 𝑆𝐷 = 65). Interestingly, AGENTS.md files had the
+                                                                               explicitly indicating what not to do, e.g., “Never commit directly
+highest variation in file length (𝑀 = 142, 𝑆𝐷 = 231). This variation
+                                                                               to the main branch.” These prohibitions set boundaries and clarify
+may reflect the amount of information that developers provide.
+                                                                               the constraints that AI agents should respect. Some projects added
+Exploring whether the context length is proportional to the project
+                                                                               short explanations after the rules, resulting in an explanatory style,
+size or other factors is part of our future work.
+                                                                               e.g., “Avoid hard-coded waits to prevent timing issues in CI environ-
+    To answer RQ2, we extracted all section headings from the 155
+                                                                               ments.” Here, the justification (“to prevent timing issues”) provides
+AGENTS.md files in our sample, converted them to lower case, re-
+                                                                               context for why a convention exists. Finally, we observed condi-
+moved special characters, and lemmatized the words to be able to
+                                                                               tional formulations that specify what to do in certain situations,
+group semantically equivalent variations (e.g., “tests” and “testing”).
+                                                                               e.g., “If you need to use reflection, use ReflectionUtils APIs.” This
+We excluded 15 AGENTS.md files that were created before 1st Janu-
+                                                                               style encodes situational logic, specifying conditional actions that
+ary 2025, i.e., before the AGENTS.md convention was introduced. For
+                                                                               depend on the context of the agent’s task.
+each lemmatized heading, we determined (1) in how many distinct
+                                                                                   In summary, AGENTS.md files vary widely both in the informa-
+repositories it occurred, (2) in how many distinct files it occurred
+                                                                               tion they contain and how they are presented, yet some recurring
+(#files > #repositories), and (3) how many total occurrences it had
+                                                                               patterns are emerging. Projects often document architecture, con-
+(multiple equivalent headings per file). We excluded five reposito-
+                                                                               tribution processes, and coding conventions, but without a consis-
+ries that contained AGENTS.md files without any heading structure.
+                                                                               tent structure. Stylistic choices range from descriptive to directive,
+For the remaining files, we recorded the heading levels (from #,
+                                                                               reflecting experimentation with how best to communicate expec-
+i.e., level 1, to #####, i.e., level 5) to understand their structural
+                                                                               tations to AI agents. These observations suggest that conventions
+depth. Following related work on README files [9], which found
+                                                                               for documenting context are still evolving and point to promising
+that the first- and second-level headings are the most informative
+                                                                               opportunities for future work on how information structure and
+and consistent, we restricted our initial analysis to these levels.
+                                                                               style influence agent behavior.
+    We manually developed an initial coding guide based on the 44
+lemmatized section headings that appeared in ≥ 3 different repos-
+itories and ≥ 3 times at heading levels 1 or 2. We then examined                4.3   Evolution (RQ3)
+examples of section content for each heading. The resulting coding             To answer RQ3, we analyzed the commit histories of all 155
+guide, shown in Table 1, groups semantically similar headings into             AGENTS.md files and found that 77 (50%) of them had not been
+categories. We then applied this guide to a larger set of 91 lemma-            changed, 36 (23%) only once, and 32 (21%) between two and seven
+tized section headings that were used in ≥ 2 repositories and ≥ 2              times. For this study, we were primarily interested in understand-
+times at heading levels 1 or 2. This analysis provides an overview of          ing the types of changes developers make in AI context files. We
+the information most commonly provided in AGENTS.md files. Top-                decided to focus on the 10 files (6%) with at least 10 commits, which
+ics such as code conventions and best practices, contribution guide-           yielded a sample of 169 commits to annotate (37% of all collected
+lines, and architecture or project structure appeared frequently, in           commits). The resulting modification patterns varied per file, with
+contrast to sections on troubleshooting or security.                           some histories spanning a short period with many changes (e.g.,
+MSR ’26, April 13–14, 2026, Rio de Janeiro, Brazil                                                                                              Mohsenimofidi et al.
+
+
+Table 1: Categories of information provided in AGENTS.md                             Table 2: Categories of changes for AGENTS.md files with ≥ 10
+files (last column: number of level 1 and 2 headings).                               commits (last column: category frequency across all files).
+
+ Category              Description                                              #     Category                Description                                        #
+ Conventions       Outlines coding standards, naming/formatting conven-         50    Add instruction(s)      Add instruction line(s) to existing sections.      78
+                   tions, and best practices for writing consistent and               Modify instruction(s)   Modify instruction line(s) within a section (ig-   59
+                   maintainable code.                                                                         noring typo fixes and references additions).
+ Contribution      Provides instructions for contributing to the repository,    48    Add section(s)          Add new section(s) to the AGENTS.md file.          26
+ guidelines        such as branching, code reviews, or CI requirements.               Remove instruction(s)   Remove line(s) with instructions from existing     23
+ Architecture/     Describes how the project or repository is organized,        47                            sections.
+ structure         including key directories, modules, components, and                Modify heading(s)       Modify existing section heading title or level.    23
+                   relationships between them.                                        Modify text             Minor changes to content of AGENTS.md file,        19
+ Build commands    Lists commands for building, running, or deploying.          40                            such as fixing typos.
+ Goals/purposes    Summarizes what the project or agent does, its goals or      32    Reformat style          Changing visual appearance of content in           10
+                   purposes, and high-level functionality or capabilities.                                    AGENTS.md file (not related to structure).
+ Test execution    Explains how to execute test suites or individual tests,     32    Remove section(s)       Remove sections from AGENTS.md file.               2
+                   including tools, commands, and environments.                       Update reference(s)     Update references, e.g., URLs.                     2
+ Metadata          Contains file metadata or configuration (e.g., tags).        29
+ Test strategy     Describes the overall approach to testing (unit, inte-       24
+                   gration, end-to-end), test organization, or principles
+                   guiding test coverage and design.                                 for AGENTS.md in rsyslog, one of the commit messages states “AI
+ Tech stack        Lists programming languages, libraries, frameworks,          15   support: Agent shall no longer call stylecheck.sh”. The related change
+                   or other dependencies used in the project.
+ Setup             Covers installation prerequisites, environment setup,        11   category is ‘Remove instruction(s)’, because the change deleted
+                   and initial steps required to run/use the project locally.        an instruction. A commit in eclipse-rdf4j/rdf4j fixed a flaky
+ References        Provides a concise list of frequently used commands,          9   test and updated the AGENTS.md file to handle flaky tests during
+                   API references, or quick tips for developers or users.
+ Troubleshooting Offers guidance for diagnosing and resolving common             8   test execution. Analyzing co-changes of AI context files and other
+                   errors, failures, or configuration problems encountered           artifacts is a promising direction for future work.
+                   during development or deployment.
+ Patterns/examples Shows reusable patterns, sample agent configs, or ex-         8
+                                                                                        In summary, the evolution of the AGENTS.md files in our sample
+                   ample use cases to guide understanding or extensions.             varies, and we did not identify clear patterns in terms of when and
+ Security          Highlights security-related advice, configurations, or        6   how often changes occur. However, we did identify common change
+                   precautions (e.g., managing secrets or access controls).
+                                                                                     categories. Based on these categories, it appears that changes are
+                                                                                     mostly made to fine-tune and adjust instructions.
+
+neomjs/neo: 49 changes over 19 days) and others spanning longer
+                                                                                     5    Conclusion
+periods with fewer changes (e.g., gofiber/fiber: 11 changes, 148                     In addition to README files for humans, OSS projects increasingly
+days). Although we did not analyze files with fewer than 10 com-                     include AI context files for AI coding agents. In other words, soft-
+mits in detail, we noticed that the history of these files varied                    ware developers are now writing and maintaining documentation
+significantly as well, ranging from 0 to 127 days, with 2 to 8 com-                  for machines. Our results show that conventions for this new soft-
+mits. A more detailed analysis of evolution patterns is an important                 ware artifact are still in flux. Projects differ widely in what they
+direction for future work.                                                           encode (e.g., conventions, architecture) and how they express it
+   To understand what developers change in AI context files and                      (e.g., prescriptive vs. prohibitive). These stylistic variations mirror
+to inductively identify general change categories, we manually                       different prompt writing practices. Thus, OSS repositories serve as
+reviewed the commits, including the source code diff, the commit                     natural laboratories for studying how developers experiment with
+messages, and any related issues or pull requests. Two authors                       “talking” to agent-based AI tools.
+developed an initial coding guide and then iteratively refined the                      AI context files are maintained software artifacts. They are ver-
+emerging categories and descriptions. We considered each commit                      sioned, reviewed, quality-assured, and tested. Future work needs to
+as an isolated change. Although most commits (111 commits, i.e.,                     evaluate how their content, structure, and style affect agent behav-
+66%) represented only one change category, we observed commits                       ior and task performance, and how automated feedback loops could
+that represented multiple. Table 2 shows that some categories refer                  update or refine these files based on observed results. Research
+to the overall structure of AGENTS.md files while others refer to                    should also investigate the co-evolution of source code and related
+the content of specific sections, indicating a narrower scope. Note                  AI context files, similar to the co-evolution of source code and com-
+that we currently do not quantify changes per category, meaning                      ments [8]. Open questions include whether standard schemas could
+that, e.g., ‘Add section(s)’ can represent a change that added one                   improve interoperability, whether repositories should maintain one
+or multiple sections. Furthermore, we did not label the intent of                    or multiple AI context files, and how to coordinate instructions for
+a change, e.g., why a certain section was added or removed. An                       multiple agents. Beyond technical considerations, this new form
+analysis of the intent of changes is the subject of our future work.                 of documentation has the potential to reshape communication, re-
+   Table 2 shows that the most frequent change categories are ‘Add                   view, and collaboration patterns in software teams as instructions
+instruction(s)’ and ‘Modify instruction(s)’. For all examined                        move from being written for humans to being negotiated between
+AGENTS.md files, these categories occurred as the first or second                    humans and AI. The systematic study of AI context files has great
+change in the history of changes. Looking at commit messages                         potential to provide actionable recommendations to practitioners.
+related to changes, we found a few interesting cases. For example,
+Context Engineering for AI Agents in Open-Source Software                                                                   MSR ’26, April 13–14, 2026, Rio de Janeiro, Brazil
+
+
+References                                                                              [22] Lingrui Mei, Jiayu Yao, Yuyao Ge, Yiwei Wang, Baolong Bi, Yujun Cai, Jiazhi
+ [1] Anthropic. 2025. Claude 3.7 Sonnet and Claude Code. https://www.anthropic.              Liu, Mingyu Li, Zhong-Zhi Li, Duzhen Zhang, Chenlin Zhou, Jiayi Mao, Tianze
+     com/news/claude-3-7-sonnet.                                                             Xia, Jiafeng Guo, and Shenghua Liu. 2025. A Survey of Context Engineering
+ [2] Anthropic. 2025. Claude Code Best Practices. https://www.anthropic.com/                 for Large Language Models. CoRR abs/2507.13334 (2025). arXiv:2507.13334
+     engineering/claude-code-best-practices.                                                 doi:10.48550/arXiv.2507.13334
+ [3] Sebastian Baltes, Florian Angermeir, Chetan Arora, Marvin Muñoz Barón, Chun-       [23] Seyedmoein Mohsenimofidi, Matthias Galster, Christoph Treude, and Sebastian
+     yang Chen, Lukas Böhme, Fabio Calefato, Neil Ernst, Davide Falessi, Brian               Baltes. 2025. Context Engineering for AI Agents in Open-Source Software (Supple-
+     Fitzgerald, Davide Fucci, Marcos Kalinowski, Stefano Lambiase, Daniel Russo,            mentary Material). doi:10.5281/zenodo.17428770
+                                                                                        [24] Nuthan Munaiah, Steven Kroh, Craig Cabrey, and Meiyappan Nagappan. 2017.
+     Mircea Lungu, Lutz Prechelt, Paul Ralph, Rijnard van Tonder, Christoph Treude,
+                                                                                             Curating GitHub for engineered software projects. Empir. Softw. Eng. 22, 6 (2017),
+     and Stefan Wagner. 2025. Guidelines for Empirical Studies in Software En-
+                                                                                             3219–3253. doi:10.1007/S10664-017-9512-6
+     gineering involving Large Language Models. arXiv:2508.15503 [cs.SE] https:
+                                                                                        [25] Open Source Initiative. 2025. Approved Licenses. https://opensource.org/licenses.
+     //arxiv.org/abs/2508.15503
+                                                                                        [26] OpenAI. 2025. Introducing Codex. https://openai.com/index/introducing-codex/.
+ [4] Worawalan Chatlatanagulchai, Kundjanasith Thonglek, Brittany Reid, Yutaro
+                                                                                        [27] Stuart Russell and Peter Norvig. 2021. Artificial Intelligence: A Modern Approach.
+     Kashiwa, Pattara Leelaprute, Arnon Rungsawang, Bundit Manaskasemsak, and
+                                                                                        [28] Pranab Sahoo, Ayush Kumar Singh, Sriparna Saha, Vinija Jain, Samrat Mondal,
+     Hajimu Iida. 2025. On the Use of Agentic Coding Manifests: An Empirical Study
+                                                                                             and Aman Chadha. 2024. A Systematic Survey of Prompt Engineering in Large
+     of Claude Code. In Proceedings of the 26th International Conference on Product-
+                                                                                             Language Models: Techniques and Applications. CoRR abs/2402.07927 (2024).
+     Focused Software Process Improvement (PROFES 2025).
+                                                                                             arXiv:2402.07927 doi:10.48550/arXiv.2402.07927
+ [5] Ozren Dabic, Emad Aghajani, and Gabriele Bavota. 2021. Sampling Projects in
+                                                                                        [29] Philipp Schmid. 2025. The New Skill in AI is Not Prompting, It’s Context Engi-
+     GitHub for MSR Studies. In 18th IEEE/ACM International Conference on Mining
+                                                                                             neering. https://www.philschmid.de/context-engineering.
+     Software Repositories, MSR 2021, Madrid, Spain, May 17-19, 2021. IEEE, 560–564.
+                                                                                        [30] SEART. 2025. GitHub Search. https://seart-ghs.si.usi.ch/.
+     doi:10.1109/MSR52588.2021.00074
+                                                                                        [31] Significant Gravitas. 2023. AutoGPT. https://agpt.co/.
+ [6] DAIR.AI Prompt Engineering Guide. 2025. Elements of a Prompt | Prompt
+                                                                                        [32] Samdyuti Suri, Sankar Narayan Das, Kapil Singi, Kuntal Dey, Vibhu Saujanya
+     Engineering Guide. https://www.promptingguide.ai/introduction/elements.
+                                                                                             Sharma, and Vikrant Kaulgud. 2023. Software Engineering Using Autonomous
+ [7] Angela Fan, Beliz Gokkaya, Mark Harman, Mitya Lyubarskiy, Shubho Sengupta,
+                                                                                             Agents: Are We There Yet?. In 38th IEEE/ACM International Conference on Auto-
+     Shin Yoo, and Jie M. Zhang. 2023. Large Language Models for Software Engi-
+                                                                                             mated Software Engineering, ASE 2023, Luxembourg, September 11-15, 2023. IEEE,
+     neering: Survey and Open Problems. In IEEE/ACM International Conference on
+                                                                                             1855–1857. doi:10.1109/ASE56229.2023.00174
+     Software Engineering: Future of Software Engineering, ICSE-FoSE 2023, Melbourne,
+                                                                                        [33] Mahan Tafreshipour, Aaron Imani, Eric Huang, Eduardo Santana de Almeida,
+     Australia, May 14-20, 2023. IEEE, 31–53. doi:10.1109/ICSE-FOSE59343.2023.00008
+                                                                                             Thomas Zimmermann, and Iftekhar Ahmed. 2025. Prompting in the Wild: An
+ [8] B. Fluri, M. Würsch, E. Giger, and H. Gall. 2009. Analyzing the co-evolution of
+                                                                                             Empirical Study of Prompt Evolution in Software Repositories. In 22nd IEEE/ACM
+     comments and source code. Software Quality Journal 17 (2009), 367––394.
+                                                                                             International Conference on Mining Software Repositories, MSR@ICSE 2025, Ottawa,
+ [9] Haoyu Gao, Christoph Treude, and Mansooreh Zahedi. 2025. Adapting Installa-
+                                                                                             ON, Canada, April 28-29, 2025. IEEE, 686–698. doi:10.1109/MSR66628.2025.00106
+     tion Instructions in Rapidly Evolving Software Ecosystems. IEEE Trans. Software
+                                                                                        [34] Rosalia Tufano, Ozren Dabic, Antonio Mastropaolo, Matteo Ciniselli, and Gabriele
+     Eng. 51, 4 (2025), 1334–1357. doi:10.1109/TSE.2025.3552614
+                                                                                             Bavota. 2024. Code Review Automation: Strengths and Weaknesses of the State
+[10] GitHub. 2025. Copilot coding agent now supports AGENTS.md custom instruc-
+                                                                                             of the Art. IEEE Trans. Software Eng. 50, 2 (2024), 338–353. doi:10.1109/TSE.2023.
+     tions. https://github.blog/changelog/2025-08-28-copilot-coding-agent-now-
+                                                                                             3348172
+     supports-agents-md-custom-instructions/.
+                                                                                        [35] Hugo Villamizar, Jannik Fischbach, Alexander Korn, Andreas Vogelsang, and
+[11] GitHub. 2025. Search for most popular repositories. https://github.com/search?
+                                                                                             Daniel Méndez. 2025. Prompts as Software Engineering Artifacts: A Research
+     q=stars%3A%3E10000&type=Repositories&s=stars&o=desc.
+                                                                                             Agenda and Preliminary Findings. CoRR abs/2509.17548 (2025). arXiv:2509.17548
+[12] GitHub. 2025. Search for AGENTS.md files. https://github.com/search?q=path%
+                                                                                             doi:10.48550/arXiv.2509.17548
+     3A**%2FAGENTS.md&type=code.
+                                                                                        [36] Junjie Wang, Yuchao Huang, Chunyang Chen, Zhe Liu, Song Wang, and Qing
+[13] GitHub Changelog. 2025. Copilot Code Review: Customization for All. https://
+                                                                                             Wang. 2024. Software Testing With Large Language Models: Survey, Landscape,
+     github.blog/changelog/2025-06-13-copilot-code-review-customization-for-all/.
+                                                                                             and Vision. IEEE Trans. Software Eng. 50, 4 (2024), 911–936. doi:10.1109/TSE.2024.
+[14] Dexter Horthy. 2025.          Getting AI to Work in Complex Codebases.
+                                                                                             3368208
+     https://github.com/humanlayer/advanced-context-engineering-for-coding-
+                                                                                        [37] Scott Wu. 2024. Introducing Devin, the first AI software engineer. https://
+     agents/blob/main/ace-fca.md.
+                                                                                             cognition.ai/blog/introducing-devin.
+[15] Xinyi Hou, Yanjie Zhao, Yue Liu, Zhou Yang, Kailong Wang, Li Li, Xiapu Luo,
+                                                                                        [38] Zhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yiwen Ding, Boyang Hong,
+     David Lo, John Grundy, and Haoyu Wang. 2024. Large Language Models for
+                                                                                             Ming Zhang, Junzhe Wang, Senjie Jin, Enyu Zhou, Rui Zheng, Xiaoran Fan, Xiao
+     Software Engineering: A Systematic Literature Review. ACM Trans. Softw. Eng.
+                                                                                             Wang, Limao Xiong, Yuhao Zhou, Weiran Wang, Changhao Jiang, Yicheng Zou,
+     Methodol. 33, 8 (2024), 220:1–220:79. doi:10.1145/3695988
+                                                                                             Xiangyang Liu, Zhangyue Yin, Shihan Dou, Rongxiang Weng, Wenjuan Qin,
+[16] Laurie Hughes, Yogesh K. Dwivedi, F. Tegwen Malik, Mazen Shawosh,
+                                                                                             Yongyan Zheng, Xipeng Qiu, Xuanjing Huang, Qi Zhang, and Tao Gui. 2025. The
+     Mousa Ahmed Albashrawi, Il Jeon, Vincent Dutot, Mandanna Appanderanda,
+                                                                                             rise and potential of large language model based agents: a survey. Sci. China Inf.
+     Tom Crick, Rahul De’, Mark Fenwick, Madugoda Gunaratnege Senali, Paulius
+                                                                                             Sci. 68, 2 (2025). doi:10.1007/S11432-024-4222-0
+     Jurcys, Arpan Kumar Kar, Nir Kshetri, Keyao Li, Sashah Mutasa, Spyridon
+                                                                                        [39] John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao,
+     Samothrakis, Michael R. Wade, and Paul Walton. 2025. AI Agents and Agentic
+                                                                                             Karthik Narasimhan, and Ofir Press. 2024. SWE-agent: Agent-Computer Inter-
+     Systems: A Multi-Expert Analysis. J. Comput. Inf. Syst. 65, 4 (2025), 489–517.
+                                                                                             faces Enable Automated Software Engineering. In Advances in Neural Information
+     doi:10.1080/08874417.2025.2483832
+                                                                                             Processing Systems 38: Annual Conference on Neural Information Processing Systems
+[17] Juyong Jiang, Fan Wang, Jiasi Shen, Sungju Kim, and Sunghun Kim. 2025. A
+                                                                                             2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024, Amir Glober-
+     Survey on Large Language Models for Code Generation. ACM Trans. Softw. Eng.
+                                                                                             sons, Lester Mackey, Danielle Belgrave, Angela Fan, Ulrich Paquet, Jakub M.
+     Methodol. (July 2025). doi:10.1145/3747588 Just Accepted.
+                                                                                             Tomczak, and Cheng Zhang (Eds.). http://papers.nips.cc/paper_files/paper/2024/
+[18] Will Knight. 2024. Forget Chatbots. AI Agents Are the Future. https://www.
+                                                                                             hash/5a7c947568c1b1328ccc5230172e1e7c-Abstract-Conference.html
+     wired.com/story/fast-forward-forget-chatbots-ai-agents-are-the-future/.
+                                                                                        [40] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+[19] LF Projects. 2025. Why AGENTS.md? https://agents.md/.
+                                                                                             toCodeRover: Autonomous Program Improvement. In Proceedings of the 33rd
+[20] Hao Li, Hicham Masri, Filipe Roseiro Côgo, Abdul Ali Bangash, Bram Adams, and
+                                                                                             ACM SIGSOFT International Symposium on Software Testing and Analysis, ISSTA
+     Ahmed E. Hassan. 2025. Understanding Prompt Management in GitHub Reposi-
+                                                                                             2024, Vienna, Austria, September 16-20, 2024, Maria Christakis and Michael Pradel
+     tories: A Call for Best Practices. CoRR abs/2509.12421 (2025). arXiv:2509.12421
+                                                                                             (Eds.). ACM, 1592–1604. doi:10.1145/3650212.3680384
+     doi:10.48550/arXiv.2509.12421
+                                                                                        [41] Zibin Zheng, Kaiwen Ning, Qingyuan Zhong, Jiachi Chen, Wenqing Chen,
+[21] Ziyou Li, Agnia Sergeyuk, and Maliheh Izadi. 2025. Prompt-with-Me: in-IDE
+                                                                                             Lianghong Guo, Weicheng Wang, and Yanlin Wang. 2025. Towards an under-
+     Structured Prompt Management for LLM-Driven Software Engineering. CoRR
+                                                                                             standing of large language models in software engineering tasks. Empir. Softw.
+     abs/2509.17096 (2025). arXiv:2509.17096 doi:10.48550/arXiv.2509.17096
+                                                                                             Eng. 30, 2 (2025), 50. doi:10.1007/S10664-024-10602-0
+
