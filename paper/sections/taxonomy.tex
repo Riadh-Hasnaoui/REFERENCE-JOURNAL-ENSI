@@ -1,0 +1,442 @@
+%% =============================================================================
+%% Section 3 — Taxonomy of Repository Representation Paradigms
+%% "How Do LLM-Based Agents Represent Code Repositories?"
+%% ACM Transactions on Software Engineering and Methodology (TOSEM)
+%% =============================================================================
+
+\section{Taxonomy of Repository Representation Paradigms}
+\label{sec:taxonomy}
+
+This section presents the core contribution of the paper: a seven-paradigm
+taxonomy of the Repository Representation Problem (RRP), grounded in the
+thematic synthesis of 159 primary studies.
+Section~\ref{subsec:dimensions} defines the 10 analytical dimensions.
+Sections~\ref{subsec:par1} through~\ref{subsec:par7} define each paradigm,
+discuss its representative works, and analyse it across the 10 dimensions.
+Section~\ref{subsec:taxonomy-summary} presents a comprehensive comparison
+table.
+
+\subsection{10 Analytical Dimensions}
+\label{subsec:dimensions}
+
+For each paradigm we report 10 structural dimensions:
+
+\begin{description}
+  \item[\textbf{D1 — Context Representation Type.}] The primary format of the
+        context produced (dense vector, retrieved text passages, serialised
+        graph, execution trace, episodic memory, compressed summary, or
+        dynamically assembled transcript).
+
+  \item[\textbf{D2 — Representation Granularity.}] The unit of indexing or
+        selection (token, function, file, module, repository).
+
+  \item[\textbf{D3 — Construction Pipeline.}] Whether context is built
+        \emph{offline} (batch pre-computation before query time),
+        \emph{online} (constructed at query time), or \emph{hybrid}.
+
+  \item[\textbf{D4 — Computational Complexity.}] Asymptotic cost of context
+        construction and retrieval.
+
+  \item[\textbf{D5 — Token Budget Consumption.}] Empirical or theoretical
+        characterisation of context length relative to the LLM window $\tau$.
+
+  \item[\textbf{D6 — Context Freshness.}] Whether the constructed context
+        reflects the \emph{current} state of the repository (\emph{stale},
+        \emph{semi-fresh}, or \emph{fresh}).
+
+  \item[\textbf{D7 — Semantic Precision.}] The degree to which the context
+        covers semantically relevant rather than spuriously similar content.
+
+  \item[\textbf{D8 — Scalability.}] Ability to handle repositories with
+        $10{,}000+$ source files.
+
+  \item[\textbf{D9 — Cross-File Dependency Support.}] Whether inter-file
+        dependencies are captured \emph{natively} (by design), \emph{explicitly}
+        (through dedicated retrieval), \emph{implicitly} (through learned
+        similarity), or \emph{partially}.
+
+  \item[\textbf{D10 — Training Dependency.}] Whether the paradigm requires
+        no additional training (\emph{zero-shot}), RAG-only augmentation with
+        no fine-tuning, lightweight fine-tuning, or full reinforcement
+        learning training.
+\end{description}
+
+Dimension D10 was refined from an initial ``fine-tuning requirement'' dimension
+following reviewer audit (see Section~\ref{subsec:d10-rationale}): the
+revised four-level scale (zero-shot / RAG-only / lightweight FT / full RL)
+better captures the observed variation and aligns with EC1's exclusion of
+papers whose primary contribution is fine-tuning.
+
+\subsection{PAR-1: Repository-Level Code Embedding \& Dense Representation}
+\label{subsec:par1}
+
+\textbf{Definition.}
+PAR-1 systems encode source code artifacts (tokens, functions, files) into
+dense vector representations using pre-trained LLMs.
+At query time, the repository context is retrieved by nearest-neighbor search
+in the embedding space.
+The representation is \emph{implicit}: semantics are encoded in the vector
+geometry rather than in explicit structural relationships.
+
+\textbf{Representative works.}
+CodeBERT~\cite{feng2020codebert} established the bimodal pre-training paradigm
+for code-NL embeddings.
+UniXcoder~\cite{guo2022unixcoder} extended this with cross-modal attention.
+GraphCodeBERT~\cite{guo2021graphcodebert} incorporates data-flow information
+into the embedding, bridging PAR-1 and PAR-3.
+Fan et al.~\cite{fan2025hardnegative} showed that hard-negative mining during
+contrastive pre-training substantially improves retrieval precision.
+Zhang et al.~\cite{zhang2025hcp} proposed hierarchical context pruning to
+reduce the token cost of dense-retrieval outputs at inference time.
+Shrivastava et al.~\cite{shrivastava2023repolevel} directly address the
+repository-level prompt generation problem, extending PAR-1 to cross-file
+retrieval.
+
+\textbf{Dimensional analysis.}
+D1:~Dense vector; D2:~Token/function; D3:~Offline pre-training + online
+retrieval; D4:~$O(n^2)$ pre-training, $O(n)$ inference;
+D5:~Low (embeddings do not consume LLM context tokens);
+D6:~Stale (embeddings are pre-computed and updated in batch);
+D7:~High (semantic space aligns code and NL semantics);
+D8:~High (encoders are trivially parallelisable);
+D9:~Implicit (cross-file similarity captured indirectly through embedding
+geometry); D10:~Lightweight FT (embedding quality improves with task-specific
+fine-tuning, but zero-shot baselines exist).
+
+\textbf{Corpus size:} 8 primary studies.
+
+\subsection{PAR-2: Retrieval-Augmented Context Construction}
+\label{subsec:par2}
+
+\textbf{Definition.}
+PAR-2 systems retrieve textual code passages from a repository index and
+inject them directly into the LLM prompt.
+The representation is \emph{explicit}: retrieved chunks are verbatim fragments
+of source files.
+PAR-2 is the dominant paradigm in the corpus (35 primary studies).
+
+\textbf{Representative works.}
+ReACC~\cite{lu2022reacc} introduced the RAG framework for code completion.
+RepoCoder~\cite{zhang2023repocoder} demonstrated that iterative retrieval-and-
+generation loops improve cross-file coherence.
+CoCoMIC~\cite{ding2024cocomic} jointly models in-file and cross-file context.
+HyRACC~\cite{li2025hyracc} combines sparse and dense retrieval.
+Repoformer~\cite{wu2024repoformer} introduced selective retrieval to avoid
+context pollution.
+Yang et al.~\cite{yang2025empirical} provide the most comprehensive empirical
+study of RAG challenges and opportunities for code completion.
+CodeRAG~\cite{zhang2025coderag} introduces a relevance-necessity dual
+criterion for what to retrieve.
+Wang et al.~\cite{wang2025ragvsft} compare RAG against fine-tuning in an
+industrial deployment, finding RAG superior for evolving codebases.
+SECRET~\cite{gu2025secret} proposes scalable deep hashing to index
+repositories with millions of functions.
+
+\textbf{Distinction from PAR-7.}
+PAR-2 systems retrieve context \emph{passively} (index lookup); PAR-7 systems
+construct context \emph{actively} through multi-step navigation and tool use.
+The distinction is architecturally fundamental: PAR-2 operates in a
+single retrieval round (or a fixed small number of rounds), while PAR-7 may
+execute dozens of actions before context is finalised.
+
+\textbf{Dimensional analysis.}
+D1:~Text passages; D2:~Chunk/snippet/cross-file; D3:~Offline indexing + online
+retrieval; D4:~$O(k \cdot d)$ where $k$ = chunks retrieved, $d$ = embedding
+dimension; D5:~Medium ($k$ passages of average length);
+D6:~Semi-fresh (index updated periodically~\cite{yang2025wechat});
+D7:~Medium to high (depends on retrieval quality);
+D8:~High (vector stores scale linearly);
+D9:~Explicit (cross-file retrieval is the defining property);
+D10:~RAG-only to lightweight FT (FT2Ra~\cite{guo2024ft2ra} shows
+fine-tuning-inspired RAG improves over zero-shot).
+
+\textbf{Corpus size:} 35 primary studies.
+
+\subsection{PAR-3: Graph-Based \& Structural Representation}
+\label{subsec:par3}
+
+\textbf{Definition.}
+PAR-3 systems build explicit graph representations of repository structure
+and use graph traversal or graph neural networks to construct context.
+Five graph sub-types appear in the corpus:
+\emph{Abstract Syntax Trees (AST)},
+\emph{Control Flow Graphs (CFG)},
+\emph{Data Flow Graphs (DFG)},
+\emph{Call Graphs / Dependency Graphs}, and
+\emph{Knowledge Graphs}.
+
+\textbf{Representative works.}
+GraphCodeBERT~\cite{guo2021graphcodebert} introduces DFG-based pre-training.
+GraphCoder~\cite{liu2024graphcoder} builds a Code Context Graph and performs
+coarse-to-fine retrieval over it.
+CodexGraph~\cite{liu2025codexgraph} stores repository graphs in a queryable
+graph database, enabling LLMs to issue structured graph queries at runtime.
+Cheng et al.~\cite{cheng2024dataflow} show that dataflow-guided retrieval
+outperforms text-based retrieval for cross-file completion.
+The Code Graph Model (CGM)~\cite{tao2025cgm} integrates a graph neural network
+directly into the LLM forward pass.
+LocAgent~\cite{chen2025locagent} uses graph-guided search for bug localization.
+RepoGraph~\cite{ouyang2025repograph} builds repository-level call graphs to
+support multi-hop reasoning.
+AlphaTrans~\cite{ibrahimzada2025alphatrans} uses dependency graphs for
+compositional code translation.
+
+\textbf{Distinction from PAR-2.}
+PAR-2 retrieves text fragments; PAR-3 retrieves \emph{structural relationships}.
+A PAR-3 system knows that \texttt{foo()} calls \texttt{bar()} and that
+\texttt{bar()} is defined in \texttt{utils.py}; a PAR-2 system knows only
+that the text of \texttt{bar()} is similar to the query.
+
+\textbf{Dimensional analysis.}
+D1:~Graph (nodes + typed edges); D2:~Node (function/class) + edge (dependency);
+D3:~Static analysis → graph construction → query (offline);
+D4:~$O(V+E)$ graph traversal; D5:~High (graph serialisation is token-expensive,
+see Le-Anh et al.~\cite{leanh2026notnatural});
+D6:~Stale (graph rebuilt in batch); D7:~Very high (explicit dependencies are
+high-precision);
+D8:~Medium (graph scales as $O(V+E)$);
+D9:~Native (dependency graphs capture cross-file structure by design);
+D10:~Zero-shot to lightweight FT (many graph-based systems require no
+task-specific training~\cite{liu2025codexgraph}).
+
+\textbf{Corpus size:} 29 primary studies.
+
+\subsection{PAR-4: Execution \& Dynamic Representation}
+\label{subsec:par4}
+
+\textbf{Definition.}
+PAR-4 systems enrich LLM context with information obtained by \emph{executing}
+code: compilation output, test results, runtime traces, and coverage signals.
+The representation is \emph{dynamic}: it reflects the actual behaviour of the
+code, not its static text or structure.
+
+\textbf{Representative works.}
+Rete~\cite{parasaram2023rete} uses namespace traces to represent program
+repair context.
+RAP-Gen~\cite{wang2023rapgen} iteratively compiles candidate patches and
+injects compiler feedback into the context.
+Bi et al.~\cite{bi2024iterative} show that compiler feedback enables precise
+cross-file code generation.
+IRCoCo~\cite{li2024ircoco} uses immediate execution rewards in a reinforcement
+learning loop.
+SWE-Gym~\cite{pan2025swegym} scales execution-based training by building a
+containerised execution environment for 2,438 GitHub tasks.
+
+\textbf{Distinction from PAR-7.}
+PAR-4 uses execution signals as \emph{passive representations} of code
+behaviour.
+PAR-7 agents may also execute code, but they do so as \emph{one tool among
+many} in an active exploration pipeline.
+The distinguishing criterion is whether execution feedback is the \emph{primary}
+mechanism for context construction (PAR-4) or a secondary signal in an agentic
+loop (PAR-7).
+
+\textbf{Dimensional analysis.}
+D1:~Execution traces / test signals; D2:~Statement/test-case;
+D3:~Online (runtime execution); D4:~$O(t \cdot s)$ (trace length × steps);
+D5:~Variable (trace length depends on execution path);
+D6:~Fresh (execution reflects current code state);
+D7:~Very high (execution is the ground truth of code behaviour);
+D8:~Low (sequential execution does not scale to large repos);
+D9:~Partial (traces capture inter-module calls but not static dependencies);
+D10:~Full RL (IRCoCo~\cite{li2024ircoco}, SWE-Gym~\cite{pan2025swegym} require
+RL training with execution rewards).
+
+\textbf{Corpus size:} 7 primary studies.
+We note that PAR-4 is the smallest paradigm in the corpus.
+Its relative scarcity reflects the high computational cost of repository-level
+execution environments, not a lack of research interest.
+
+\subsection{PAR-5: Memory-Augmented Context}
+\label{subsec:par5}
+
+\textbf{Definition.}
+PAR-5 systems maintain a \emph{persistent memory} of prior interactions,
+solutions, or repository states, and retrieve relevant memories to augment the
+current LLM context.
+Memory is the \emph{primary structure} through which the repository is
+represented; this distinguishes PAR-5 from PAR-7, where memory is one
+component of a broader agentic pipeline.
+
+\textbf{Representative works.}
+CodeMEM~\cite{wang2026codemem} proposes AST-guided adaptive memory that
+stores and retrieves repository-level context across iterative generation rounds.
+SWE-Exp~\cite{chen2025sweexp} stores experience from previously resolved
+issues to guide future issue resolution.
+LingmaAgent~\cite{ma2025lingmaagent} combines comprehensive repository
+exploration with a persistent memory of visited code locations.
+Prometheus~\cite{pan2026prometheus} addresses long-horizon codebase navigation
+through a hierarchical memory architecture that persists across sessions.
+
+\textbf{Distinction from PAR-7.}
+The key architectural distinction is \emph{primacy}: in PAR-5, the memory
+structure \emph{is} the repository representation; all other components (LLM
+prompting, retrieval) are secondary.
+In PAR-7, memory is one component of an agent that also browses files, runs
+tools, and edits code.
+
+\textbf{Dimensional analysis.}
+D1:~Episodic/vectorised memory; D2:~Session / project-level;
+D3:~Incremental online update; D4:~$O(m)$ lookup + $O(1)$ amortised update;
+D5:~Medium (compressed memory entries);
+D6:~Semi-fresh (memory updated incrementally, but may lag real-time changes);
+D7:~High (memory stores only contextually relevant experiences);
+D8:~Medium (memory size is bounded, but growth management is an open problem);
+D9:~Explicit (cross-session memory captures cross-file context);
+D10:~Zero-shot to lightweight FT (CodeMEM~\cite{wang2026codemem} works
+without additional training; SWE-Exp~\cite{chen2025sweexp} requires no RL).
+
+\textbf{Corpus size:} 4 primary studies.
+The small corpus size reflects the novelty of the paradigm (all four studies
+were published in 2025--2026).
+
+\subsection{PAR-6: Compression \& Summarization}
+\label{subsec:par6}
+
+\textbf{Definition.}
+PAR-6 systems reduce repository context by summarising, abstracting, or
+compressing source files before injecting them into the LLM context window.
+The goal is to maximise semantic density per token consumed.
+
+\textbf{Representative works.}
+CodeS~\cite{zan2025codes} proposes a multi-layer sketch that hierarchically
+summarises a repository (functions → files → modules → repository).
+LongCodeZip~\cite{shi2025longcodezip} applies progressive compression to
+long code contexts, trading off compression ratio against semantic fidelity.
+Dhulshette et al.~\cite{dhulshette2025hierarchical} implement hierarchical
+repository-level summarisation using local LLMs for business applications.
+Ahmed and Devanbu~\cite{ahmed2024semantic} show that semantic summarisation of
+called functions improves LLM prompt quality for code summarisation.
+SWE-Pruner~\cite{wang2026swepruner} introduces self-adaptive context pruning
+for coding agents, dynamically adjusting compression ratios.
+Mohsenimofidi et al.~\cite{mohsenimofidi2026context} provide a systematic study
+of context engineering strategies for LLM agents in open-source repositories.
+
+\textbf{Dimensional analysis.}
+D1:~Hierarchical summaries; D2:~Function → file → module → repository;
+D3:~Offline batch summarisation; D4:~$O(n \log n)$ hierarchical compression;
+D5:~Low to medium (compression reduces token cost by design);
+D6:~Stale (summaries pre-computed, not reflecting real-time changes);
+D7:~Medium to low (compression introduces information loss);
+D8:~High (compression enables scaling to large repositories);
+D9:~Partial (module-level summaries capture some inter-file dependencies);
+D10:~Zero-shot to lightweight FT (LongCodeZip~\cite{shi2025longcodezip} fine-
+tunes a compression model; CodeS~\cite{zan2025codes} uses a task-specific
+sketching model).
+
+\textbf{Corpus size:} 10 primary studies.
+
+\subsection{PAR-7: Agentic \& Iterative Context Exploration}
+\label{subsec:par7}
+
+\textbf{Definition.}
+PAR-7 systems employ autonomous agents that \emph{actively navigate} a
+repository through repeated tool invocations (file read, search, code execution,
+edit) to construct their context incrementally.
+Context is not retrieved in a single step but accumulated through a
+multi-step exploration trajectory.
+PAR-7 is the largest paradigm in the corpus (41 primary studies).
+
+\textbf{Representative works.}
+SWE-agent~\cite{yang2024sweagent} introduced Agent-Computer Interfaces (ACI)
+that allow LLMs to interact with repositories as a human developer would.
+CodePlan~\cite{bairi2024codeplan} frames repository-level coding as a planning
+problem, using LLMs to decompose tasks into subtasks over the repository
+dependency graph.
+MetaGPT~\cite{hong2024metagpt} implements a multi-agent framework where
+specialised agents (product manager, architect, developer, tester) collaborate
+over a shared repository context.
+AutoCodeRover~\cite{zhang2024autocoderover} combines program analysis with
+search-based context construction for autonomous program improvement.
+RepairAgent~\cite{bouzenia2025repairagent} demonstrates LLM-based agents for
+fully autonomous program repair.
+RLCoder~\cite{wang2025rlcoder} trains a reinforcement learning agent
+specifically for repository-level code completion.
+SWE-GPT~\cite{ma2025swegpt} proposes process-centric language models trained
+on software engineering workflows.
+SWE-Search~\cite{antoniades2024swesearch} enhances agentic software engineering
+with Monte Carlo Tree Search for context exploration.
+
+\textbf{Distinction from PAR-5.}
+PAR-7 agents \emph{actively explore} the repository; the context they build is
+the by-product of purposeful action sequences.
+PAR-5 systems \emph{look up} stored memories; the memory is built passively
+from prior interactions.
+A useful operational test: if removing the memory component would collapse
+the system's ability to represent the repository, it is PAR-5; if the system
+can still navigate the repository through fresh tool calls (at higher cost),
+it is PAR-7.
+
+\textbf{Dimensional analysis.}
+D1:~Dynamically assembled action transcript;
+D2:~Action-level (file/line granularity);
+D3:~Online iterative construction;
+D4:~$O(i \cdot a)$ where $i$ = iterations, $a$ = actions per iteration;
+D5:~Very high (accumulating history of actions + code fragments);
+D6:~Fresh (exploration in real time);
+D7:~Variable (depends on exploration strategy quality);
+D8:~Low to medium (sequential action chains are difficult to parallelise);
+D9:~Native (active navigation crosses files by design);
+D10:~Zero-shot (SWE-agent~\cite{yang2024sweagent}) to full RL (SWE-RL
+\cite{wei2025swerl}, RLCoder~\cite{wang2025rlcoder}).
+
+\textbf{Corpus size:} 41 primary studies.
+
+\subsection{Taxonomy Summary and Dimensional Comparison}
+\label{subsec:taxonomy-summary}
+
+Table~\ref{tab:taxonomy-summary} summarises the seven paradigms across the 10
+analytical dimensions.
+
+\begin{table*}[t]
+  \caption{Seven-paradigm taxonomy of the Repository Representation Problem:
+           summary across 10 analytical dimensions.
+           Token cost: L~=~low, M~=~medium, H~=~high, VH~=~very high.
+           Scalability / Semantic precision: L/M/H.
+           Cross-file: N~=~native, E~=~explicit, I~=~implicit, P~=~partial.
+           Training dep.: ZS~=~zero-shot, R~=~RAG-only, LFT~=~lightweight FT,
+           RL~=~full RL.}
+  \label{tab:taxonomy-summary}
+  \scriptsize
+  \begin{tabular}{lcccccccccc}
+    \toprule
+    \textbf{Paradigm} &
+    \textbf{D1 Repr.} &
+    \textbf{D2 Grain.} &
+    \textbf{D3 Pipeline} &
+    \textbf{D4 Complexity} &
+    \textbf{D5 Token} &
+    \textbf{D6 Fresh.} &
+    \textbf{D7 Sem.} &
+    \textbf{D8 Scale} &
+    \textbf{D9 X-file} &
+    \textbf{D10 Train.} \\
+    \midrule
+    PAR-1 Dense emb. & Vector & Token/Fn & Offline+Online & $O(n^2)$ pre & L & Stale & H & H & I & LFT \\
+    PAR-2 RAG & Text & Chunk/File & Offline+Online & $O(kd)$ & M & Semi-fresh & M--H & H & E & R--LFT \\
+    PAR-3 Graph & Graph & Node/Edge & Offline & $O(V{+}E)$ & H & Stale & VH & M & N & ZS--LFT \\
+    PAR-4 Execution & Trace & Stmt/Test & Online & $O(ts)$ & Var. & Fresh & VH & L & P & RL \\
+    PAR-5 Memory & Memory & Session & Hybrid & $O(m)$ & M & Semi-fresh & H & M & E & ZS--LFT \\
+    PAR-6 Compress. & Summary & Fn/Module & Offline & $O(n\log n)$ & L--M & Stale & M & H & P & ZS--LFT \\
+    PAR-7 Agentic & Transcript & Action & Online & $O(ia)$ & VH & Fresh & Var. & L--M & N & ZS--RL \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsubsection{Rationale for Renaming D10}
+\label{subsec:d10-rationale}
+
+An earlier version of this taxonomy used ``Fine-Tuning Requirement'' as the
+tenth dimension.
+A reviewer audit (Section~\ref{sec:methodology}) identified two problems.
+First, EC1 excludes papers whose primary contribution is fine-tuning, creating
+a potential contradiction between the inclusion criteria and the taxonomy.
+Second, the original binary fine-tuning/no-fine-tuning scale does not capture
+the observed variation: the corpus includes zero-shot approaches
+(CodexGraph~\cite{liu2025codexgraph}, SWE-agent~\cite{yang2024sweagent}),
+RAG-only approaches (RepoCoder~\cite{zhang2023repocoder}),
+lightweight fine-tuning (FT2Ra~\cite{guo2024ft2ra}, fan et al.\
+\cite{fan2025hardnegative}), and full RL training (IRCoCo~\cite{li2024ircoco},
+RLCoder~\cite{wang2025rlcoder}, SWE-RL~\cite{wei2025swerl}).
+The four-level scale of D10 (zero-shot / RAG-only / lightweight FT / full RL)
+resolves both issues.
