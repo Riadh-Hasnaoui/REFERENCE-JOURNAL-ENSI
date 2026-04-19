@@ -1,0 +1,896 @@
+%%
+%% main.tex — "How Do LLM-Based Agents Represent Code Repositories?
+%%              A Systematic Review, Taxonomy, and Comparative Evaluation"
+%%
+%% Target venue : ACM Transactions on Software Engineering and Methodology (TOSEM)
+%% Template     : ACM Small Standard Format  (acmart, acmsmall class)
+%%
+\documentclass[acmsmall,review,anonymous]{acmart}
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% BibTeX / citation style
+%%──────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{ACM-Reference-Format}
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% ACM journal metadata  (fill in after rights-form completion)
+%%──────────────────────────────────────────────────────────────────────────────
+\setcopyright{acmlicensed}
+\copyrightyear{2026}
+\acmYear{2026}
+\acmDOI{XXXXXXX.XXXXXXX}
+\acmJournal{TOSEM}
+\acmVolume{XX}
+\acmNumber{X}
+\acmArticle{XX}
+\acmMonth{X}
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% Extra packages
+%%──────────────────────────────────────────────────────────────────────────────
+\usepackage{booktabs}      % professional tables
+\usepackage{multirow}      % table cells spanning rows
+\usepackage{xcolor}        % cell shading
+\usepackage{rotating}      % sideways tables
+\usepackage{enumitem}      % compact lists
+\usepackage{microtype}     % better text justification
+\usepackage{hyperref}      % hyperlinks in PDF
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% Convenience macros
+%%──────────────────────────────────────────────────────────────────────────────
+\newcommand{\paradigm}[1]{\textbf{#1}}          % PAR-N label in prose
+\newcommand{\dim}[1]{\textbf{#1}}               % dimension label in prose
+\newcommand{\toolname}[1]{\textsc{#1}}          % tool / system names
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% Title, authors
+%%──────────────────────────────────────────────────────────────────────────────
+\title{How Do LLM-Based Agents Represent Code Repositories? A Systematic
+       Review, Taxonomy, and Comparative Evaluation}
+
+\author{Anonymous}
+\affiliation{%
+  \institution{Anonymous Institution}
+  \country{Anonymous Country}}
+\email{anonymous@institution.edu}
+
+\begin{abstract}
+Modern software-engineering tasks --- code completion, generation, bug repair,
+test synthesis, and refactoring --- increasingly rely on large language models
+(LLMs) that must comprehend entire \emph{code repositories}.  Despite a
+rapidly growing literature, no unified conceptual framework has yet been
+proposed to compare the diverse strategies by which these models acquire,
+structure, and exploit repository-level context.
+
+This paper presents a \emph{Systematic Literature Review} (SLR) following the
+Kitchenham guidelines, covering \textbf{168 peer-reviewed studies} published
+between 2020 and early~2026 and selected through a rigorous
+inclusion/exclusion protocol.  From this corpus we derive a
+\textbf{seven-paradigm taxonomy} (\textbf{PAR-1}--\textbf{PAR-7}) organised
+along \textbf{ten structural dimensions} (\textbf{D1}--\textbf{D10}).  We
+further provide a comparative evaluation of representative systems against 25
+public benchmarks, identify key research gaps, and outline a research agenda
+for repository-aware LLM-based software engineering.
+\end{abstract}
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% CCS concepts and keywords
+%%──────────────────────────────────────────────────────────────────────────────
+\begin{CCSXML}
+<ccs2012>
+  <concept>
+    <concept_id>10011007.10011006.10011008</concept_id>
+    <concept_desc>Software and its engineering~General programming languages</concept_desc>
+    <concept_significance>300</concept_significance>
+  </concept>
+  <concept>
+    <concept_id>10010147.10010257</concept_id>
+    <concept_desc>Computing methodologies~Machine learning</concept_desc>
+    <concept_significance>500</concept_significance>
+  </concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Computing methodologies~Machine learning}
+\ccsdesc[300]{Software and its engineering~General programming languages}
+
+\keywords{large language models, code repositories, repository-level context,
+          retrieval-augmented generation, graph-based code representation,
+          agentic software engineering, systematic literature review, taxonomy}
+
+\maketitle
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Introduction}
+\label{sec:intro}
+%%══════════════════════════════════════════════════════════════════════════════
+
+The advent of large language models (LLMs) has transformed automated software
+engineering (SE).  Tools such as \toolname{SWE-agent}~\cite{yang2024sweagent},
+\toolname{OpenHands}~\cite{wang2025openhands}, and
+\toolname{MetaGPT}~\cite{hong2023metagpt} demonstrate that LLMs, when given
+appropriate context, can resolve real-world GitHub issues, generate entire
+features, and repair complex bugs.  However, the performance of these systems
+depends critically on \emph{how they represent the code repository}: what
+context they extract, at what granularity, and through what mechanism.
+
+Existing surveys~\cite{hou2024llmsslr,jiang2026surveyllm,tao2026ragsurvey,%
+zhang2026surveyllmse} provide broad overviews but lack a fine-grained
+\emph{taxonomy} of context-representation strategies.  Practitioners therefore
+face a fragmented landscape: dense embedding models, retrieval-augmented
+generation (RAG) pipelines, graph-structured representations, execution-trace
+oracles, memory architectures, compression schemes, and full agentic loops
+all co-exist without a common reference frame.
+
+\textbf{Contributions.}  This paper makes the following contributions:
+\begin{enumerate}[leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item A \emph{rigorous SLR protocol} (Kitchenham~\cite{kitchenham2004slr})
+        applied to 168 primary studies published 2020--2026
+        (Section~\ref{sec:methodology}).
+  \item A \emph{seven-paradigm taxonomy} (PAR-1--PAR-7) characterised along
+        \emph{ten structural dimensions} (D1--D10), including a refined
+        dimension \textbf{D10: Training Dependency} that distinguishes
+        zero-shot, RAG-only, lightweight fine-tuning, and full reinforcement
+        learning workflows (Section~\ref{sec:taxonomy}).
+  \item A \emph{cross-paradigm disambiguation} resolving recurring confusions
+        between PAR-4 and PAR-7, and between PAR-5 and PAR-7
+        (Section~\ref{subsec:disambiguation}).
+  \item A \emph{comparative evaluation} of representative systems on 25
+        public benchmarks (Section~\ref{sec:evaluation}).
+  \item A \emph{research agenda} identifying open challenges and future
+        directions (Section~\ref{sec:discussion}).
+\end{enumerate}
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Methodology}
+\label{sec:methodology}
+%%══════════════════════════════════════════════════════════════════════════════
+
+We follow Kitchenham's guidelines for conducting systematic literature reviews
+in software engineering~\cite{kitchenham2004slr}.
+
+\subsection{Research Questions}
+
+\begin{description}[leftmargin=2em,topsep=2pt,itemsep=2pt]
+  \item[RQ1] What are the distinct paradigms by which LLM-based systems
+             represent code repositories?
+  \item[RQ2] Along what structural dimensions do these paradigms differ?
+  \item[RQ3] Which paradigms achieve the best trade-off across SE objectives,
+             benchmarks, and training cost?
+  \item[RQ4] What are the open challenges in repository-level LLM-based SE?
+\end{description}
+
+\subsection{Search Strategy}
+
+We queried ACM Digital Library, IEEE Xplore, Semantic Scholar, and arXiv
+using the string:
+\begin{quote}\small
+\texttt{("repository-level" OR "repo-level" OR "cross-file") AND}\\
+\texttt{("LLM" OR "large language model" OR "language model") AND}\\
+\texttt{("code" OR "software engineering")}
+\end{quote}
+
+\subsection{Inclusion and Exclusion Criteria}
+
+\textbf{Inclusion.}
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item \textbf{IC1} --- The study proposes or evaluates a method for
+    extracting or structuring \emph{repository-level context} to feed an LLM
+    in an automated SE task (examples: RAG cross-file, dependency graphs,
+    hierarchical summaries, agent memories, execution traces).
+  \item \textbf{IC2} --- The study targets at least one of seven SE
+    objectives: code completion (O1), code generation (O2), code search (O3),
+    bug fixing (O4), refactoring/translation (O5), test generation (O6), or
+    code review (O7).
+  \item \textbf{IC3} --- The work appears in a peer-reviewed venue of
+    appropriate standing (ICSE, FSE, ASE, ISSTA, PLDI, NeurIPS, ICML, ICLR,
+    ACL, EMNLP, NAACL, AAAI, TSE, TOSEM, EMSE, MSR, SANER, FORGE, \ldots)
+    or is an arXiv pre-print satisfying the grey-literature exception
+    (${\ge}50$ citations, or public artefacts on a standardised benchmark).
+\end{itemize}
+
+\textbf{Exclusion.}
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item \textbf{EC1} --- Pure LLM architecture/pre-training papers without a
+    repository-context mechanism.
+  \item \textbf{EC2} --- Works operating exclusively at function or snippet
+    level (no cross-file context).
+  \item \textbf{EC3} --- Position papers or purely theoretical contributions
+    without empirical evaluation.
+  \item \textbf{EC4} --- Secondary studies (surveys, SLRs, meta-analyses)
+    retained only in the Related Work section for snowballing.
+  \item \textbf{EC5} --- Highly domain-specific applications (cybersecurity,
+    smart contracts, hardware design).
+  \item \textbf{EC6} --- Duplicate versions of the same work (only the most
+    recent peer-reviewed version is retained).
+\end{itemize}
+
+\subsection{Study Selection and Data Extraction}
+
+After deduplication, an initial pool of 934~studies was screened by two
+independent reviewers; disagreements were resolved by a third reviewer.
+The final corpus comprises \textbf{168 primary studies}.  Each study was
+annotated with the ten taxonomy dimensions described in
+Section~\ref{sec:taxonomy}.
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{A Seven-Paradigm Taxonomy of Repository-Level Context Representation}
+\label{sec:taxonomy}
+%%══════════════════════════════════════════════════════════════════════════════
+
+\subsection{The Ten-Dimension Analysis Framework}
+\label{subsec:dimensions}
+
+Every primary study in our corpus is characterised along ten dimensions.
+Table~\ref{tab:dimensions} provides an overview; each dimension is described
+below.
+
+\begin{table*}[t]
+  \caption{The ten structural dimensions (D1--D10) used to characterise each
+           paradigm.  D10 was revised in this review: the former label
+           \emph{Fine-Tuning Requirements} has been replaced by
+           \emph{Training Dependency}, which more accurately captures the
+           full spectrum from zero-shot inference to full reinforcement
+           learning.}
+  \label{tab:dimensions}
+  \small
+  \begin{tabular}{@{}llp{9cm}@{}}
+    \toprule
+    \textbf{Dim.} & \textbf{Label} & \textbf{Value range (representative values)} \\
+    \midrule
+    D1  & Representation Modality   & Dense vector; sparse text/BM25; symbolic graph; execution trace; NL summary \\
+    D2  & Context Granularity       & Token; statement; function; file; cross-file; repository-wide \\
+    D3  & Context Source            & Static analysis; runtime execution; version history; external KB \\
+    D4  & Retrieval Mechanism       & None; lexical (BM25/TF-IDF); dense (FAISS/ANN); graph traversal; agent-driven \\
+    D5  & Temporal Awareness        & Static; dynamic (online); hybrid \\
+    D6  & Primary SE Objective      & O1 completion; O2 generation; O3 search; O4 bug fixing; O5 refactoring; O6 testing; O7 review \\
+    D7  & Multi-language Support    & Single language; multiple languages \\
+    D8  & Context Window Strategy   & Naive truncation; selective filtering; hierarchical compression; adaptive summarisation \\
+    D9  & Evaluation Protocol       & Task-metric (EM, BLEU, pass@k); benchmark suite; human study \\
+    D10 & \textbf{Training Dependency} & \textbf{Zero-shot} (no task-specific training); \textbf{RAG-only} (retrieval, no fine-tuning); \textbf{Lightweight FT} (LoRA / adapter / instruction tuning); \textbf{Full RL} (reinforcement learning from execution rewards) \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\paragraph{D10 --- Training Dependency (formerly \emph{Fine-Tuning Requirements}).}
+The original label \emph{Fine-Tuning Requirements} in earlier drafts of this
+taxonomy conflated two orthogonal concerns: (i)~whether any task-specific
+parameter update is required at all, and (ii)~the computational and data cost
+of that update.  We therefore adopt the label \textbf{Training Dependency} and
+define four ordered levels:
+
+\begin{description}[leftmargin=2em,topsep=2pt,itemsep=2pt]
+  \item[\textit{Level~0 --- Zero-shot.}] The system uses a frozen, pre-trained
+    LLM with no task-specific adaptation.  The repository is represented
+    entirely through prompt engineering and context assembly.  Examples:
+    \toolname{RepoCoder}~\cite{zhang2023repocoder},
+    \toolname{CodexGraph}~\cite{liu2025codexgraph}.
+
+  \item[\textit{Level~1 --- RAG-only.}] Retrieval components (indexing,
+    embedding, ranking) are trained or fine-tuned, but the backbone LLM
+    remains frozen.  The representation is encoded in the retrieval index
+    rather than in model weights.  Examples:
+    \toolname{ReACC}~\cite{lu2022reacc},
+    \toolname{Repoformer}~\cite{wu2024repoformer},
+    \toolname{SECRET}~\cite{gu2025secret}.
+
+  \item[\textit{Level~2 --- Lightweight FT.}] The backbone LLM is adapted via
+    parameter-efficient methods (LoRA, adapter layers, or targeted instruction
+    tuning) on repository-related data.  This includes cross-file context
+    alignment~\cite{li2025alignllms} and preference-guided
+    tuning~\cite{gao2024prefguided}.
+
+  \item[\textit{Level~3 --- Full RL.}] The LLM is updated through
+    reinforcement learning with rewards derived from code execution or test
+    outcomes.  This is the most expensive tier and yields models that learn to
+    \emph{navigate} the repository as an environment.  Examples:
+    \toolname{SWE-RL}~\cite{wei2025swerl},
+    \toolname{RLCoder}~\cite{wang2025rlcoder},
+    \toolname{IRCoCo}~\cite{li2024ircoco}.
+\end{description}
+
+This revised definition enables direct, comparable positioning of all 168
+primary studies on a single axis without conflating prompt-level,
+retrieval-level, and training-level choices.
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-1: Repository-Level Code Embedding \& Dense Representation}
+\label{subsec:par1}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-1 systems represent the repository as a collection of \emph{dense
+continuous vectors} produced by a code-pretrained encoder.  A shared embedding
+space allows semantic similarity search across the entire codebase.  The
+representation is static: it is computed offline and stored in a vector index.
+
+\paragraph{Canonical works.}
+\toolname{CodeBERT}~\cite{feng2020codebert} and
+\toolname{UniXcoder}~\cite{guo2022unixcoder} establish the bimodal
+(code + natural language) pretraining paradigm.
+\toolname{LongCoder}~\cite{guo2023longcoder} extends the context window to
+handle longer code sequences.
+More recently, contrastive learning with hard negative
+mining~\cite{fan2025hardneg} and context
+alignment~\cite{li2025alignllms,sohrabizadeh2025nemotron} improve retrieval
+precision for cross-file scenarios.
+Repository-level prompt generation~\cite{shrivastava2023repoprompt} and
+hierarchical context pruning~\cite{zhang2025hierctxpruning} address the
+token-budget problem at the prompt-assembly layer.
+
+\paragraph{Dimension profile.}
+D1~=~Dense vector; D2~=~Function/file; D3~=~Static analysis;
+D4~=~Dense (FAISS/ANN); D5~=~Static; D6~=~O1, O3;
+D7~=~Multi; D8~=~Selective filtering; D9~=~Benchmark (CrossCodeEval, RepoBench);
+\textbf{D10~=~RAG-only} (embedding models trained; backbone LLM frozen) or
+\textbf{Lightweight FT} for context-alignment variants.
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-2: Retrieval-Augmented Context Construction (RAG cross-file)}
+\label{subsec:par2}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-2 encompasses systems that \emph{retrieve} relevant cross-file context at
+inference time and prepend it to the LLM's prompt.  The repository is not
+persistently embedded into model weights; rather, it is encoded in a retrieval
+index (sparse or dense) that is queried on demand.
+
+\paragraph{Canonical works.}
+\toolname{ReACC}~\cite{lu2022reacc} introduces the retrieve-then-complete
+pipeline.  \toolname{RepoCoder}~\cite{zhang2023repocoder} iterates retrieval
+and generation in multiple rounds.  \toolname{CodeRAG}~\cite{zhang2025coderag}
+and \toolname{HyRACC}~\cite{li2025hyracc} combine sparse and dense signals.
+Industry deployments such as WeChat's RAG pipeline~\cite{yang2025wechat} and
+comparative analyses~\cite{wang2025ragorfine,yang2025empiricalrag} validate
+PAR-2 approaches at scale.  Specialised PAR-2 variants target
+completion~\cite{ding2024cocomic,liang2024repogenix,shen2025adaptiveseg,%
+wu2024repoformer,rahman2025positionchunk,sedov2025contextfilter,%
+yusuf2025granularity},
+type context~\cite{pan2025catcoder},
+API inference~\cite{deng2025internalapi},
+issue-commit linking~\cite{huang2025issuecommit},
+and code quality improvement~\cite{abtahi2025staticcode,olewicki2026reviewassist}.
+
+\paragraph{Dimension profile.}
+D1~=~Sparse + Dense; D2~=~Function/cross-file; D3~=~Static analysis;
+D4~=~BM25 + dense; D5~=~Static (one-shot) or iterative;
+D6~=~O1, O2; D7~=~Multi; D8~=~Filtering / chunking;
+D9~=~Benchmark (CrossCodeEval, RepoBench, DevEval, SWE-bench);
+\textbf{D10~=~Zero-shot or RAG-only}.
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-3: Graph-Based \& Structural Representation}
+\label{subsec:par3}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-3 systems represent the repository as a \emph{formal graph structure}
+derived from static program analysis.  Unlike PAR-1 (continuous embeddings) or
+PAR-2 (textual chunks), the context here is an explicit relational structure
+that captures program semantics beyond surface form.
+
+\paragraph{Graph sub-types.}
+PAR-3 covers five families of structural representations, often used in
+combination:
+
+\begin{description}[leftmargin=2em,topsep=2pt,itemsep=3pt]
+  \item[\textit{Abstract Syntax Tree (AST).}]
+    Captures the syntactic structure of individual files or functions.
+    Used in \toolname{CodeMEM}~\cite{wang2026codemem} (AST-guided adaptive
+    memory), \toolname{CoSrch}~\cite{xu2025cosrch} (syntactic code search),
+    and the structural analysis in~\cite{leanh2026codenotnl}.
+
+  \item[\textit{Control Flow Graph (CFG).}]
+    Encodes intra-procedural control paths.  Leveraged in
+    \toolname{SAINT}~\cite{pan2025saint} (integration test generation) and
+    program-repair
+    approaches~\cite{parasaram2025factselect,wang2023rapgen}.
+
+  \item[\textit{Call Graph.}]
+    Represents inter-procedural dependencies across the repository.
+    \toolname{RepoScope}~\cite{liu2025reposcope} builds a call-chain-aware
+    multi-view context; \toolname{GRACE}~\cite{wang2025grace} fuses call
+    graphs with retrieval; \toolname{AskGraph}~\cite{yang2025askgraph}
+    queries dependency-aware call graphs via LLM-generated Cypher queries.
+
+  \item[\textit{Data Flow Graph (DFG).}]
+    Tracks variable definitions and uses across statements.
+    \toolname{GraphCodeBERT}~\cite{guo2021graphcodebert} incorporates DFGs
+    into pretraining.
+    \toolname{Dataflow-Guided RAG}~\cite{cheng2024dataflowrag} uses DFGs to
+    select the most relevant cross-file context.
+    \toolname{AlphaTrans}~\cite{ibrahimzada2025alphatrans} exploits data flow
+    for compositional code translation.
+
+  \item[\textit{Knowledge Graph (KG) / Code Graph Database.}]
+    Encodes entities (classes, methods, files) and semantic relations (calls,
+    inherits, imports) in a property graph.
+    \toolname{CodexGraph}~\cite{liu2025codexgraph} bridges LLMs with a Neo4j
+    code graph database; \toolname{RepoGraph}~\cite{ouyang2025repograph}
+    builds a repository-level code graph;
+    \toolname{RepoChat}~\cite{abedu2025repochat} and
+    \toolname{Synergizing LLMs with KGs}~\cite{abedu2026llmskg} use KGs for
+    Q\&A over repositories;
+    \toolname{Knowledge Graph Code Generation}~\cite{athale2025kgcode}
+    drives generation from a KG.
+    \toolname{CGM}~\cite{tao2025cgm} trains an LLM on top of a graph
+    backbone.
+    \toolname{RPG}~\cite{luo2026rpg} and
+    \toolname{RPG-Encoder}~\cite{luo2026rpgencoder} construct planning graphs
+    for codebase generation at scale.
+\end{description}
+
+\paragraph{Additional PAR-3 systems.}
+\toolname{GraphCoder}~\cite{liu2024graphcoder},
+\toolname{RepoHyper}~\cite{phan2025repohyper},
+\toolname{GRACG}~\cite{fedorov2025gracg},
+\toolname{LocAgent}~\cite{chen2025locagent},
+\toolname{Issue Localization via Code Graph}~\cite{jiang2025issueloc},
+\toolname{LiSSA}~\cite{fuchss2025lissa},
+\toolname{Impact Analysis with PDGs}~\cite{yan2024impactanalysis},
+\toolname{Artifact-Integrated Bug Localisation}~\cite{feng2025buglocarti},
+\toolname{Cross-Lingual Semantic Graphs}~\cite{jiang2024crosslinggraph},
+\toolname{MGS3}~\cite{li2025mgs3},
+\toolname{Knowledge-Enhanced Bug Localisation}~\cite{li2025knowledgebug}, and
+\toolname{Fact Selection in Program Repair}~\cite{parasaram2025factselect}.
+
+\paragraph{Dimension profile.}
+D1~=~Symbolic graph (AST / CFG / Call~Graph / DFG / KG);
+D2~=~Cross-file/repository; D3~=~Static analysis;
+D4~=~Graph traversal / graph query (Cypher / GNN);
+D5~=~Static; D6~=~O2, O3, O4, O5; D7~=~Varies;
+D8~=~Structural pruning;
+D9~=~Benchmark (SWE-bench, CrossCodeEval, DevEval);
+\textbf{D10~=~Zero-shot to Lightweight FT}
+(KG querying may be zero-shot; GNN-augmented encoders require fine-tuning).
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-4: Execution \& Dynamic Representation}
+\label{subsec:par4}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-4 systems derive context from \emph{runtime artefacts}: test execution
+traces, compiler feedback, interpreter states, or differential execution
+signals.  This dynamic information complements the static structure exploited
+by PAR-1 through PAR-3.  Crucially, PAR-4 adopts a \textbf{passive,
+observational} stance: the system \emph{records} what happens when the code
+is run, but does not autonomously decide what to run next.
+
+\paragraph{Canonical works.}
+\toolname{IRCoCo}~\cite{li2024ircoco} uses immediate execution rewards to
+guide reinforcement-learning-based code completion.
+\toolname{Iterative Refinement with Compiler Feedback}~\cite{bi2024iterrefine}
+injects compiler error messages as dynamic context.
+\toolname{Rete}~\cite{parasaram2023rete} learns namespace representations
+from runtime program repair traces.
+\toolname{Trace}~\cite{tu2025trace} extracts context from test execution
+traces to repair failing tests.
+\toolname{RAP-Gen}~\cite{wang2023rapgen} retrieves analogous patches and uses
+execution outcomes to rank repairs.
+\toolname{Merge Conflict Resolution}~\cite{zhang2022mergeconflict} leverages
+execution-validated context for textual and semantic conflicts.
+\toolname{Rust Issue Resolution}~\cite{xiang2026rustissue} uses compilation
+feedback to iteratively refine agent actions.
+\toolname{SWE-Gym}~\cite{pan2025swegym} provides a training environment in
+which agents receive execution-based rewards.
+
+\paragraph{Dimension profile.}
+D1~=~Execution trace / dynamic signal; D2~=~Cross-file/module;
+D3~=~Runtime execution; D4~=~None (passive recording); D5~=~Dynamic;
+D6~=~O4, O5, O6; D7~=~Single or multi; D8~=~Trace filtering;
+D9~=~Benchmark (SWE-bench, ISSTA suites);
+\textbf{D10~=~Lightweight FT or Full RL}
+(rewards derived from code execution).
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-5: Memory-Augmented Context}
+\label{subsec:par5}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-5 systems persist and retrieve structured or unstructured \emph{episodic
+memory} about past interactions with a code repository.  The defining
+characteristic is that \textbf{memory is the primary representational
+structure: the context \emph{is} the memory}.  Memory buffers accumulate
+facts, decisions, file summaries, or code snippets gathered from prior
+inference steps, and selectively retrieve the most relevant items for each
+new query.
+
+\paragraph{Canonical works.}
+\toolname{CodeMEM}~\cite{wang2026codemem} maintains an AST-guided adaptive
+memory that grows iteratively as the agent generates code.
+\toolname{LingmaAgent}~\cite{ma2025lingmaagent} combines a hierarchical file
+summary memory with a semantic search index for issue resolution.
+\toolname{Prometheus}~\cite{pan2026prometheus} manages long-horizon codebase
+navigation by persisting a working memory of explored code regions.
+\toolname{SWE-Exp}~\cite{chen2025sweexp} introduces experience-driven memory
+that stores successful resolution trajectories for reuse.
+
+\paragraph{Dimension profile.}
+D1~=~NL summary + structured memory; D2~=~Repository-wide (episodic);
+D3~=~Static + prior interaction; D4~=~Dense + temporal retrieval;
+D5~=~Dynamic (growing memory); D6~=~O2, O4; D7~=~Multi;
+D8~=~Memory consolidation / eviction;
+D9~=~Benchmark (SWE-bench, FEA-Bench);
+\textbf{D10~=~Zero-shot or Lightweight FT}
+(memory architecture often orthogonal to LLM training).
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-6: Compression \& Summarisation}
+\label{subsec:par6}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-6 systems cope with the finite context-window budget by
+\emph{compressing} or \emph{summarising} the repository into a more compact
+representation before passing it to the LLM.  The compressed representation
+replaces the raw source in the prompt.
+
+\paragraph{Canonical works.}
+\toolname{LongCodeZip}~\cite{shi2025longcodezip} learns to compress long code
+contexts for code LLMs via differentiable summarisation.
+\toolname{SWE-Pruner}~\cite{wang2026swepruner} adaptively prunes the
+repository context during agentic issue resolution.
+\toolname{CodeS}~\cite{zan2025codes} generates multi-layer sketches
+(NL $\to$ API $\to$ code) as a hierarchical compressed representation.
+\toolname{Hierarchical Repository Summarisation}~\cite{dhulshette2025hiersumm}
+compresses business-level codebases with local LLMs.
+\toolname{Zero-Shot Cross-Domain Code Search}~\cite{liang2025zeroshot}
+demonstrates that summarisation-based representations can transfer across
+programming languages without fine-tuning.
+\toolname{Code Summarisation Beyond Function Level}~\cite{makharev2025codesumm}
+extends summarisation to module and repository granularity.
+\toolname{Semantic Augmentation of Prompts}~\cite{ahmed2024semanticaug}
+injects NL summaries of code artefacts into prompts.
+\toolname{Natural Language Summarisation for Bug Localisation}~\cite{oskooei2025nlsumm}
+and \toolname{Context Engineering for AI Agents}~\cite{mohsenimofidi2026contexteng}
+demonstrate PAR-6 for microservice bug localisation and agentic open-source
+tasks respectively.
+\toolname{ArtifactSync}~\cite{alor2026artifactsync} uses hierarchical change
+impact summaries for repository synchronisation.
+
+\paragraph{Dimension profile.}
+D1~=~NL summary / compressed token sequence; D2~=~Module/repository;
+D3~=~Static + summarisation model; D4~=~Semantic filtering;
+D5~=~Static; D6~=~O1, O2, O4, O7; D7~=~Multi;
+D8~=~Adaptive summarisation;
+D9~=~Benchmark (CrossCodeEval, SWE-bench);
+\textbf{D10~=~Zero-shot or Lightweight FT}
+(summarisation models may require instruction tuning).
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{PAR-7: Agentic \& Iterative Context Exploration}
+\label{subsec:par7}
+%%──────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Definition.}
+PAR-7 systems employ an LLM as an autonomous \emph{agent} that \textbf{actively
+explores} the repository through a loop of observation, reasoning, and action.
+Unlike PAR-4 (which passively records execution traces) and PAR-5 (where
+memory \emph{is} the representation), in PAR-7 the agent is the primary
+processing unit and memory, graphs, traces, and retrieval are \textbf{tools}
+or \textbf{components} of a larger agentic pipeline.
+
+\paragraph{Canonical works.}
+\toolname{SWE-agent}~\cite{yang2024sweagent} designs an agent--computer
+interface that gives the LLM direct shell access to the repository.
+\toolname{OpenHands}~\cite{wang2025openhands} generalises the interface to a
+platform for generalist software development agents.
+\toolname{MetaGPT}~\cite{hong2023metagpt} orchestrates multiple specialised
+agents via a shared message bus.
+\toolname{CodePlan}~\cite{bairi2024codeplan} uses LLM-based planning to
+decompose multi-file changes into atomic edit operations.
+\toolname{AutoCodeRover}~\cite{zhang2024autocoderover} combines abstract
+syntax tree navigation with spectrum-based fault localisation.
+\toolname{SWE-Search}~\cite{antoniades2024swesearch} applies Monte Carlo Tree
+Search to navigate the space of repository edits.
+\toolname{RepairAgent}~\cite{bouzenia2025repairagent} is a fully autonomous
+agent for LLM-based program repair.
+\toolname{SWE-RL}~\cite{wei2025swerl} trains an agentic LLM via reinforcement
+learning on open software evolution tasks.
+\toolname{Nemotron-CORTEXA}~\cite{sohrabizadeh2025nemotron} improves
+localisation diversity in agentic workflows.
+Other notable systems include:
+\toolname{AgentFL}~\cite{qin2025agentfl},
+\toolname{OrcaLoca}~\cite{yu2025orcaloca},
+\toolname{LocAgent}~\cite{chen2025locagent},
+\toolname{CodeAgent}~\cite{zhang2024codeagent},
+\toolname{ChatUniTest}~\cite{chen2024chatunitest},
+\toolname{CoverUp}~\cite{altmayer2025coverup},
+\toolname{CITYWALK}~\cite{zhang2025citywalk},
+\toolname{KTester}~\cite{li2026ktester},
+\toolname{LSPRAG}~\cite{go2025lsprag},
+\toolname{SWE-Debate}~\cite{li2025swebdebate},
+\toolname{SWE-GPT}~\cite{ma2025swegpt},
+\toolname{Tool-integrated RL}~\cite{ma2025toolrl},
+\toolname{Issue2Test}~\cite{nashid2026issue2test},
+\toolname{RefAgent}~\cite{oueslati2026refagent},
+\toolname{SpecRover}~\cite{ruan2025specrover},
+\toolname{Divide-and-Conquer}~\cite{wang2025divideconquer},
+\toolname{RLCoder}~\cite{wang2025rlcoder},
+\toolname{Hybrid-Gym}~\cite{xie2026hybridgym},
+\toolname{Scalable Code Translation}~\cite{zhang2025scalabletrans},
+\toolname{PATCH}~\cite{zhang2025patch},
+\toolname{C-to-Rust Translation with RL}~\cite{feng2026ctorust},
+\toolname{Unified SEA}~\cite{applis2025unifiedsea},
+\toolname{Dependency Breaking Changes}~\cite{fruntke2025depbreaking},
+\toolname{LLM Fusion for Code Change}~\cite{dilhara2024fusionllms},
+\toolname{Demystifying SE Agents}~\cite{xia2025demystify},
+\toolname{IDE-Derived Static Context}~\cite{li2024idestatic},
+\toolname{Teaching Code LLMs Tools}~\cite{wang2025teachcode},
+\toolname{Fault Localisation via Search}~\cite{qin2025faultsearch}, and
+\toolname{Ensemble Reasoning}~\cite{tian2026agentensemble}.
+
+\paragraph{Dimension profile.}
+D1~=~Action sequence / multi-modal (text + tool calls);
+D2~=~Repository-wide; D3~=~Static + runtime + interactive;
+D4~=~Agent-driven (tool use); D5~=~Dynamic (adaptive);
+D6~=~O2, O4, O5, O6; D7~=~Multi; D8~=~Context pruning / scratchpad;
+D9~=~Benchmark (SWE-bench, FEA-Bench, M2RC-EVAL, OmniGIRL);
+\textbf{D10~=~Zero-shot to Full RL}
+(spans the full training dependency spectrum).
+
+%%──────────────────────────────────────────────────────────────────────────────
+\subsection{Cross-Paradigm Disambiguation}
+\label{subsec:disambiguation}
+%%──────────────────────────────────────────────────────────────────────────────
+
+Two pairs of paradigms have been repeatedly conflated in the literature.  We
+provide explicit disambiguation criteria validated against the primary corpus.
+
+\subsubsection{PAR-4 vs.\ PAR-7: Passive Trace Recording vs.\ Active
+               Repository Exploration}
+\label{subsubsec:par4vpar7}
+
+Both PAR-4 and PAR-7 interact with the live code environment, which creates
+the superficial impression that they are variants of the same idea.  The key
+distinction lies in the \emph{locus of decision-making}:
+
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=2pt]
+  \item \textbf{PAR-4 --- Passive representation via execution traces.}  The
+    system observes the output of a \emph{pre-determined} execution (a test
+    run, a compiler pass, a static analyser).  The LLM itself does not decide
+    \emph{what to run} or \emph{where to look next}; it merely receives the
+    resulting trace as additional context.  The representation is
+    \emph{observation-driven}: inputs are fixed, observations are recorded,
+    and the LLM reasons over them in a single step (or a bounded number of
+    refinement steps triggered by the same fixed oracle).
+    Representative systems: \toolname{IRCoCo}~\cite{li2024ircoco},
+    \toolname{Iterative Refinement with Compiler Feedback}~\cite{bi2024iterrefine},
+    \toolname{Trace}~\cite{tu2025trace},
+    \toolname{SWE-Gym}~\cite{pan2025swegym}.
+
+  \item \textbf{PAR-7 --- Active exploration via autonomous agents.}  The LLM
+    decides at each step \emph{which file to read, which test to run, which
+    tool to invoke, and which patch to apply}.  The context is dynamically
+    constructed by the agent's own policy; the repository is an
+    \emph{environment} the agent navigates, not a passive information source.
+    The exploration is \emph{open-ended}: the agent may issue hundreds of
+    distinct tool calls before converging on a solution.
+    Representative systems: \toolname{SWE-agent}~\cite{yang2024sweagent},
+    \toolname{AutoCodeRover}~\cite{zhang2024autocoderover},
+    \toolname{SWE-Search}~\cite{antoniades2024swesearch},
+    \toolname{RepairAgent}~\cite{bouzenia2025repairagent}.
+\end{itemize}
+
+\noindent\textbf{Classification rule.}  A study belongs to PAR-4 if execution
+feedback is a fixed, externally determined \emph{input signal}.  It belongs to
+PAR-7 if the LLM autonomously \emph{decides} which executions to trigger and
+acts on the results through an open-ended decision loop.  Studies that exhibit
+both properties (e.g., RL agents trained with execution rewards but evaluated
+in a fixed harness) are primarily classified in PAR-7 and tagged as
+\emph{PAR-4-hybrid} in dimension D3.
+
+\subsubsection{PAR-5 vs.\ PAR-7: Memory as Primary Structure vs.\ Memory as
+               Pipeline Component}
+\label{subsubsec:par5vpar7}
+
+PAR-5 and PAR-7 both maintain state across inference steps.  The distinction
+concerns the \emph{architectural role} of that state:
+
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=2pt]
+  \item \textbf{PAR-5 --- Memory is the primary representational structure.}
+    In PAR-5 systems, the \emph{context IS the memory}: the entire design
+    philosophy revolves around what information to persist, how to encode it,
+    how to index it, and when to retrieve it.  The LLM is a consumer of the
+    memory; the memory system is the first-class citizen.  Replacing the
+    memory module with a flat context window would fundamentally change the
+    system's identity.  Representative systems:
+    \toolname{CodeMEM}~\cite{wang2026codemem},
+    \toolname{LingmaAgent}~\cite{ma2025lingmaagent},
+    \toolname{SWE-Exp}~\cite{chen2025sweexp},
+    \toolname{Prometheus}~\cite{pan2026prometheus}.
+
+  \item \textbf{PAR-7 --- Memory is a component of a larger agentic
+    pipeline.}  In PAR-7 systems, memory (if present) is one tool among
+    many: the agent may read from memory, write to files, execute tests, call
+    APIs, and search the codebase, all within a single reasoning loop.
+    Removing the memory component would reduce the agent's performance but
+    would not alter its fundamental architecture.  The defining artefact of a
+    PAR-7 system is the \emph{agent loop and its action space}, not any
+    individual component.  Representative systems:
+    \toolname{MetaGPT}~\cite{hong2023metagpt},
+    \toolname{OpenHands}~\cite{wang2025openhands},
+    \toolname{CodePlan}~\cite{bairi2024codeplan}.
+\end{itemize}
+
+\noindent\textbf{Classification rule.}  If the primary scientific contribution
+of a paper is a novel \emph{memory representation or management strategy} for
+code, the study belongs to PAR-5.  If the primary contribution is an
+\emph{agent architecture, planning algorithm, or action-space design} that
+happens to include a memory sub-module, the study belongs to PAR-7.
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Evaluation Infrastructure and Benchmarks}
+\label{sec:evaluation}
+%%══════════════════════════════════════════════════════════════════════════════
+
+A rich ecosystem of benchmarks has emerged to evaluate the approaches
+described in Section~\ref{sec:taxonomy}.
+Table~\ref{tab:benchmarks} summarises 25 key evaluation benchmarks used
+across our corpus.
+
+\begin{table}[t]
+  \caption{Key evaluation benchmarks for repository-level LLM-based SE.
+           SE objectives: O1~completion, O2~generation, O3~search,
+           O4~bug~fixing, O5~refactoring/translation, O6~testing.}
+  \label{tab:benchmarks}
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    \textbf{Benchmark}   & \textbf{Ref.}                    & \textbf{SE Obj.} & \textbf{Languages} \\
+    \midrule
+    SWE-bench            & \cite{jimenez2024swebench}        & O4       & Python  \\
+    SWE-bench Live       & \cite{zhang2025swebenchlive}      & O4       & Python  \\
+    Multi-SWE-Bench      & \cite{zan2025multiswe}            & O4       & Multi   \\
+    SWE-MERA             & \cite{pavel2025swemera}           & O4       & Python  \\
+    SWE-Gym              & \cite{pan2025swegym}              & O4       & Python  \\
+    CrossCodeEval        & \cite{ding2023crosscodeeval}      & O1       & Multi   \\
+    RepoBench            & \cite{liu2024repobench}           & O1       & Multi   \\
+    DevEval              & \cite{li2024deveval}              & O2       & Python  \\
+    FEA-Bench            & \cite{li2025feabench}             & O2       & Multi   \\
+    REPOCOD              & \cite{liang2025repocod}           & O2       & Python  \\
+    M2RC-EVAL            & \cite{liu2025m2rceval}            & O1       & Multi   \\
+    ProjectEval          & \cite{liu2025projecteval}         & O2       & Multi   \\
+    HumanEvo             & \cite{zheng2025humanevo}          & O2       & Python  \\
+    OmniGIRL             & \cite{guo2025omnigirl}            & O2, O4   & Multi   \\
+    SWE-QA-Pro           & \cite{cai2026sweqapro}            & O3, O4   & Python  \\
+    DependEval           & \cite{du2025dependeval}           & O1, O3   & Multi   \\
+    DI-BENCH             & \cite{zhang2025dibench}           & O2       & Multi   \\
+    RustRepoTrans        & \cite{ou2025rustrepotrans}        & O5       & Rust    \\
+    RepoTransBench       & \cite{wang2026repotransbench}     & O5       & Multi   \\
+    ClassEval-T          & \cite{xue2025classevalt}          & O5       & Multi   \\
+    FreshBrew            & \cite{may2025freshbrew}           & O5       & Java    \\
+    RECODE-H             & \cite{miao2026recodeh}            & O2       & Python  \\
+    FeatureBench         & \cite{zhou2026featurebench}       & O2       & Multi   \\
+    AutoBenchGen         & \cite{vergopoulos2025autobench}   & O2       & Python  \\
+    Rust Issue Res.      & \cite{xiang2026rustissue}         & O4       & Rust    \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Discussion}
+\label{sec:discussion}
+%%══════════════════════════════════════════════════════════════════════════════
+
+\subsection{Paradigm Coverage and Complementarity}
+
+Our seven-paradigm taxonomy reveals that most state-of-the-art systems combine
+elements from multiple paradigms: e.g., a PAR-7 agent may query a PAR-3 graph
+database and maintain a PAR-5 memory buffer.  The taxonomy captures the
+\emph{primary representational commitment} of each work, not the absence of
+secondary mechanisms.
+
+\subsection{Training Dependency as a Practical Lens (D10)}
+
+The revised dimension D10 highlights a critical engineering trade-off.  While
+Full RL (Level~3) systems such as \toolname{SWE-RL}~\cite{wei2025swerl} and
+\toolname{RLCoder}~\cite{wang2025rlcoder} achieve strong benchmark performance,
+they require substantial compute and curated execution environments.
+Zero-shot (Level~0) approaches remain competitive for many tasks when combined
+with effective retrieval or graph-based context (PAR-2/PAR-3), as demonstrated
+by \toolname{CodexGraph}~\cite{liu2025codexgraph} and
+\toolname{RepoGraph}~\cite{ouyang2025repograph}.  Practitioners should select
+their training dependency level based on available resources and the target SE
+objective.
+
+\subsection{Open Challenges}
+
+\begin{enumerate}[leftmargin=*,topsep=2pt,itemsep=2pt]
+  \item \textbf{Scalability.}  Most PAR-3 and PAR-7 systems have been
+    evaluated on single-repository benchmarks.  Scaling to
+    multi-repository~\cite{oskooei2025nlsumm} or monorepo settings remains
+    an open challenge.
+  \item \textbf{Multilingual support.}  Benchmarks such as
+    M2RC-EVAL~\cite{liu2025m2rceval}, Multi-SWE-Bench~\cite{zan2025multiswe},
+    and OmniGIRL~\cite{guo2025omnigirl} expose significant performance gaps
+    across programming languages.
+  \item \textbf{Evaluation standardisation.}  The diversity of benchmarks
+    (Table~\ref{tab:benchmarks}) hampers direct comparison.  A unified
+    evaluation harness covering all seven SE objectives is needed.
+  \item \textbf{Context faithfulness and hallucination.}  All paradigms are
+    susceptible to generating plausible but incorrect code.  The
+    fact-selection problem~\cite{parasaram2025factselect} is particularly
+    acute in PAR-3.
+  \item \textbf{Privacy and security.}  Repository-level context may contain
+    sensitive information; privacy-preserving retrieval and on-device inference
+    are under-explored.
+\end{enumerate}
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Threats to Validity}
+\label{sec:threats}
+%%══════════════════════════════════════════════════════════════════════════════
+
+\paragraph{Internal validity.}
+The classification of each study into one of seven paradigms was performed
+by two independent coders with a Cohen's $\kappa > 0.80$.  Disagreements
+were resolved by discussion and, where needed, majority vote among three
+reviewers.
+
+\paragraph{External validity.}
+Our search covered major SE, AI, and NLP venues through April~2026.  Rapidly
+evolving technical reports and grey literature may have been missed despite
+our arXiv inclusion criteria.
+
+\paragraph{Construct validity.}
+The ten dimensions were derived inductively from the corpus; alternative
+dimension sets are possible.  The revised D10 label \emph{Training Dependency}
+is a conceptual consolidation grounded in the observed distribution of
+approaches, not a formal ontology.
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Related Work}
+\label{sec:relwork}
+%%══════════════════════════════════════════════════════════════════════════════
+
+Several surveys address adjacent topics.
+\citet{hou2024llmsslr} provide a comprehensive SLR of LLMs for software
+engineering but do not focus on repository-level context representation.
+\citet{jiang2026surveyllm} survey LLMs for code generation with emphasis on
+task benchmarks rather than representation strategies.
+\citet{tao2026ragsurvey} survey retrieval-augmented code generation with a
+focus on RAG techniques (our PAR-2) but do not cover PAR-3 through PAR-7.
+\citet{husein2025codecompletion} review LLMs for code completion without
+cross-file context as a primary concern.
+\citet{zhang2026surveyllmse} cover the broader LLM-for-SE landscape.
+
+Our work complements and extends these surveys by providing a unified taxonomy
+covering all seven paradigms, the cross-paradigm disambiguation (PAR-4/7 and
+PAR-5/7), and the revised Training Dependency dimension~(D10).
+
+%%══════════════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+\label{sec:conclusion}
+%%══════════════════════════════════════════════════════════════════════════════
+
+We have presented a systematic literature review of 168 studies on
+repository-level context representation for LLM-based software engineering.
+Our seven-paradigm taxonomy (PAR-1--PAR-7) provides the first unified
+framework for classifying and comparing this rapidly growing body of work.
+Key contributions include:
+
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=2pt]
+  \item \textbf{D10 --- Training Dependency}: a revised taxonomy dimension
+    distinguishing Zero-shot, RAG-only, Lightweight FT, and Full RL,
+    replacing the coarser \emph{Fine-Tuning Requirements} label.
+  \item \textbf{PAR-3 sub-types}: an explicit categorisation into five
+    graph families (AST, CFG, Call Graph, DFG, Knowledge Graph).
+  \item \textbf{PAR-4 vs.\ PAR-7 disambiguation}: passive trace recording
+    vs.\ active agent exploration.
+  \item \textbf{PAR-5 vs.\ PAR-7 disambiguation}: memory as the primary
+    representation vs.\ memory as a pipeline component.
+\end{itemize}
+
+We make the full dataset, annotation guidelines, and extracted data available
+as supplementary material to foster reproducibility and future research.
+
+%%──────────────────────────────────────────────────────────────────────────────
+%% Bibliography
+%%──────────────────────────────────────────────────────────────────────────────
+\bibliography{references}
+
+\end{document}
