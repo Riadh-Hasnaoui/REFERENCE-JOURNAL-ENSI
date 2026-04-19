@@ -1,0 +1,171 @@
+\section{Introduction}
+\label{sec:intro}
+
+The integration of Large Language Models (LLMs) into software engineering
+workflows has undergone a dramatic transformation since 2020. Tools such as
+GitHub Copilot, Cursor, and Amazon CodeWhisperer now operate directly on
+industrial-scale codebases, demonstrating that \textbf{the unit of interaction
+for AI-assisted software engineering is no longer the isolated function or
+snippet, but the entire code repository}. This paradigm shift introduces a
+fundamental representational challenge: how should a repository containing
+thousands of files, complex dependency graphs, and rich semantic relationships
+be structured so that an LLM can effectively reason over it for diverse
+software engineering tasks?
+
+This question---which we term the \textbf{repository representation
+problem}---lies at the intersection of information retrieval, program analysis,
+and natural language processing. It is not merely an engineering concern; it is
+a \textbf{first-class scientific problem} that conditions the success of every
+downstream software engineering task, from code completion and bug
+fixing~\cite{jimenez2024swebench,yang2024sweagent} to refactoring, test
+generation, and code review~\cite{hou2024llmse_slr}.
+
+\subsection{The Repository Representation Problem}
+
+Formally, we define the \textbf{repository representation problem} as follows:
+given a software repository $\mathbf{R} = \{F, D, H\}$---where $F$ is the set
+of source files, $D$ is the dependency structure (import/call graphs, data
+flows), and $H$ is the evolutionary history (commits, issues)---construct a
+\textbf{context representation} $C(R, q, \tau)$ that is both:
+\begin{enumerate}
+  \item \textbf{Informationally sufficient} for the LLM to address query $q$
+  (e.g., ``fix bug \#1234'', ``complete this function'', ``refactor class X'');
+  \item \textbf{Computationally feasible} given the token budget constraint
+  $\tau$ (typically 4K--128K tokens for modern LLMs).
+\end{enumerate}
+
+The fundamental tension between these two requirements---\textbf{informational
+completeness versus token economy}---drives the diversity of approaches in the
+literature.
+
+\subsection{Limitations of the Current Research Landscape}
+
+Despite rapid growth in this domain, the existing literature exhibits
+\textbf{four structural limitations} that motivate the present work, summarized
+in Table~\ref{tab:challenges}.
+
+\begin{table*}[htbp]
+\renewcommand{\arraystretch}{1.3}
+\caption{Core Challenges in Repository Representation for LLMs and Our Responses}
+\label{tab:challenges}
+\centering
+\begin{tabular}{L{2.2cm}L{3.5cm}L{3.5cm}L{3.5cm}}
+\toprule
+\textbf{Challenge} & \textbf{Current Limitation} & \textbf{Consequence} & \textbf{Our Response} \\
+\midrule
+\textbf{Representation Heterogeneity} &
+Seven distinct paradigms developed in isolation with no unified framework. &
+Practitioners cannot systematically select the appropriate representation for
+their target task. &
+\textbf{C1} --- Multi-dimensional taxonomy across 7 paradigms and 10 structural
+properties. \\
+\addlinespace
+\textbf{Objective-Agnostic Design} &
+Most approaches optimize for a single task without analyzing transferability. &
+Significant performance gaps when applying completion-oriented representations
+to bug fixing or refactoring tasks. &
+\textbf{C2} --- Bidirectional \textbf{Representation~$\times$~Objective}
+mapping matrix ($7 \times 7$). \\
+\addlinespace
+\textbf{Unformalized Trade-offs} &
+Token cost, latency, scalability, and semantic precision reported inconsistently
+across heterogeneous benchmarks. &
+Impossible to make evidence-based architectural decisions in production systems. &
+\textbf{C3} --- Formal trade-off framework with normalized cross-benchmark
+analysis. \\
+\addlinespace
+\textbf{Evaluation Blind Spots} &
+Existing benchmarks treat repositories as static artifacts, ignoring temporal
+evolution. &
+Inflated performance claims that do not transfer to real-world evolving
+codebases. &
+\textbf{C4} --- Systematic gap analysis of 25 benchmarks + research agenda
+(HumanEvo bias: 10\%--61\%~\cite{zheng2025humanevo}). \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Scope and Positioning}
+
+This paper focuses specifically on the \textbf{context construction phase} of
+repository-level LLM systems. We explicitly exclude: (1)~the internal
+architecture of LLMs; (2)~prompt engineering strategies that do not modify the
+underlying representation; and (3)~model fine-tuning approaches where
+repository structure is encoded in model weights.
+
+Table~\ref{tab:positioning} positions our work relative to four closely related
+surveys~\cite{tao2026ragsurvey,hou2024llmse_slr,jiang2026surveycodegen,husein2025llmcompletion_slr}.
+
+\begin{table*}[htbp]
+\renewcommand{\arraystretch}{1.3}
+\caption{Positioning vs.\ Related Surveys}
+\label{tab:positioning}
+\centering
+\begin{tabular}{L{2.8cm}C{2.0cm}C{2.0cm}C{2.0cm}C{2.0cm}C{2.0cm}}
+\toprule
+\textbf{Criterion} & \textbf{This Work} & \textbf{Tao et al.~\cite{tao2026ragsurvey}} & \textbf{Hou et al.~\cite{hou2024llmse_slr}} & \textbf{Jiang et al.~\cite{jiang2026surveycodegen}} & \textbf{Husein et al.~\cite{husein2025llmcompletion_slr}} \\
+\midrule
+Focus & Repo representation & RAG for code gen. & LLM for SE (broad) & Code generation & Code completion \\
+Representation Types & \textbf{7 paradigms} & RAG only & Model-centric & Model-centric & Model-centric \\
+Multi-dim.\ Taxonomy & \checkmark \textbf{10 dims.} & $\times$ & $\times$ & $\times$ & $\times$ \\
+Repr.$\times$Obj.\ Matrix & \checkmark \textbf{7$\times$7} & $\sim$ Partial & $\times$ & $\sim$ Partial & $\sim$ Partial \\
+Trade-off Analysis & \checkmark \textbf{Formal} & $\sim$ Qualitative & $\times$ & $\times$ & $\times$ \\
+Temporal Coverage & \textbf{2019--2025} & 2023--2025 & 2017--2024 & 2020--2026 & 2018--2025 \\
+Primary Studies & \textbf{262} & 110 & 229 & 50+ & 50+ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Contributions}
+
+This paper makes \textbf{four original scientific contributions}:
+
+\begin{itemize}
+  \item[\textbf{C1}] \textbf{A Multi-Dimensional Taxonomy}: classifying 7
+  representation paradigms across 10 structural dimensions, derived through
+  thematic synthesis (Cruzes \& Dyb\r{a}~\cite{cruzes2011thematic}) on 159
+  primary studies with inter-coder agreement $\kappa > 0.75$, following the
+  Kitchenham \& Charters~\cite{kitchenham2007guidelines} protocol and
+  PRISMA~2020~\cite{prisma2020} standards.
+
+  \item[\textbf{C2}] \textbf{A Bidirectional Representation~$\times$~Objective
+  Mapping}: a complete $7 \times 7$ matrix grounded in empirical evidence from
+  primary studies and validated against SWE-bench~\cite{jimenez2024swebench},
+  RepoBench~\cite{liu2024repobench}, CrossCodeEval~\cite{ding2023crosscodeeval},
+  M2RC-EVAL~\cite{liu2025m2rceval}, and REPOCOD~\cite{liang2025repocod}.
+
+  \item[\textbf{C3}] \textbf{A Formal Trade-off Framework}: characterizing each
+  paradigm across 5 operational dimensions (semantic precision, token
+  efficiency, construction latency, update cost, scalability) with
+  evidence-based selection guidelines for practitioners.
+
+  \item[\textbf{C4}] \textbf{A Systematic Gap Analysis}: analyzing 25 benchmarks
+  and identifying 5 critical research gaps, including the static-repository
+  assumption (HumanEvo bias: 10\%--61\%~\cite{zheng2025humanevo}).
+\end{itemize}
+
+\subsection{Research Questions}
+
+\begin{itemize}
+  \item[\textbf{RQ1}] What representation approaches are used to model code
+  repositories for LLM-based SE systems, and what are their structural
+  properties? \emph{(Motivates C1.)}
+
+  \item[\textbf{RQ2}] How does the choice of repository representation vary
+  across downstream SE objectives? \emph{(Motivates C2.)}
+
+  \item[\textbf{RQ3}] What are the empirical trade-offs between representation
+  paradigms in terms of semantic precision, token efficiency, construction
+  latency, update cost, and scalability? \emph{(Motivates C3.)}
+
+  \item[\textbf{RQ4}] What are the open research gaps in the evaluation and
+  design of repository representation approaches? \emph{(Motivates C4.)}
+\end{itemize}
+
+\subsection{Paper Organization}
+
+Section~\ref{sec:methodology} presents the five-pillar SLR methodology
+(PRISMA~2020~\cite{prisma2020} + Kitchenham~\cite{kitchenham2007guidelines}).
+Sections~\ref{sec:taxonomy}--\ref{sec:gaps} address RQ1--RQ4 and present C1--C4.
+Section~\ref{sec:threats} discusses threats to validity.
+Section~\ref{sec:conclusion} concludes.
