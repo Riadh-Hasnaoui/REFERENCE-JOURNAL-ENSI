@@ -1,0 +1,928 @@
+                                                                                                                                                                                           2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE)
+
+
+
+                                                                                                                                                                                                The Fact Selection Problem
+                                                                                                                                                                                              in LLM-Based Program Repair
+                                                                                                                                                                          Nikhil Parasaram                           Huijie Yan†                   Boyu Yang†                      Zineb Flahy
+                                                                                                                                                                    University College London               University College London       University College London       University College London
+                                                                                                                                                                   nikhil.parasaram.19@ucl.ac.uk             huijie.yan.20@ucl.ac.uk         boyu.yang.21@ucl.ac.uk          zineb.flahy.21@ucl.ac.uk
+
+                                                                                                                                                                      Abriele Qudsi                           Damian Ziaber                      Earl T. Barr                Sergey Mechtaev∗
+                                                                                                                                                             University College London                 University College London           University College London         Peking University
+                                                                                                                                                             abriele.qudsi.21@ucl.ac.uk                damian.ziaber.21@ucl.ac.uk               e.barr@ucl.ac.uk            mechtaev@pku.edu.cn
+   2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) | 979-8-3315-0569-1/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSE55347.2025.00162
+
+
+
+
+                                                                                                                                                                 Abstract—Recent research has shown that incorporating bug-             of cutting-edge LLMs, a critical question emerges: “Which
+                                                                                                                                                             related facts, such as stack traces and GitHub issues, into prompts        specific facts, and in what quantity, should be integrated into
+                                                                                                                                                             enhances the bug-fixing capabilities of large language models              the prompt to optimise the chance of correctly fixing a bug?”
+                                                                                                                                                             (LLMs). Considering the ever-increasing context window of these
+                                                                                                                                                             models, a critical question arises: what and how many facts should            This work is a systematic effort to investigate how to
+                                                                                                                                                             be included in prompts to maximise the chance of correctly fixing          construct effective prompts for LLM-based automated program
+                                                                                                                                                             bugs? To answer this question, we conducted a large-scale study,           repair (APR) by composing facts extracted from the buggy
+                                                                                                                                                             employing over 19K prompts featuring various combinations of               program and external sources. We identified seven facts: those
+                                                                                                                                                             seven diverse facts to rectify 314 bugs from open-source Python            individually studied in the context of APR by previous work,
+                                                                                                                                                             projects within the BugsInPy benchmark. Our findings revealed
+                                                                                                                                                             that each fact, ranging from simple syntactic details like code            such as the buggy code’s context [5], [2], [6], GitHub issues [3],
+                                                                                                                                                             context to semantic information previously unexplored in the               and stack traces [7]; Angelic values, a semantic fact previously
+                                                                                                                                                             context of LLMs such as angelic values, is beneficial. Specifically,       unexplored in the context of LLM-based APR, but that has
+                                                                                                                                                             each fact aids in fixing some bugs that would remain unresolved            been successfully used for debugging [8] and repair [9]; and
+                                                                                                                                                             or only be fixed with a low success rate without it. Importantly,          those chosen based on our intution as developers. Our study
+                                                                                                                                                             we discovered that the effectiveness of program repair prompts
+                                                                                                                                                             is non-monotonic over the number of used facts; using too many             was conducted on 314 bugs in open source Python projects
+                                                                                                                                                             facts leads to subpar outcomes. These insights led us to define            from the BugsInPy [10] benchmark.
+                                                                                                                                                             the fact selection problem: determining the optimal set of facts              Our first experiment aims to confirm the utility of the
+                                                                                                                                                             for inclusion in a prompt to maximise LLM’s performance                    considered facts. Specifically, for each fact, if the potential
+                                                                                                                                                             on a given task instance. We found that there is no one-size-              inclusion of this fact in APR prompts helps to repair some
+                                                                                                                                                             fits-all set of facts for bug repair. Therefore, we developed a
+                                                                                                                                                             basic statistical model, named M ANIPLE, which selects facts               additional bugs, or increases the probability of fixing some bugs.
+                                                                                                                                                             specific to a given bug to include in the prompt. This model               To answer this question, we constructed over 19K prompts
+                                                                                                                                                             significantly surpasses the performance of the best generic fact           tasked to repair the buggy function and containing different
+                                                                                                                                                             set. To underscore the significance of the fact selection problem, we      subsets of the seven facts for the 314 bugs. Then, we queried
+                                                                                                                                                             benchmarked M ANIPLE against the state-of-the-art zero-shot, non-          an LLM to generate patches, and evaluated the patches using
+                                                                                                                                                             conversational LLM-based bug repair methods. On our testing
+                                                                                                                                                             dataset of 157 bugs, M ANIPLE repairs 88 bugs, 17% above the               the provided test suites. Finding 1 confirms the utility of each
+                                                                                                                                                             best configuration.                                                        fact, that is each fact helped repair at least one bug that was
+                                                                                                                                                                 Index Terms—automated program repair, large language                   not repaired by any prompt without this fact. Moreover, all
+                                                                                                                                                             models, prompt engineering                                                 the facts have statistically significant positive impact on the
+                                                                                                                                                                                                                                        probability of fixing a bug in a single attempt.
+                                                                                                                                                                                         I. I NTRODUCTION                                  Given the utility of each fact, it is tempting to assume
+                                                                                                                                                               When debugging and fixing software bugs, developers seek                 that adding more facts always enhances LLM’s performance.
+                                                                                                                                                             bug-related information from a diverse array of sources. Such              Contrary to this intuition, Finding 2 reveals that APR prompts
+                                                                                                                                                             sources include the buggy code’s context, documentation, error             are non-monotonic over facts: adding more facts may degrade
+                                                                                                                                                             messages, outputs from program analysis, etc. Individual pieces            LLM’s performance. An experiment involving 157 bugs showed
+                                                                                                                                                             of this information, which following recent work we refer to               that prompts incorporating all available facts resulted in 12
+                                                                                                                                                             as facts [1], have been demonstrated by previous studies to                fewer bug fixes and exhibited an 8.2% lower probability of
+                                                                                                                                                             enhance LLMs’ bug-fixing efficacy when incorporated into the               repairing a bug within a single attempt compared to the
+                                                                                                                                                             prompts [2], [3], [4]. Given the ever-increasing context window            most effective subset. This finding is non-obvious, because
+                                                                                                                                                                                                                                        each fact may contain crucial information for fixing the bug,
+                                                                                                                                                               †
+                                                                                                                                                                   These authors contributed equally to this work.                      and although previous research showed that LLMs do not
+                                                                                                                                                               ∗
+                                                                                                                                                                   Corresponding author.                                                robustly make use of information in long input contexts [11],
+
+
+                                                                                                                                                             1558-1225/25/$31.00 ©2025 IEEE                                         2574
+                                                                                                                                                             DOI 10.1109/ICSE55347.2025.00162
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+             Please fix the buggy function provided below and output a
+                  ,→ corrected version.
+             <.. CoT instructions are omitted ...>
+
+             ## The source code of the buggy function
+             ‘‘‘python
+             # this is the buggy function you need to fix
+             def read_json(
+             <... a part of code is omitted ...>
+                 return result
+             ‘‘‘
+             ## A test function that the buggy function fails
+             ‘‘‘python
+             def test_readjson_unicode(monkeypatch):
+             <... a part of code is omitted ...>
+                     tm.assert_frame_equal(result, expected)                           Fig. 2: Comparison of pass@1 (the vertical axis) for around 10K
+             ‘‘‘
+             ### The error message from the failing test
+                                                                                       prompts incorporating subsets of the seven considered facts (the
+             ‘‘‘text                                                                   horizontal axis) computed over 15 responses for repairing 157 Python
+             monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0                bugs within the BugsInPy benchmark. Zero facts corresponds to the
+                  ,→ x7f567d325d00>                                                    prompt containing only the buggy function without any additional
+             <... a part of message is omitted ...>
+             pandas/_libs/testing.pyx:174: AssertionError
+                                                                                       information about the bug. The graph plots the average pass@1 score
+             ‘‘‘                                                                       (dashed lines) and the maximum pass@1 score (solid lines) across
+             ## Runtime values and types of variables inside the buggy                 all bugs. This graph clearly shows the non-monotonic nature of APR
+                  ,→ function                                                          prompts over facts for GPT-3.5 and Llama3-70B.
+             compression, value: ‘’infer’‘, type: ‘str‘
+             <... some variables are omitted ...>
+             lines, value: ‘False‘, type: ‘bool‘
+                                                                                       fact selection. Specifically, Finding 3 identified that there is no
+             ## Expected values and types of variables during the
+                  ,→ failing test execution                                            single subset of the seven considered facts that is sufficiently
+             path_or_buf, expected value: ‘’/tmp/tmphu0tx4qstest.json’‘,               effective across all bugs in the dataset. Meanwhile, enumerating
+                  ,→ type: ‘str‘
+             <... some variables are omitted ...>                                      sets of facts via e.g. greedy strategies while repairing each bug
+             result, expected value: <...omitted...>, type: ‘DataFrame‘                might be impractical, because of the high cost of LLM queries
+             ## A GitHub issue for this bug                                            and the necessity to generate multiple responses due to LLMs’
+             ‘‘‘text                                                                   nondeterminism. As a practical compromise, we trained a
+             Code Sample, a copy-pastable example if possible
+             <... a part of text is omitted ...>                                       statistical model that we call M ANIPLE. It is designed to select
+             However, when read_json() is called without encoding                      facts contingent upon the features of a specific bug. Empirical
+                  parameter, it calls built-in open() method to open a
+                  ,→ file and open() uses return value of locale.                      evidence shows that M ANIPLE significantly outperforms a
+                  ,→ getpreferredencoding() to determine the encoding                  universal fact selection strategy, fixing 11 more bugs than a
+                  ,→ which can be something not utf-8
+             ‘‘‘                                                                       generic set of facts that exhibited the optimal performance on
+             Fig. 1: A simplified APR prompt incorporating various facts for           the training data.
+             fixing pandas:128. ... shows information omitted for brevity. ... shows      We benchmarked M ANIPLE against state-of-the-art zero-
+             a part of the GitHub issue that is essential to correctly fix the bug.    shot non-conversational LLM-based APR techniques. On our
+             Too much information in the prompt “distracts” the LLM from the
+             relevant part of the issue description, significantly reducing pass@1
+                                                                                       testing set, M ANIPLE repaired 17% more bugs, highlighting
+             and the correctness rate.                                                 the practical impact of the fact selection problem.
+                                                                                          The contributions of this work are:
+             and their performance dramatically decreases when irrelevant                 • A large scale systematic study of a diverse set of bug-
+             information is included in a prompt [12], the trade-off between                pertinent facts for APR prompts.
+             utility of information and the ability of LLM to process long                • An empirical evidence of the utility of each considered fact
+             contexts has not investigated.                                                 for program repair, including angelic values, previously
+                The non-monotonicity of APR prompts and, simultaneously,                    unexplored in the context of LLMs.
+                                                                                          • An empirical evidence of the non-monotonicity of APR
+             the utility of each fact led us to define the fact selection problem:
+             determining the optimal set of facts for inclusion in prompts to               prompts over bug-related facts, i.e. adding more bug-
+             maximise LLM’s performance on given tasks. It can be viewed                    related facts into APR prompts may degrade LLM’s bug-
+             as a variant of feature selection of classical machine learning                fixing performance.
+                                                                                          • A motivation and introduction of the fact selection problem
+             for LLM prompt engineering. We consider two instances of
+             fact selection: universal fact selection when the selected facts               for LLM-based APR.
+                                                                                          • M ANIPLE , a bug-tailored fact selection model that, for
+             do not depend on a specific task instance, i.e. the bug, and
+             bug-tailored fact selection when the fact set is bug-specific.                 a given bug, chooses a set of fact to construct an effec-
+                                                                                            tive APR prompt; This model significantly outperforms
+                If there was a universal set of facts that is effective for
+                                                                                            previous related techniques.
+             all bugs, it would significantly simplify the development of
+             LLM-based APR tools. However, our experiments showed that                 All code, scripts, and data necessary to reproduce this work
+             universal fact selection is suboptimal compared to bug-tailored           are available at https://github.com/PyRepair/maniple.
+
+
+                                                                                   2575
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                 II. M OTIVATING EXAMPLE                               phenomenon of non-monotonicity and its impact on prompt
+                                                                                       performance are discussed in more detail in Section IV-B.
+                To illustrate the importance of the fact selection problem,
+                                                                                          Apart from the non-monotonicity of prompts, we also
+             we consider the bug pandas:128 [13] in the Pandas data
+                                                                                       discovered that each of the considered facts helps to fix
+             analysis library within the BugsInPy benchmark. This bug
+                                                                                       some bugs that cannot be fixed without it. These observations
+             arises due to incorrectly handling the default encoding in the
+                                                                                       motivated us to formulate the fact selection problem, the
+             Pandas’ read_json function. The developer patch for this
+                                                                                       problem of selecting facts for a given bug to maximise the
+             bug involves setting the encoding to UTF-8 when it is not
+                                                                                       chance of repairing it and propose a model M ANIPLE that
+             specified by adding the following lines to the buggy function:
+                                                                                       selects effective facts based on features of a given bug.
+             +        if encoding is None:
+             +          encoding = "utf-8"
+                                                                                                               III. S TUDY D ESIGN
+                When GPT-3.5-Turbo [14] was prompted to rectify the bug                  This section discusses the experimental setup, the facts
+             solely based on the source code of the buggy function, it did             chosen for our study, and how they are represented in prompts.
+             not successfully address the issue in any of 15 responses. A
+             likely explanation of this failure is that the function itself does       A. Experimental Setup
+             not contain any inherently incorrect code, so fixing this bug                We denote the set of bugs as B and the set of all bug-relevant
+             requires external information.                                            facts as F. Since we aim to investigate how using various facts
+                Drawing upon existing literature on LLM-based APR and                  impacts the success of APR, we define the set of all jobs as
+             relying on our intuition as developers, we assembled a diverse            J = B × 2F , which pairs bugs with sets of facts.
+             set of bug-related facts to incorporate into the prompt. These                  Zero-shot Prompting for APR: A advantage of large
+             include the buggy function’s context, the failing test case,              language models, such as ChatGPT [14], is they can be
+             the error message, the runtime values of local variables, their           adapted to a downstream task without retraining via prompt
+             angelic values (values that, when taken by program variables              engineering [16]. A prompt refers to the input or instruction
+             during test execution, result in successful passage of the test),         given to the model to elicit a response. Prompting typically
+             and the GitHub issue description. Figure 1 gives a simplified             takes either the form of zero-shot, i.e. directly providing the
+             representation of the resulting prompt. Adding these facts                model a task’s input, or few-shot [17], where the model is
+             enabled the LLM to generate a plausible patch, i.e. a patch that          provided with a few examples. In this work, we investigate
+             passes the tests, in four out of 15 responses. However, only              a zero-shot APR approach. Although the few-shot approach
+             two of these patches were correct. The other two hard-coded               is promising, it requires finding high-quality examples [18],
+             UTF-8 as the only encoding instead of the default one. The                which we leave for future work.
+             causes of failures to fix the bug included “forgetting” to change               Function-granular Perfect Fault Localisation: APR tools
+             the function despite correct chain-of-thought reasoning [15],             repair bugs by first localising suspicious locations. For an
+             or hard-coding the encoding inconsistently.                               objective evaluation of APR tools, Liu et al. [19] argues for
+                Interestingly, when we removed all facts but the code of the           the use of perfect fault localisation (PFL), that is, when the
+             buggy function, the runtime variable values and the GitHub                buggy locations are known to the tool. PFL can resolve to
+             issue, it significantly raised the success rate. Specifically, the        difference granularity levels: notably, the line or the function.
+             LLM generated plausible patches in 12 out of 15 responses,                Liu et al. argues that fault localisation tools do not offer
+             and 11 out of these 12 were correct. A similar high success rate          the same accuracy in identifying faulty locations at different
+             was demonstrated by the prompt with only the buggy function               granularities, “making function-level granularity appealing for
+             and the GitHub issue. We posit that this is because redundant             limiting unnecessary responses on fault positive locations”.
+             or irrelevant information in the original prompt “distracted” the         We found that, in BugsInPy [10], the average Ochiai [20]
+             LLM from critical details in the GitHub issue (highlighted in             rank of the buggy line is 2502 and the buggy function is
+             Figure 1) necessary to repair the bug [12].                               22 across the entire codebase, making it much more likely
+                We refer to this phenomenon, that adding more facts may                to localise the buggy function than the buggy line. Apart
+             degrade LLM’s performance, as the non-monotonicity of                     from that, although 70% of the bugs in BugsInPy require
+             prompts over facts. To provide stronger empirical evidence,               modifying only a single function, 65% of them modify multiple
+             we conducted a large-scale experiment with 19K prompts                    lines within this function. Localising a bug to multiple lines
+             containing various subsets of seven facts on 314 bugs in                  is harder than targeting individual lines. Meanwhile, cutting-
+             Python projects. Figure 2 shows how pass@1, which estimates               edge models, like GPT-3.5-Turbo, effectively fix bugs even
+             the probability of generating a plausible patch in a single               without specifying the exact lines, i.e. when only the buggy
+             trial, depends on the number of included facts. The graph                 function is provided. Consequently, and in contrast to some
+             shows two types of lines: the solid line corresponds to the               previous studies [21], [22], [2], this paper adopts function-
+             scenario when we select the most effective combination of                 granular PFL as the standard approach for evaluating APR
+             facts for each bug. The dashed line indicates the performance             tools. We implement this by providing the buggy function as
+             of an average fact set. It is evident that both these functions           context in the prompts for the LLM, enabling it to focus on
+             are non-monotonic for both GPT-3.5 and Llama3-70B. This                   fixing issues within the specified function.
+
+
+                                                                                   2576
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                                                                          Facts
+
+
+
+                                          Static (1)                                                          Dynamic (2)                                      External (3)
+
+
+
+                                       Used Method                                      Error                 Runtime                    Angelic
+                Buggy Class (1.1)                           Failing Test (1.3)                                                                              GitHub Issue (3.1)
+                                      Signatures (1.2)                            Information (2.1)       Information (2.2)            Forest (2.3)
+
+
+
+                Declaration (1.1.1)   Class Scope (1.2.1)   Test Code (1.3.1)    Error Message (2.1.1)   Variable Values (2.2.1)   Angelic Values (2.3.1)      Title (3.1.1)
+
+
+
+                                                               Test File
+                 Docstring (1.1.2)    File Scope (1.2.2)                          Stack Trace (2.1.2)    Variable Types (2.2.2)    Angelic Types (2.3.2)    Description (3.1.2)
+                                                              Name (1.3.2)
+
+
+             Fig. 3: This work uses seven facts (dark rectangles) across three categories for constructing program repair prompts. Each fact is composed
+             of related pieces of information. Each prompt contains the buggy function to be repaired; the facts can be included based on the employed
+             fact selection strategy.
+
+
+                  Python Bug Benchmark: APR tools are typically com- refer to Appendix A in the full version of this paper on arXiv
+             pared on datasets of bugs extracted from real world projects, [28]).
+             such as Defects4J [23] for Java and BugsInPy [10] for Python.        For generate-and-validate APR [29] that iteratively generates
+             In this work, we use BugsInPy because of Python’s ever- and tests patches until it finds one that passes, a commonly
+             increasing importance and popularity. BugsInPy contains 501 used measure is the number of bugs for which at least one
+             bugs from 17 popular Python projects such as Pandas [24] and patch passes the tests among LLM’s responses:
+             Matplotlib [25]. Among them, we selected a subset of 314
+             bugs, which we refer to as BGP314, that require modifications                 #fixed(LLM (J)) ≜ {b | j ∈ J, Cj > 0}                   (2)
+             within a single function, due to our PFL approach, and that we where j = (b, F ) is a prompt, and Cj is the number of
+             were able to reproduce. To investigate APR performance on responses that pass the tests for the prompt j.
+             various classes of defects, we consider three parts of BGP314:          Test-overfitting in Program Repair: APR techniques
+                • BGP157P LY 1: This dataset comprises 157 bugs, which         repair  bugs w.r.t. correctness criteria, such as tests or formal
+                  have been uniformly selected from BGP314 for the             specification.  Since tests do not fully capture the intended
+                  purpose of training and analysis.                            behaviour,    automatically    generated patches based on tests
+                • BGP157P LY 2: Consisting of 157 bugs, this dataset is        may   be incorrect  [30].  Thus,   the APR literature distinguishes
+                  the complement of BGP157P LY 1 in BGP314. Used for           between    plausible  patches,    patches   that pass the tests, and
+                  evaluating fact selection strategies.                        correct  patches,  patches  that  satisfy the  intended requirements.
+                • BGP32: A subset of 32 bugs uniformly sampled from            Since  manually   labelling  a large  number    of patches is resource-
+                  BGP157P LY 1, intended for preliminary studies on finding    intensive  and  error-prone,   most   analyses   of the fact selection
+                  parameters, such as determining the right response count     problem   with  pass@k    and  #fixed  in this  paper  count plausible
+                  to reduce the variance.                                      patches   as  successes.   We   only   label  correct   patches when
+                                                                               comparing our tool with other APR techniques in Section VI.
+                  LLM Nondeterminism: Nondeterminism in LLMs leads to             In our experiments, we utilised the latest version of GPT-3.5-
+             varying outcomes between responses, which poses a challenge Turbo, specifically gpt-3.5-turbo-0125, which features a 16K
+             for analysing results [26]. To alleviate it, we use the pass@k context window. For our studies, GPT-3.5-Turbo was run with
+             measure, which represents the probability that at least one query n = 15 responses on BGP157P LY 1, BGP157P LY 2, and with
+             out of k succeeds at solving a problem. Previous work [27] n = 30 for parameter exploration on BGP32. Additionally,
+             recommends estimating pass@k as                                   we used llama3-70B, which offers an 8K context window and
+                                                    "
+                                                           n−C
+                                                                 #            was run exclusively on BGP157P LY 1. As of March 2024,
+                         pass@k(LLM (Q)) ≜ EQ 1 − n          k
+                                                                           (1) the cost of reproducing the experiments detailed in this paper,
+                                                             k                 using the OpenAI API [31] for GPT-3.5 and DeepInfra [32]
+                                                                               for llama3-70B, is estimated at $479 + $269.
+             where EJ denotes expectation over the set of LLM responses
+             to the set of queries (prompts) Q, n is the number of responses B. Bug-Related Facts
+             obtained from the LLM, where n > k and C is the number               The considered facts were collected from previous LLM-
+             of successes found in the n responses. Our task is program based APR research, previous non-LLM-based APR literature,
+             repair, so we deem a response successful if the extracted and our intuition as developers. We conducted a pilot study
+             patch satisfies a correctness criterion, which we approximate on BGP32 to validate fact utility. In total, we collected 14
+             with passing a test suite. A pilot study using BGP32 reveals pieces of information, but since many of them are related, we
+             that when n = 15 and k = 1, pass@k exhibits the average grouped them into seven facts, which we refer to as F. These
+             standard deviation of ca. 0.04, and that further increasing n seven facts are divided into three categories: static, dynamic,
+             only marginally decreases standard deviation. For more details, and external, as shown in Figure 3.
+
+
+                                                                                           2577
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                   Buggy Class (1.1): The declaration of a class containing            a specialised prompt template. Figure 1 shows an example
+             the buggy function provides a broader context and dependencies.           prompt with incorporated facts, and the fact templates are
+             A class docstring offers insight into the overall purpose and             detailed in Appendix B of the full version of this paper on
+             functionality of the class.                                               arXiv [28]).
+                   Used Method Signatures (1.2): Considering methods used                 We employed the standard chain-of-thought [15] approach
+             within the buggy function, as shown by Chen et al. [6], allows            by instructing the LLM to reason about the provided facts, as
+             for the analysis of dependencies and potential side effects that          detailed in Appendix C of the full version of this paper on
+             might contribute to the incorrect behaviour.                              arXiv [28].
+                   Failing Test (1.3): The code of a failing test, as shown               In our preliminary experiments, we discovered that LLM
+             by Xia et al. [4] provides useful context for repairing a buggy           often generates incorrect import statements, which makes it
+             function as it specifically highlights the conditions under which         hard to automatically extract patches from the responses and
+             the program fails.                                                        apply them to the code. To address it, we explicitly added the
+                   Error Information (2.1): Previous approaches showed that            import statements in the current file to the prompts. A small
+             using error messages [4] and stack traces [7] improves LLM’s              study showed that this consistently improves the success rate,
+             bug-fixing performance.                                                   as detailed in Appendix D of the full version of this paper on
+                   Runtime Information (2.2): Runtime values and types of              arXiv [28].
+             the function’s parameters and local variables during the failing
+                                                                                                    IV. T HE FACT S ELECTION P ROBLEM
+             test execution provide an LLM with concrete data about the
+             program’s behaviour.                                                         Let an LLM be a function from a string, i.e. a prompt, to
+                   Angelic Forest (2.3): For a given program location, a               a set of strings, the responses R. We consider an arbitrary
+             variable’s angelic value [8] is a value that, if bound to the             measure m : 2R × 2C → R that scores a set of LLM responses
+             variable during the execution of a failing test, would enable the         w.r.t. some correctness criteria C that maps correct patches
+             program to pass the test. Angelic forest [9], previously applied          to a high score and incorrect patches to a low score, and a
+             for synthesis-based repair, is a specification for a program              prompt engineer E : B × 2F → Σ∗ .
+             fragment in the form of pairs of initial states and output angelic        Definition IV.1 (Fact Selection Problem). Given a set of bug-
+             values, such that if the fragment satisfies these pairs, then the         relevant facts F, a prompt engineer E, a buggy program b,
+             program passes the test.                                                  and correctness criteria for that buggy program Cb , the fact
+                Inspired by this approach, we added a variant of angelic               selection problem is to find F ⊆ F that maximises
+             forest to a prompt; this variant combines variable values at
+             the beginning of a function’s execution coupled with the                                   arg max m(LLM(E(b, F )), Cb )                      (3)
+                                                                                                             F ∈2F
+             angelic values at the end of a function’s execution, i.e. the
+             input/output requirements of the function. Since Python is                   Cb encompasses any of the standard correctness criteria such
+                                                                                                                                    ∗
+             dynamically typed, we specify both the values and types of                as a test suite or a specification, etc. F b denotes an optimal
+                                                                                                                                        ∗
+             variables. Angelic values can be computed using symbolic                  solution of Equation (3) for b; We use F b (F) to denote the
+             execution [9], [8]; however, due to the immaturity of Python              optimal F for the buggy program b over the fact set F.
+             symbolic execution engines, we were unable to execute them                                           ∗
+             on bugs in BugsInPy. Thus, we extracted angelic values from                 Similarly, we use F B (F) to denote the optimal fact set F
+             the correct versions of the programs via instrumentation.                 over all the buggy programs b ∈ B and the fact set F. This
+                   GitHub Issue (3.1): A GitHub issue, when available,                 can be defined as the solution to the equation below.
+             provides important contextual information for fixing the bug,
+                                                                                                             X
+                                                                                                    arg max      m(LLM(E(b, F )), Cb )
+             as shown by Fakhoury et al. [3].                                                             F ∈2F
+                                                                                                                  b∈B
+                To denote subsets of F, we utilise seven-width bitvectors,
+                                                                                          We aim to answer the following questions in this section:
+             where the i-th bit indicates whether the i-th fact in our
+             taxonomy (Figure 3) is included in the set. For example,                     • How does the inclusion of each fact affect the overall
+
+             0000100 corresponds to the set containing only the runtime                     effectiveness of a program repair prompt?
+             information (2.2).                                                           • Is there point beyond which adding facts to a program
+                                                                                            repair prompt degrades its performance?
+             C. Prompt Design                                                             • Can a fixed subset of facts be universally optimal up to a
+
+                We construct prompts via the prompt engineer E : B ×2F →                    tolerance of ϵ for bug resolution across various bug sets?
+               ∗
+             Σ , which builds a prompt over the alphabet Σ to repair an input          The first question examines the impact of each fact on the
+             bug using a subset of facts from F. The prompt is constructed             repair effectiveness, questioning whether every fact contributes
+             with the directive “Please fix the buggy function provided                positively to the resolution process. Section IV-A answers this
+             below and output a corrected version” along with the included             question affirmatively, showing the inherent value of each fact.
+             subset of facts. The buggy function’s code, together with its             The second question delves into the potential for diminishing
+             docstring, is provided as part of the prompt for the LLM to               returns or even detrimental effects from overloading a prompt
+             effectively fulfill this directive. Each fact is incorporated via         with too many facts, suggesting an optimal threshold for fact
+
+
+                                                                                   2578
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                                                                                                                                       ∗
+                                           GPT-3.5               Llama3-70B     an optimal selection strategy by explicitly considering F b for
+               Fact
+                                                                                each bug, and a uniform selection strategy.
+                                     Gain      Shapley     Gain     Shapley
+                                                                                   We evaluate the utility of individual facts under uniform
+               Error Info.            0.48         0.54    0.41         0.32    selection using two complementary measures: Shapley [33]
+               GitHub Issue           0.44         0.51    0.20         0.17    and a new measure we introduce and call fact gain, defined
+               Angelic Forest         0.08         0.11    0.36         0.28    in Equation (5). We report fact gain along with Shapley for
+               Failing Test           0.06         0.08    0.17         0.15    two reasons: (1) Shapley’s results are hard to interpret and (2)
+               Runtime Info.          0.03         0.05    0.08         0.07    we have the luxury of exhaustive enumeration, since our fact
+               Buggy Class           -0.03        -0.05    0.03         0.03
+                                                                                set is small. Fact gain computes the net increase in pass@1
+               Used Method S.        -0.12        -0.18    0.01         0.00
+                                                                                scores due to the addition of a specific fact f ; we defined it
+             TABLE I: We report Gain (Equation (5)) and Shapley values (scaled by adapting relative change [34] to our problem domain by
+             by 16) for uniform fact selection on BGP157P LY 1. Gain quantifies setting the reference value to fact subsets that do not contain
+             the average percentage increase in prompt repair performance from the measured fact f . Let Jf = {(b, F ) ∈ J | f ∈ F } be the
+             the fact.                                                          subset of prompts whose fact set F includes the fact f , and
+                                                                                Jf = {(b, F ) ∈ J | f ∈/ F } be those prompts that do not. Let
+             inclusion that maximises prompt efficacy. If there is no such Rf = LLM (Jf ) and Rf = LLM (Jf ). Then the gain of each
+             point, then the optimal strategy will be to include all the facts. fact is:
+             Section IV-B shows that, on our dataset, adding facts to a
+             prompt is non-monotonic. Formally, the final question asks                               pass@k(Rf ) − pass@k(Rf )
+                                                                                             A(f ) =                                         (5)
+             whether, ∀b ∈ B, the following equation holds:                                                   pass@k(Jf )
+                          ∗                       ∗
+                                                           
+               m LLM(E(b, F B )), Cb = m LLM(E(b, F b )), Cb + ϵ (4)                   A(f ) computes the change in the likelihood of generating a
+                                                                                       successful repair when the fact f can be used in a prompt.
+             This equation asks whether one can select a fact set for a                   Table I showcases the significance of each fact in APR
+             set of bugs that is as effective as a fact set tailored to each           prompts, leveraging both aggregate gain (A(f )) and Shapley
+             bug. Section IV-C answers this question by showing that                   values, as defined in Equation (5). Another interesting observa-
+             this statement does not hold. The above answers, combined,                tion from the experimental results is that the facts “Buggy Class”
+             establish the importance of the fact selection problem.                   and “Used Method” Signatures” exhibit a negative aggregate
+                                                                                       gain for GPT-3.5, indicating that their inclusion might adversely
+             A. Fact Utility                                                           affect the repair outcome on average. For Llama3-70B, these
+                A fact should only be considered for inclusion in a prompt             facts have an aggregate gain close to zero, still making them
+             if it has a potential to improve the outcome. To confirm the              the least beneficial among the considered facts. Nonetheless,
+             utility of the considered facts F, we simplify the premise by             each of these facts allows GPT-3.5 to fix 4 additional bugs
+             assuming that facts are independent and pose two questions:               that were not fixed without them. For Llama3-70B, “Buggy
+             “What is the utility of each individual fact in improving repair          Class” enables fixing 1 additional bug, while “Used Method
+             performance on our dataset if we select the most effective fact           Signatures” contributes to fixing 5 additional bugs. This shows
+             set for each bug?” and “What is the utility of each individual            the importance of fact selection.
+             fact in improving repair performance on our dataset if we select             To demonstrate the utility of facts F under optimal fact
+             a random fact set for each bug?” The first question addresses             selection, we compute the number of bugs that were fixed
+             the potential effectiveness when we precisely know which facts            exclusively when each fact was available. These exclusive fixes
+             to choose for a specific bug. This notion of utility, which we            are reported in the column “# Excl.” for both GPT-3.5 and
+             refer to as utility under optimal fact selection, is relevant when        Llama3-70B in Table II. This table highlights the unique bug-
+             we have a method to closely approximate an optimal solution               fixing contribution of each fact, showing the distinct set of
+              ∗
+             F b (F) to Equation (3), i.e. choose the most effective facts for         bugs resolved by each fact across the two models. It further
+             each bug b ∈ B. The second question explores the expected                 shows that all facts improve performance. These improvements
+             outcomes when we lack specific knowledge about which facts to             are statistically significant for both models, with no p-value
+             select, and hence make a random choice. This notion of utility,           exceeding 0.004.
+             which we call utility under uniform fact selection, is relevant              Second, we analysed each fact’s utility under optimal
+             when solving Equation (3) is either difficult or infeasible.              selection by how its inclusion in or its exclusion affects pass@k.
+                To estimate the utility of each fact, we generated prompts             We do so by simulating the scenario where specific facts are
+             containing all subsets of the considered 7 facts (the remaining           missing: If a fact f were missing, we would be forced to
+                                                                                                   ∗
+             one, the buggy function, is always present in the prompt), which          compute F b over F − {f } for each bug b ∈ B. The baseline
+             resulted in a total of 19228 prompts for BGP314, which is less            for this scenario is when all the facts are available.
+             than 314 × 27 since some facts are not available for some bugs.              Each row in the table in Table II details the pass@1 attainable
+             For each prompt, we computed 15 responses to estimate the                 by the best prompts, with and without a specific fact (denoted by
+             measures pass@1 and #fixed. This enabled us to both evaluate              f). For each bug b ∈ B, prompts are constructed using optimal
+
+
+                                                                                   2579
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                              GPT-3.5                        Llama3-70B
+               Fact f                                                                                     samples X1 , . . . , X32 and Y1 , . . . , Y64 drawn from the same
+                                          ∗                                  ∗
+                                # Excl.   F b (F − {f })    ∆      # Excl.   F b (F − {f })    ∆          distribution, E[max (X1 , . . . X32 )] < E[max (Y1 , . . . , Y64 )]
+               Error Info.        9             0.331      0.071     8           0.257        0.0493      due to the properties of the function max
+               Failing Test       7             0.375      0.027     7           0.281        0.0251
+               Angelic Forest     7             0.371      0.032     5           0.245        0.0607         From the plot, we observe that for both GPT-3.5 and Llama3-
+               Buggy Class        4             0.392      0.010     1           0.290        0.0166
+               Used Method S.     4             0.393      0.009     5           0.285        0.0208      70B, the “Max Pass@1” scores (solid lines) generally increase
+               GitHub Issue
+               Runtime Info.
+                                  3
+                                  2
+                                                0.341
+                                                0.384
+                                                           0.062
+                                                           0.019
+                                                                     6
+                                                                     8
+                                                                                 0.263
+                                                                                 0.288
+                                                                                              0.0429
+                                                                                              0.0183
+                                                                                                          with the number of facts, reaching a peak at 3 facts for GPT-
+                                                                                                          3.5 (solid blue) and 4 facts for Llama3-70B (solid orange)
+             TABLE II: # Excl. shows the bugs that could only be fixed                                    before declining. The “Avg Pass@1” scores (dotted blue line)
+             by including the specific fact under optimal fact selection for                              for GPT-3.5 show improvement with more facts, reaching a
+                                   ∗
+             BGP157P LY 1 . F b (F − {f }) shows performance of the best facts                            plateau between 2 and 5 facts, followed by a decrease. For
+             when f cannot be selected. ∆ represents the drop in performance due                          Llama3-70B, the “Avg Pass@1” scores (dotted orange line)
+             to excluding the fact from the bug’s best performing fact set.
+                                                                                                          increase up to 4 facts and then decrease. This pattern confirms
+                         ∗                                    ∗                                           the non-monotonicity in prompt performance as the number
+             fact sets F b (F) over all facts and F b (F − {f }), excluding the                           of facts increases.
+             fact f . The consistent reduction in pass@1 (denoted as ∆)
+             emphasises the value of each fact in bug fixing.
+                                                                                                              Finding 2. Prompt performance is non-monotonic with
+                To determine the statistical significance of the impact of each                               respect to the number of included facts. While adding facts
+             individual fact under optimal selection, we calculated pass@1                                    generally improves performance, there exists a threshold
+             scores for all bugs, both with and without a particular fact.                                    beyond which additional facts hinder performance.
+             These scores were then compared. the Wilcoxon signed-rank
+             test shows that the inclusion of each fact has a statistically
+             significant effect on each bug’s optimal fact set.                                           C. Non-Existence of a Universally Optimal Fact Set
+                                                                                                             A ”universally optimal fact set” in the context of automated
+                Finding 1. Under the assumption that we select the most                                   program repair is a collection of facts that, when applied,
+                effective fact set for repairing each bug, each of the                                    yields the highest effectiveness in terms of bug fixes and
+                considered facts demonstrates its utility on our dataset.                                 pass@1 scores across a wide range of projects. For defining
+                                                                                                          an universally optimal fact set, we first define the quality of a
+                                                                                                          fact set in terms of the following properties:
+                When selecting an optimal fact set for repairing each bug,
+             each of the seven considered facts proves useful on our dataset:                                • Efficiency: A fact set is efficient when it outperforms
+
+             including any of these facts in the prompt helps repair at least                                   alternative fact sets.
+             one bug exclusively and has a statistically significant positive                                • Universality: A fact set is universal when it is efficient
+
+             impact on pass@1.                                                                                  up to ϵ-tolerance, as defined in Equation (4).
+                                                                                                             • Coverage: The set of bugs a fact set can resolve.
+             B. Impact of Fact Set Size on Prompt Performance                                                We define the function Coverage : 2F → 2B where F ⊆ F
+                In this section, we investigate the concept of prompt                                     is a fact set and B is the set of all bugs in the dataset being
+             monotonicity by examining how the incremental addition of                                    considered, such that Coverage(F ) returns the set of bugs
+             facts affects prompt performance. Monotonicity, in this context,                             fixed by the fact set F .
+             refers to a consistent improvement in performance with each                                     The Coverage Ratio for a given fact set F is defined as:
+             additional fact. This implies that more information invariably                             |Coverage(F )|
+             leads to better outcomes. Conversely, non-monotonicity indi-                CR(F ) = S                                   (6)
+                                                                                                    | ∀Fi ⊆F Coverage(Fi )|
+             cates that there exists a threshold beyond which adding more
+             facts does not enhance, and may even degrade, performance. We prefer sets that maximise universality and coverage ratio.
+                Similarly to Section IV-A, we evaluate the non-monotonicity    Table III presents the best-performing fact sets for each
+             of prompts in two settings: under an optimal fact selection project, along with their project-specific and overall pass@1
+             and under a random selection. For each of them, we ag- scores for both GPT-3.5 and Llama3-70B. Notably, no single
+             gregate pass@1 scores for all bugs over sets containing a fact set achieves top performance across all projects. For
+             varying number of facts. Figure 2 presents the performance of instance, the fact set 0010101 achieves a pass@1 of 0.21
+             pass@1 for the prompts across different fact set cardinalities, on GPT-3.5 for the Sanic project, which is below the highest
+             ranging from 0 to 7. The maximum pass@1 corresponds pass@1 score of 0.26. Similarly, in the FastAPI project, the
+             to an optimal fact selection for each bug, and the average best fact set 0000101 attains a project-specific pass@1 of
+             pass@1 corresponds to a random fact selection. To ensure 0.19 on GPT-3.5, slightly exceeding its overall score of 0.18,
+             a fair comparison across different fact set cardinalities, we yet still lower than the highest score of 0.26 on the same
+             sampled 128 elements with replacement for each cardinality. model. A similar variability is observed with Llama3-70B,
+             This accounts for the difference in the cardinality of the where no common fact set appears across different repositories,
+             fact sets we are sampling. Specifically, given two sets of highlighting the unique nature of each project’s optimal fact
+
+
+                                                                                                       2580
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                           GPT-3.5                       Llama3-70B                    BGP157P LY 2. These sets fix 84 bugs, and set the upper limit
+               Project
+                              Best Fact Set    Project   All    Best Fact Set     Project    All       for universal fact selection in BGP157P LY 2. These sets were
+               luigi             0011111        0.53     0.26     1010111             0.42   0.16      not ranked high in the training data, as they were positioned
+               black             0010111        0.38     0.22     1101011             0.35   0.17
+               fastapi           0000101        0.19     0.18     0011001             0.11   0.11      at ranks 16 and 34, respectively out of 128 candidates.
+               httpie            0001111        0.50     0.25     0001000             0.50   0.12
+               pandas            0011001        0.25     0.25     0101011             0.13   0.17         The UpSet diagram [35] in Figure 4 shows the overlap
+               tornado           0011000        0.37     0.20     1001001             0.22   0.13      among the top 5 fact sets from BGP157P LY 1, as well as a
+               ansible           0010100        0.10     0.12     0011011             0.15   0.14
+               matplotlib        0001001        0.36     0.25     0101010             0.26   0.16      fact-free baseline, encoded as 0000000. The diagram reveals
+               cookiecutter      0001101        0.93     0.20     0001010             0.67   0.14      the number of bugs addressed by various intersections of these
+               tqdm              0001111        0.00     0.24     1011001             0.00   0.13
+               youtube-dl        0011001        0.08     0.25     0001110             0.06   0.14      fact sets, with the largest subset intersection resolving 41 bugs.
+               keras             0101111        0.32     0.23     1011110             0.17   0.15      The diagram shows that each fact set individuallys contribute
+               scrapy            0011111        0.45     0.26     1101110             0.36   0.15
+               sanic             0010101        0.64     0.21     0110011             0.51   0.15      to the resolution of up to 7 bugs. Cumulatively, these 6 fact
+               thefuck           0001001        0.16     0.21     0001001             0.29   0.12
+                                                                                                       sets fix a total of 107 bugs, surpassing the efficacy of the single
+             TABLE III: Comparison of project-specific best fact sets and their                        best fact set, which fixes 89 bugs. This UpSet plot helps us
+             project’s average Pass@1 scores and the total average Pass@1 scores                       answer the question of the existence of a universal fact set. If
+             across all projects in BGP157P LY 1 . The fact sets are represented                       one existed, we would expect to see a row with dots in most,
+             using their bitvector encodings. The table highlights that different                      if not all, columns, signifying that fact set’s presence in the
+             repositories have different best fact sets, indicating the importance of
+             tailored fact selection for effective bug fixing.                                         majority of intersections. No such pattern exist in this UpSet
+                                                                                                       plot, indicating that no single fact set fixes all bugs. Instead,
+                              Fact Aggregations                           #fixed                       different fact sets are effective for different bugs.
+                              Best Fact Set in BGP157P LY 1                      77
+                              Best Fact Set in BGP157P LY 2                      84
+                              All Facts                                          72                        Finding 3. The diversity in the best fact sets across differ-
+                              Bugs Fixed by the Top 5 Fact Subsets               99                        ent repositories (Table III), and the significant difference
+                              Bugs Fixed by Any Fact Subset                     119
+                                                                                                           in the bugs fixed by the top five fact sets (Figure 4), both
+             TABLE IV: The number of bugs plausibly fixed by fact subset in                                point to the absence of a universal fact set in our dataset.
+             BGP157P LY 2 using GPT-3.5.
+
+
+             set. Additionally, the highest occurrence count for any fact set D. Effect of Fact Order on Performance
+             is just 2, with five fact sets appearing twice. This distribution   The experiments conducted to this point assume a fixed fact
+             emphasizes the inconsistency in fact set effectiveness across order. We now investigate the effect of permuting the facts. Our
+             projects and suggests that a universally optimal fact set is prompt template constrains the permutations we consider. We
+             unlikely, given the diverse nature of repositories and bugs.      add the facts ”Buggy class” (1.1) and ”Used method signatures”
+                Table IV assesses the effectiveness of various approaches (1.2) to our prompt next to each other in the order that they
+             of fact selection in producing plausible fixes on GPT-3.5. The appear in source code, so we do not separately permute them.
+             analysis underscores the Best Fact Set, identified as 1111001, Similarly, the ”Failing Tests” (1.3) fact immediately precedes
+             which was selected for its highest coverage in terms of the the ”Error Information” (2.1) fact it generates in the template.
+             number of bugs it could fix according to the training data, Thus, we only permute 5 facts.
+             compared against broader approaches such as the Top 5 Union         This experiment was conducted on BGP32, comprising 32
+             and Total Union. The Top 5 Union, which aggregates the bugs. For each of the 120 permutations, we created prompts
+             bugs fixed by the top five best performing fact sets, generates for each bug, resulting in a total of 120 × 32 prompts. We
+             fixes that pass tests for 99 bugs, while the Total Union, computed the pass@1 for each prompt, and then averaged
+             encompassing bugs fixed by all fact subsets, resolves 119 these scores across the 32 bugs for each permutation. The
+             bugs. These unions significantly surpass the Best Fact Set in resulting violet histogram in Figure 5 represents the mean
+             bug resolution capability, fixing many additional bugs (22 and pass@1 performance across these permutations.
+             42 respectively). This shows that the highest coverage ratio of     We conducted a similar analysis for different fact subsets,
+             the fact set is CR(1111001) = 0.65 that it fixes 65% of the also shown in Figure 5. With 7 facts, there are 128×32 prompts.
+             bugs while missing 35% of the bugs fixable by other sets.         For each subset, we calculated the mean pass@1 across the 32
+                These results highlight that the Best Fact Set does not have bugs. The yellow histogram represents the distribution of the
+             a high coverage ratio, especially compared to the theoretical mean performance over these fact subsets. Comparing the two
+             maximum of an optimal fact selection which has a coverage histograms reveals that the variability due to fact order (violet)
+             ratio of 1. The coverage ratio’s delineation as monotonic — is relatively narrow, ranging from 0.24 to 0.31. In contrast,
+             in that the fact set with the highest number of bugs fixed is the impact of different fact subsets (yellow) is significantly
+             deemed the best — indicates that within this dataset, no fact broader, ranging from 0.07 to 0.34. This demonstrates that the
+             set achieves a high coverage ratio. Table IV further shows selection of which facts to include (fact subsets) has a much
+             the limitations inherent in static fact selection strategies, as greater influence on prompt performance than the specific order
+             demonstrated by the performance of the Best Fact Sets w.r.t. in which these facts are presented.
+
+
+                                                                                                    2581
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+             Fig. 4: This upset diagram compares the 5 fact sets that fix the most bugs in BGP157P LY 1 with using no facts (encoded as 0000000)
+             including the buggy function and chain-of-thought instructions. The fact sets shown on the left collectively fix 107 bugs, 18 more than the
+             single best fact set, which fixes 89 bugs. The diagram is constructed by generating prompts from each fact set, sending them to GPT-3.5 for
+             n = 15 responses, and identifying the set of bugs with at least one passing response.
+
+                                                                                       available for every bug, missing facts are labeled as “None”.
+                                                                                       This reduces the number of unique prompts to 9496.
+                                                                                          We manually craft a set of features f (j) based on domain
+                                                                                       knowledge and the characteristics of the facts. The feature
+                                                                                       function f : J → Rm maps the input job j ∈ J to an m-
+                                                                                       dimensional feature space.
+                                                                                          The goal is to train a machine learning model M capable
+                                                                                       of using the feature vector f (j) to accurately predict the
+                                                                                       probability of the success (pass@k) for each fact set. Using
+                                                                                       M, we can select the optimal fact set by choosing the one that
+                                                                                       yields the highest predicted probability of success according
+             Fig. 5: Distribution of mean pass@k evaluated on BGP32. The
+             violet histogram reports the mean performance under permutation;          to the model’s output.
+             the yellow histogram reports mean by subset. The wider range in theA. Feature Selection
+             yellow distribution suggests that fact subsets have a stronger impact
+             on performance than fact order.                                       To train a machine learning model to meet these objectives,
+                                                                                we define the feature vector, f (x) = [b, rep id , ℓ, c]T , where
+                                                                                                                                                  n
+                                                                                   • Bitvector (b): encodes the fact set F , where b ∈ {0, 1} .
+                Finding 4. Selecting facts has more impact on perfor-              • Repository ID (rep id): uniquely identifies the source
+                mance than ordering them.                                             repository of the bug b.
+                                                                                   • Prompt Length (ℓ): the length of the prompt in either
+                                                                                      characters or tokens, where ℓ ∈ N0 . Cross-validation
+                         V. S ELECTING FACTS WITH M ANIPLE                            determines whether characters or tokens are chosen.
+                                                                                   • Cyclomatic Complexity (c): a measure of code complexity
+                Universal fact selection, as demonstrated in Section IV-C,
+                                                                                      that quantifies the number of linearly independent paths
+             does not achieve consistent performance across all the bugs in
+                                                                                      through a program’s source code.
+             our dataset. Thus, to automate creating bug-tailored prompts,
+             we introduce M ANIPLE, a random forest trained to select              This choice of features was guided by the investigation
+             relevant facts for inclusion in the prompts.                       conducted    on BGP157P LY 1. Specifically, the including Repos-
+                We focus on the task of predicting the success or failure of    itory  ID   (rep  id ) is supported by the findings in Table III,
+             test executions based on vectors representing features extracted   which   illustrate significant variability in the optimal bitvectors
+             from both the prompt and the code.                                 for  fact  selection   across different projects. This variability
+                                                                                underscores the influence of the repository context on successful
+                Our training dataset D is constructed from the BGP157P LY 1.
+                                                                                repair. Additionally, Prompt Length (ℓ) was identified as a
+             It consists of pairs (j, y), where:
+                                                                                crucial factor, displaying a Spearman correlation of −0.18
+                • j = (b, F ) ∈ J represents a job, which is a tuple consisting with the pass@1 for repair success, accompanied by a highly
+                   of a bug b along with and a fact set F ⊆ F                   significant p-value of p < 10−129 . This correlation holds for
+                • y ∈ [0, 1] represents the probability of successfully fixing  both token and character lengths of prompts, indicating that
+                   the bug b in a single trial, given the fact set F ⊆ F. This an increase in prompt length is associated with a decrease in
+                   probability is computed using pass@1.                        LLM performance — a conclusion that is further supported
+             D consists of 157 bugs, each with 128 fact combinations, by the non-monotonicity of adding facts to prompts, as noted
+             totaling 20, 096 samples. However, since not all facts are in Figure 2, as more facts increase prompt length.
+
+
+                                                                                   2582
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                                                                                     Tool         #fixed   Correct   % Correct
+                Cyclomatic Complexity emerged as another pivotal feature,                            T0               44         7        16%
+             showing a negative Spearman correlation of −0.1 with the                                T1               37         5        14%
+             pass@1, p-value of 10−42 . Unlike prompt length, Cyclomatic                             T2               63       18         29%
+                                                                                                     T3               66       31         47%
+             complexity does not depend on the fact set chosen (recall                               M ANIPLE         88       37         42%
+             that the buggy code itself is necessarily always included) but
+             remains instrumental in predicting the pass@1 for a bug, mainly           TABLE V: Comparison of tool performance on the BGP157P LY 2
+                                                                                       test set, focusing on bugs fixed with GPT-3.5. #fixed represents the
+             for scenarios where no prompt generates a successful fix.                 number of bugs with test-passing patches, and Correct indicates
+                                                                                       bugs fixed with patches identical to the developer’s. We observe that
+             B. M ANIPLE: A Random Forest for Fact Set Selection                       M ANIPLE outperforms all the fact set combinations used. This shows
+                Leveraging these observations, we present M ANIPLE, a                  that bug-tailored fact selection can improve the repair success.
+             random forest model for the fact selection task and evaluate it
+             in both regression and classification settings. As a regressor, the baselines’ w.r.t. facts, not their performance given approach-
+             the model directly predicts the pass@1 for each job. In the specific optimal prompts, whose construction would require
+             classification task, we categorise the scale (i.e., [0, 1]) based on close cooperation with the authors of each baseline.
+             the number of fact sets considered by the model. Our analysis           We evaluated tool efficacy according to two criteria, based
+             reveals that classification performs better. This finding can be     on  n = 15 responses (Section III): (1) number of plausible fixes
+             attributed to the noise and significant variance present in our      (i.e. eq. (2)), and (2) the number of correct fixes, determined by
+             data, as detailed in Appendix A of the full version of this paper    the  first plausible patch generated by the LLM and subsequently
+             on arXiv [28]. The classification method proved more robust          subjected     to manual evaluation.
+             to variance in pass@1 compared to regression. Additionally,             For   assessing      patch correctness, we employ an interrater
+             ordering and ranking the fact sets did not yield comparable          agreement       scale,   where “3” indicates patches syntactically
+             performance. This is likely due to the variance in ranks, which      equivalent     to  the  developer’s   patch, allowing for minor refac-
+             directly stems from the variance in pass@1.                          toring   or  restructuring,   “2” —   patches that achieve the intended
+                Additionally, we trained M ANIPLE only on the top five            outcome      through    an  alternate  method, “1” — diverging from
+             highest-performing fact sets. These sets were identified using       the   developer’s      patch,  rendering    correctness indeterminable,
+             bootstrap aggregation, where we evaluated the performance of         and    “0”   —    incorrect   patches    (irrelevant,  incomplete, intro-
+             each fact set across multiple bootstrap samples drawn from           ducing     regressions).    Each  patch   undergoes    evaluation by two
+             our dataset. By aggregating the outcomes, we identified the          independent      raters.  In cases of  scoring   discrepancies,  the raters
+             best performing fact sets. We optimised the model’s hyperpa-         discuss     them.    If the  discrepancy     is not  resolved,   the more
+             rameters through a comprehensive grid search, evaluating the         conservative       (lower)   score  is  recorded,   ensuring   a  rigorous
+             performance of each combination of parameters. To ensure the standard of correctness. Following this scoring system, patches
+             model’s generalisability and to prevent overfitting, we employed with the scores of 2 and 3 are labelled as ”correct”, and with
+             k-fold cross-validation with k = 5.                                  the scores of 1 and 0 are labelled as ”incorrect.”
+                                                                                     The analysis in Table V underscores the potential of bug-
+             VI. C OMPARING M ANIPLE WITH SOTA LLM-BASED APR tailored prompt selection for boosting automated program repair
+                                                                                  efficacy. Previous LLM-based zero-shot non-conversational
+                We compared M ANIPLE with existing zero-shot non-
+                                                                                  approaches, represented by T1 , T2 and T3 , that always use
+             conversational LLM-based APR methods that incorporate
+                                                                                  the same set of facts achieve a maximum of 66 plausibly
+             various types of information into prompts. Our baselines include
+                                                                                  fixed patches on BGP157P LY 2. In contrast, M ANIPLE, which
+             approaches whose prompts include the following facts:
+                                                                                  leverages bug-tailored fact selection, identifies a significantly
+                • Buggy Function only, denoted as T0                              higher number of plausible patches (88). Furthermore, M A -
+                • Buggy Function, Buggy Class and Used Method Signa-              NIPLE boasts 6 additional correct fixes compared to the best
+                   tures, denoted as T1 , an approach similar to the technique of these approaches. These findings suggest that tailoring the
+                   by Chen et al. [6].                                            fact set to the specific context of each bug has the potential to
+                • Buggy Function combined with GitHub Issue, denoted as           improve the upper bound for repair success.
+                   T2 , an approach similar to the technique by Fakhoury [3].        Surprisingly, T1 , which utilises function code alongside
+                • Buggy Function alongside Error Information, denoted             scope information (including class information and invoked
+                   as T3 , an approach similar to the technique by functions), fixes fewer bugs compared to using function code
+                   Keller et al. [7].                                             alone. However, this does not imply that scope and class
+                For a fair comparison, we supply the same prompts, information are useless. T1 still identifies 5 plausible patches,
+             built from these facts, to M ANIPLE and all the baselines. 2 of which are correct, that would not be found using just the
+             Unsurprisingly, these prompts differ structurally from the function code as the only fact.
+             prompts on which the baselines were run. For example, our
+             prompt incorporates our chain-of-thought instructions defined                              VII. T HREATS TO VALIDITY
+             in Appendix C of the full version of this paper on arXiv [28].          In assessing LLMs, we recognise the challenge of potential
+             Our focus here is on comparing M ANIPLE’s performance to data leakage, as some training datasets are not publicly avail-
+
+
+                                                                                   2583
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+             able. This limits our ability to know exactly what information     the entire trace. Similarly, Fakhoury et al. [3] investigates
+             the model has encountered. However, our primary focus is           how combining issue descriptions with bug report titles and
+             on the impact of different facts on repair performance, rather     descriptions enhances program repair efforts. Following recent
+             than the performance itself. For instance, if a prompt with an     research [1], we refer to such pieces of information as facts.
+             “angelic forest” leads to a bug fix while a prompt without it does Our work uses individual facts from previous work to formulate
+             not, this highlights the significant role of “angelic forest” in   and motivate the fact selection problem.
+             enhancing bug-fixing performance. This remains true regardless           Program Repair for Python: QuixBugs [47] is a bench-
+             of the bug’s presence in the training data. Thus, our findings     mark consisting of small programs in Java, and Python. They
+             are robust even with possible data leakage, and using the same     are not reflective of real software projects. Bugswarm [48],
+             model across our baselines partially mitigates this issue.         was constructed by automatically mining failing CI builds, and
+                We extracted our fact set from the APR literature. We           thus contains issues outside of the scope of our study, such
+             acknowledge that it is provisional and likely to change as         as configuration issues. BugsInPy [10] manually curates 501
+             research into LLM-assisted APR continues.                          bugs from 17 popular Python Projects. We selected 314 bugs
+                Our dataset is a subset of BugsInPy, a benchmark published      from this benchmark that require modifications within a single
+             at FSE’20 [10]. BugsInPy is a curated dataset built to best        function, and which we managed to reproduce. Rete [40], a
+             practice from GitHub repos with more than 10k stars that have      program repair tool that leverages contextual information, was
+             at least one test case in the fixed commit that distinguishes      evaluated on both Python and C, using BugsInPy as its Python
+             the buggy version from its fix. Its representativeness has not     benchmark. We did not compare M ANIPLE with Rete, because
+             been challenged and, from first principles, we can think of        it relied on the line-granular perfect fault localisation (PFL),
+             no reason that our filtering (Section III-A) would introduce       while this study uses function granular PFL. PyTER [49] is a
+             systematic bias.                                                   program repair technique that focuses on Python TypeErrors;
+                                                                                it was evaluated on a custom benchmark for type errors.
+                                  VIII. R ELATED W ORK
+                                                                                      Prompt Engineering: Recent advancements in prompt
+                Traditional APR uses search, e.g. GenProg [36], or program engineering have significantly influenced the effectiveness
+             synthesis such as SemFix [37], Angelix [9], SE-ESOC [38], of models like ChatGPT. Notably, the tree-of-thoughts ap-
+             and Trident [39]. This study includes Angelic forests [9] in its proach [50] and the zero-shot-CoT approach [51] have emerged
+             fact set, demonstrating their utility in LLM-based APR.            as pivotal strategies. Frameworks like ReACT [52] use LLMs
+                CoCoNut [21] utilizes surrounding contextual information to generate interleave reasoning and task-specific actions. Self
+             to train an ensemble of neural machine translation models. Consistency [53] traverses multiple diverse reasoning paths
+             Rete [40] employs Conditional Def-Use chains as context for through few shot CoT and uses the generations to select
+             CodeBert [41]. CapGen [42] utilises AST node information the most consistent answer. Automatic Prompt Engineer [54]
+             to estimate the likelihood of patches. DLFix [43] treats the frames prompt constructs as a natural language synthesis task. It
+             program repair task as a code transformation task, learning to is orthogonal to our approach, as our task is to select ideal facts
+             transform by additionally incorporating the surrounding context while Automatic Prompt Engineer seeks to refine the prompt
+             of the bug. The context used in this work includes the class and into which the selected facts can be plugged. Repository Level
+             scope information of the buggy program, which is broader than Prompt Generation (RLPG) [55] is a general framework for
+             the contexts used above. FitRepair [2] constructs prompts using retrieving relevant repository context and constructing prompts,
+             identifier extracted from lines that look similar to the buggy instantiated for code completion. RLPG uses a classifier to
+             line. Although, our work does not directly provide identifiers choose the best one. In contrast, our fact selection problem
+             statically, as python is dynamic, we provide dynamic values aims to find an optimal combination of facts to repair a given
+             of the variables during the test run.                              bug. In addition to repository context, our work incorporates
+                   LLM-based Program Repair: APR leveraging LLMs dynamic and information external to the code repository.
+             is making strides. InferFix [44] uses few-shot prompting
+             to repair issues from Infer. ChatRepair [4] uses interactive
+             prompting constructed from failing test names and their                                   IX. C ONCLUSION
+             failing assertions. Our approach focuses on the zero-shot,
+             non-conversational setting, but can be potentially integrated         In this paper, we explore the construction of effective prompts
+             with InferFix and ChatRepair. Various approaches focused on for LLM-based APR, leveraging facts extracted from the
+             program engineering for APR, e.g. incorporating bug-related buggy program and external sources. Through a systematic
+             information within the prompts [44], [45], [46], as the quality of investigation, we incorporate seven bug-relevant facts into the
+             fixes could be enhanced by integrating contextual information, prompts, notably including angelic values, a factor previously
+             such as the bug’s local context [5] and details about relevant not considered in this domain. Furthermore, we define the fact
+             identifiers [2], into the prompt. Xia et al. [2] utilize relevant selection problem and demonstrate that a universally optimal
+             identifiers to augment the fix rate of prompts. Keller et al. [7] set of facts for addressing various bugs does not exist. Building
+             reveals that, for debugging tasks, focusing on the specific line on this insight, we devise a bug-tailored fact selection strategy
+             indicated by a stack trace is more effective than providing enhancing the effectiveness of APR.
+
+
+                                                                                   2584
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+                                           R EFERENCES                                          [18] J. Liu, D. Shen, Y. Zhang, B. Dolan, L. Carin, and W. Chen, “What makes
+                                                                                                     good in-context examples for gpt-3?” arXiv preprint arXiv:2101.06804,
+                                                                                                     2021.
+              [1] T. Ahmed, K. S. Pai, P. Devanbu, and E. T. Barr, “Improving few-              [19] K. Liu, A. Koyuncu, T. F. Bissyandé, D. Kim, J. Klein, and Y. Le Traon,
+                  shot prompts with relevant static analysis products,” arXiv preprint               “You cannot fix what you cannot find! an investigation of fault localization
+                  arXiv:2304.06815, 2023.                                                            bias in benchmarking automated program repair systems,” in 2019 12th
+              [2] C. S. Xia, Y. Ding, and L. Zhang, “Revisiting the plastic surgery                  IEEE conference on software testing, validation and verification (ICST).
+                  hypothesis via large language models,” arXiv preprint arXiv:2303.10494,            IEEE, 2019, pp. 102–113.
+                  2023.                                                                         [20] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “On the accuracy of
+              [3] S. Fakhoury, S. Chakraborty, M. Musuvathi, and S. K. Lahiri, “Towards              spectrum-based fault localization,” in Testing: Academic and industrial
+                  generating functionally correct code edits from natural language issue             conference practice and research techniques-MUTATION (TAICPART-
+                  descriptions,” arXiv preprint arXiv:2304.03816, 2023.                              MUTATION 2007). IEEE, 2007, pp. 89–98.
+              [4] C. S. Xia and L. Zhang, “Keep the conversation going: Fixing 162 out of       [21] T. Lutellier, H. V. Pham, L. Pang, Y. Li, M. Wei, and L. Tan, “Coconut:
+                  337 bugs for $0.42 each using chatgpt,” arXiv preprint arXiv:2304.00385,           combining context-aware neural translation models using ensemble for
+                  2023.                                                                              program repair,” in Proceedings of the 29th ACM SIGSOFT international
+              [5] J. A. Prenner and R. Robbes, “Out of context: How important is local               symposium on software testing and analysis, 2020, pp. 101–114.
+                  context in neural program repair?” in 2024 IEEE/ACM 46th International        [22] Z. Chen, S. Kommrusch, M. Tufano, L.-N. Pouchet, D. Poshyvanyk,
+                  Conference on Software Engineering (ICSE). IEEE, 2024.                             and M. Monperrus, “Sequencer: Sequence-to-sequence learning for end-
+              [6] Y. Chen, J. Wu, X. Ling, C. Li, Z. Rui, T. Luo, and Y. Wu, “When large             to-end program repair,” IEEE Transactions on Software Engineering,
+                  language models confront repository-level automatic program repair:                vol. 47, no. 9, pp. 1943–1959, 2019.
+                  How well they done?” arXiv preprint arXiv:2403.00448, 2024.                   [23] R. Just, D. Jalali, and M. D. Ernst, “Defects4j: A database of existing
+              [7] J. Keller and J. Nowakowski, “Ai-powered patching: the future of                   faults to enable controlled testing studies for java programs,” in
+                  automated vulnerability fixes,” Tech. Rep., 2024.                                  Proceedings of the 2014 international symposium on software testing
+              [8] S. Chandra, E. Torlak, S. Barman, and R. Bodik, “Angelic debugging,”               and analysis, 2014, pp. 437–440.
+                  in Proceedings of the 33rd International Conference on Software               [24] “Pandas, python data analysis library,” https://pandas.pydata.org/, 2023,
+                  Engineering, 2011, pp. 121–130.                                                    accessed: 2024-03-21.
+              [9] S. Mechtaev, J. Yi, and A. Roychoudhury, “Angelix: Scalable multiline         [25] “Matplotlib: Visualization with python,” https://matplotlib.org/, 2023,
+                  program patch synthesis via symbolic analysis,” in Proceedings of the              accessed: 2024-03-21.
+                  38th international conference on software engineering, 2016, pp. 691–         [26] S. Ouyang, J. M. Zhang, M. Harman, and M. Wang, “Llm is like a box
+                  701.                                                                               of chocolates: the non-determinism of chatgpt in code generation,” arXiv
+             [10] R. Widyasari, S. Q. Sim, C. Lok, H. Qi, J. Phan, Q. Tay, C. Tan, F. Wee,           preprint arXiv:2308.02828, 2023.
+                  J. E. Tan, Y. Yieh et al., “Bugsinpy: a database of existing bugs in          [27] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. d. O. Pinto, J. Kaplan,
+                  python programs to enable controlled testing and debugging studies,”               H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large
+                  in Proceedings of the 28th ACM joint meeting on european software                  language models trained on code,” arXiv preprint arXiv:2107.03374,
+                  engineering conference and symposium on the foundations of software                2021.
+                  engineering, 2020, pp. 1556–1560.                                             [28] N. Parasaram, H. Yan, B. Yang, Z. Flahy, A. Qudsi, D. Ziaber, E. Barr,
+             [11] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and         and S. Mechtaev, “The fact selection problem in llm-based program
+                  P. Liang, “Lost in the middle: How language models use long contexts,”             repair,” arXiv preprint arXiv:2404.05520, 2024.
+                  arXiv preprint arXiv:2307.03172, 2023.                                        [29] Z. Qi, F. Long, S. Achour, and M. Rinard, “An analysis of patch
+             [12] F. Shi, X. Chen, K. Misra, N. Scales, D. Dohan, E. H. Chi, N. Schärli, and        plausibility and correctness for generate-and-validate patch generation
+                  D. Zhou, “Large language models can be easily distracted by irrelevant             systems,” in Proceedings of the 2015 International Symposium on
+                  context,” in International Conference on Machine Learning. PMLR,                   Software Testing and Analysis, 2015, pp. 24–36.
+                  2023, pp. 31 210–31 227.                                                      [30] E. K. Smith, E. T. Barr, C. Le Goues, and Y. Brun, “Is the cure worse
+             [13] “The pandas:128 bug from bugsinpy,” https://github.com/pandas-                     than the disease? overfitting in automated program repair,” in Proceedings
+                  dev/pandas/commit/112e6b8d054f9adc1303138533ed6506975f94db,                        of the 2015 10th Joint Meeting on Foundations of Software Engineering,
+                  2023, accessed: 2024-03-21.                                                        2015, pp. 532–543.
+             [14] J. Schulman, B. Zoph, C. Kim, J. Hilton, J. Menick, J. Weng, a. Felipe        [31] “Openai api,” https://openai.com/blog/openai-api, 2024, accessed: 2024-
+                  Juan Uribe, L. Fedus, L. Metz, M. Pokorny, R. G. Lopes, S. Zhao,                   03-21.
+                  A. Vijayvergiya, E. Sigler, A. Perelman, C. Voss, M. Heaton, J. Parish,       [32] “Deepinfra api,” https://deepinfra.com/, 2024, accessed: 2024-07-21.
+                  D. Cummings, R. Nayak, V. Balcom, D. Schnurr, T. Kaftan, C. Hallacy,          [33] E. Winter, “The shapley value,” Handbook of game theory with economic
+                  N. Turley, N. Deutsch, V. Goel, J. Ward, A. Konstantinidis, W. Zaremba,            applications, vol. 3, pp. 2025–2054, 2002.
+                  L. Ouyang, L. Bogdonoff, J. Gross, D. Medina, S. Yoo, T. Lee,                 [34] “Relative change,” https://en.wikipedia.org/wiki/Relative change, 2023,
+                  R. Lowe, D. Mossing, J. Huizinga, R. Jiang, C. Wainwright, D. Almeida,             accessed: 2024-03-21.
+                  S. Lin, M. Zhang, K. Xiao, K. Slama, S. Bills, A. Gray, J. Leike,             [35] A. Lex, N. Gehlenborg, H. Strobelt, R. Vuillemot, and H. Pfister, “Upset:
+                  J. Pachocki, P. Tillet, S. Jain, G. Brockman, N. Ryder, A. Paino,                  visualization of intersecting sets,” IEEE transactions on visualization
+                  Q. Yuan, C. Winter, B. Wang, M. Bavarian, I. Babuschkin, S. Sidor,                 and computer graphics, vol. 20, no. 12, pp. 1983–1992, 2014.
+                  I. Kanitscheider, M. Pavlov, M. Plappert, N. Tezak, H. Jun, W. Zhuk,          [36] C. Le Goues, T. Nguyen, S. Forrest, and W. Weimer, “Genprog: A generic
+                  V. Pong, L. Kaiser, J. Tworek, A. Carr, L. Weng, S. Agarwal, K. Cobbe,             method for automatic software repair,” Ieee transactions on software
+                  V. Kosaraju, A. Power, S. Polu, J. Han, R. Puri, S. Jain, B. Chess,                engineering, vol. 38, no. 1, pp. 54–72, 2011.
+                  C. Gibson, O. Boiko, E. Parparita, A. Tootoonchian, K. Kosic, and             [37] H. D. T. Nguyen, D. Qi, A. Roychoudhury, and S. Chandra, “Semfix:
+                  C. Hesse, “Introducing chatgpt,” OpenAI blog, Nov 2022. [Online].                  Program repair via semantic analysis,” in 2013 35th International
+                  Available: https://openai.com/blog/chatgpt                                         Conference on Software Engineering (ICSE). IEEE, 2013, pp. 772–781.
+             [15] J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V. Le,           [38] S. Mechtaev, A. Griggio, A. Cimatti, and A. Roychoudhury, “Symbolic
+                  D. Zhou et al., “Chain-of-thought prompting elicits reasoning in large             execution with existential second-order constraints,” in Proceedings of
+                  language models,” Advances in Neural Information Processing Systems,               the 2018 26th ACM Joint Meeting on European Software Engineering
+                  vol. 35, pp. 24 824–24 837, 2022.                                                  Conference and Symposium on the Foundations of Software Engineering,
+             [16] L. Weng, “Prompt engineering,” lilianweng.github.io, Mar                           2018, pp. 389–399.
+                  2023.      [Online].     Available:     https://lilianweng.github.io/posts/   [39] N. Parasaram, E. T. Barr, and S. Mechtaev, “Trident: Controlling side
+                  2023-03-15-prompt-engineering/                                                     effects in automated program repair,” IEEE Transactions on Software
+             [17] T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal,                Engineering, vol. 48, no. 12, pp. 4717–4732, 2021.
+                  A. Neelakantan, P. Shyam, G. Sastry, A. Askell et al., “Language models       [40] ——, “Rete: Learning namespace representation for program repair,” in
+                  are few-shot learners,” Advances in neural information processing systems,         2023 IEEE/ACM 45th International Conference on Software Engineering
+                  vol. 33, pp. 1877–1901, 2020.                                                      (ICSE). IEEE, 2023, pp. 1264–1276.
+
+
+
+                                                                                           2585
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+             [41] Z. Feng, D. Guo, D. Tang, N. Duan, X. Feng, M. Gong,
+                  L. Shou, B. Qin, T. Liu, D. Jiang, and M. Zhou, “CodeBERT:
+                  A pre-trained model for programming and natural languages,” in
+                  Findings of the Association for Computational Linguistics: EMNLP
+                  2020, T. Cohn, Y. He, and Y. Liu, Eds. Online: Association
+                  for Computational Linguistics, Nov. 2020, pp. 1536–1547. [Online].
+                  Available: https://aclanthology.org/2020.findings-emnlp.139
+             [42] M. Wen, J. Chen, R. Wu, D. Hao, and S.-C. Cheung, “Context-aware
+                  patch generation for better automated program repair,” in Proceedings
+                  of the 40th international conference on software engineering, 2018, pp.
+                  1–11.
+             [43] Y. Li, S. Wang, and T. N. Nguyen, “Dlfix: Context-based code
+                  transformation learning for automated program repair,” in Proceedings of
+                  the ACM/IEEE 42nd International Conference on Software Engineering,
+                  2020, pp. 602–614.
+             [44] M. Jin, S. Shahriar, M. Tufano, X. Shi, S. Lu, N. Sundaresan, and
+                  A. Svyatkovskiy, “Inferfix: End-to-end program repair with llms,” arXiv
+                  preprint arXiv:2303.07263, 2023.
+             [45] C. S. Xia, Y. Wei, and L. Zhang, “Practical program repair in the era
+                  of large pre-trained language models,” arXiv preprint arXiv:2210.14179,
+                  2022.
+             [46] N. Jiang, K. Liu, T. Lutellier, and L. Tan, “Impact of code language
+                  models on automated program repair,” arXiv preprint arXiv:2302.05020,
+                  2023.
+             [47] D. Lin, J. Koppel, A. Chen, and A. Solar-Lezama, “Quixbugs: A multi-
+                  lingual program repair benchmark set based on the quixey challenge,”
+                  in Proceedings Companion of the 2017 ACM SIGPLAN international
+                  conference on systems, programming, languages, and applications:
+                  software for humanity, 2017, pp. 55–56.
+             [48] D. A. Tomassi, N. Dmeiri, Y. Wang, A. Bhowmick, Y.-C. Liu, P. T.
+                  Devanbu, B. Vasilescu, and C. Rubio-González, “Bugswarm: Mining and
+                  continuously growing a dataset of reproducible failures and fixes,” in
+                  2019 IEEE/ACM 41st International Conference on Software Engineering
+                  (ICSE). IEEE, 2019, pp. 339–349.
+             [49] W. Oh and H. Oh, “Pyter: effective program repair for python type errors,”
+                  in Proceedings of the 30th ACM Joint European Software Engineering
+                  Conference and Symposium on the Foundations of Software Engineering,
+                  2022, pp. 922–934.
+             [50] S. Yao, D. Yu, J. Zhao, I. Shafran, T. L. Griffiths, Y. Cao, and
+                  K. Narasimhan, “Tree of thoughts: Deliberate problem solving with
+                  large language models,” arXiv preprint arXiv:2305.10601, 2023.
+             [51] T. Kojima, S. S. Gu, M. Reid, Y. Matsuo, and Y. Iwasawa, “Large
+                  language models are zero-shot reasoners,” Advances in neural information
+                  processing systems, vol. 35, pp. 22 199–22 213, 2022.
+             [52] S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao,
+                  “React: Synergizing reasoning and acting in language models,” arXiv
+                  preprint arXiv:2210.03629, 2022.
+             [53] X. Wang, J. Wei, D. Schuurmans, Q. Le, E. Chi, S. Narang, A. Chowdhery,
+                  and D. Zhou, “Self-consistency improves chain of thought reasoning in
+                  language models,” arXiv preprint arXiv:2203.11171, 2022.
+             [54] Y. Zhou, A. I. Muresanu, Z. Han, K. Paster, S. Pitis, H. Chan, and
+                  J. Ba, “Large language models are human-level prompt engineers,” arXiv
+                  preprint arXiv:2211.01910, 2022.
+             [55] D. Shrivastava, H. Larochelle, and D. Tarlow, “Repository-level prompt
+                  generation for large language models of code,” in International Confer-
+                  ence on Machine Learning. PMLR, 2023, pp. 31 693–31 715.
+
+
+
+
+                                                                                          2586
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:32:14 UTC from IEEE Xplore. Restriction
+

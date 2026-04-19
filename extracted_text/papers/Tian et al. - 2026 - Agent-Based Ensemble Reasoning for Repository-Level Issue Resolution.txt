@@ -1,0 +1,952 @@
+     Agent-Based Ensemble Reasoning for Repository-Level Issue
+                           Resolution
+                                    Zhao Tian                                                                    Pengfei Gao
+          School of Computer Software, Tianjin University                                                       ByteDance
+                          Tianjin, China                                                                      Beijing, China
+                       tianzhao@tju.edu.cn                                                             gaopengfei.se@bytedance.com
+
+                                  Junjie Chen∗                                                                   Chao Peng∗
+          School of Computer Software, Tianjin University                                                      ByteDance
+                          Tianjin, China                                                                      Beijing, China
+                      junjiechen@tju.edu.cn                                                             pengchao.x@bytedance.com
+
+Abstract                                                                                ACM Reference Format:
+Software issue resolution is a critical challenge in software engi-                     Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng. 2026. Agent-Based En-
+                                                                                        semble Reasoning for Repository-Level Issue Resolution. In 2026 IEEE/ACM
+neering and has garnered increasing attention in recent years. With
+                                                                                        48th International Conference on Software Engineering (ICSE ’26), April 12–
+the rapid advancement of large language models (LLMs), substantial                      18, 2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 13 pages. https:
+progress has been made in addressing real-world software engineer-                      //doi.org/10.1145/3744916.3787761
+ing tasks. Recent studies have introduced ensemble reasoning tech-
+niques to enhance the performance of LLM-based issue resolution.
+However, existing prompting-based methods still face limitations                        1    Introduction
+in effectively exploring large ensemble spaces and lack the capacity
+                                                                                        Software issue resolution refers to the automated handling of newly
+for repository-level understanding, both of which constrain their
+                                                                                        reported bugs or feature requests during software development,
+overall effectiveness. In this paper, we propose EnAgent, the first
+                                                                                        aiming to ensure correct and reliable system behavior [19, 23, 27].
+agent-based ensemble reasoning approach for repository-level is-
+                                                                                        In recent years, this task has garnered growing interest from both
+sue resolution. EnAgent formulates our goal as an optimal solution
+                                                                                        academia and industry, driven by its potential to reduce devel-
+search problem and addresses two key challenges, i.e., large ensem-
+                                                                                        oper burden and significantly enhance productivity [58, 64]. Large
+ble spaces and repository-level understanding, through modular
+                                                                                        language models (LLMs) have shown remarkable capabilities in
+agents for generation, pruning, and selection. We conduct extensive
+                                                                                        function-level code tasks such as code generation [49, 50] and au-
+experiments using three leading LLMs on the widely-adopted SWE-
+                                                                                        tomated program repair [5, 20]. Despite this progress, LLMs con-
+bench benchmark, comparing EnAgent against four state-of-the-art
+                                                                                        tinue to face major challenges in resolving complex repository-level
+ensemble reasoning techniques. Experimental results demonstrate
+                                                                                        software issues. For example, GPT-4o achieves a resolution rate
+that EnAgent consistently achieves superior performance, with
+                                                                                        of 92.70% on the function-level HumanEval benchmark [33], but
+an average improvement of 10.22% over all baselines in terms of
+                                                                                        only 11.99% on the repository-level SWE-bench benchmark [58].
+Pass@1. EnAgent has been integrated into Trae Agent, driving it
+                                                                                        This performance gap underscores the difficulty of real-world issue
+to achieve first place on the SWE-bench Verified leaderboard as of
+                                                                                        resolution, which often requires a global understanding of large
+January 2026, with a notable Pass@1 score of 78.80%.
+                                                                                        codebases, cross-file reasoning, and the detection of subtle, multi-
+                                                                                        component bugs [43, 57]. These challenges limit the practical adop-
+CCS Concepts                                                                            tion of LLM-based techniques in real-world software engineering
+• Software and its engineering → Automatic programming;                                 and pose a risk to software quality if unresolved. Bridging this gap
+• Computing methodologies → Natural language processing;                                remains a critical research goal toward realizing robust, scalable,
+Neural networks.                                                                        and reliable automated software issue resolution.
+                                                                                           Recently, many techniques have been proposed to enhance the
+Keywords                                                                                performance of LLMs in issue resolution [54, 58]. These methods pri-
+Software Issue Resolution, Large Language Model, Agent, Ensemble                        marily focus on improving patch generation, by carefully designing
+Reasoning                                                                               agent architectures and integrating external tools to assist LLMs in
+                                                                                        producing correct fixes. For example, OpenDevin[54] incorporates
+∗ Junjie Chen and Chao Peng are the corresponding authors.                              a planning module based on issue descriptions and coordinates
+                                                                                        multiple tools within an agent system to guide patch generation.
+                                                                                        Recent studies [8, 31, 60] have revealed a key property of LLMs:
+Please use nonacm option or ACM Engage class to enable CC licenses                      although the overall resolution rate remains stable across repeated
+This work is licensed under a Creative Commons Attribution 4.0 International License.   runs, the set of issues successfully resolved varies across executions.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                     This variability arises from the large action space and complex rea-
+© 2026 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-2025-3/2026/04                                                      soning trajectories required for repository-level issue resolution,
+https://doi.org/10.1145/3744916.3787761                                                 which often lead LLMs to pursue divergent solution paths. This
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                              Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+observation has led to the emergence of a new direction, i.e., en-          We conduct extensive experiments to evaluate the performance
+semble reasoning, which builds on patch generation approaches           of EnAgent using three LLMs (Gemini 2.5 Pro [14], Claude 3.7 Son-
+by producing multiple independent candidate patches and selecting       net [2], and GPT-4.1 [38]) on the widely-used software issue res-
+a consensus solution that is more robust than any individual output.    olution benchmark (i.e., SWE-bench [27]). Our results show that
+   Existing ensemble reasoning methods are prompting-based, re-         EnAgent consistently and significantly outperforms four state-of-
+lying on LLMs not only to generate candidate patches, but also          the-art ensemble reasoning baselines (i.e., Augment, Augment w/
+to perform selection among them. For example, Augment[8] uses           Pruning, DeiBase, and DeiBase w/ Pruning) across all evaluation
+the LLM-as-a-judge [53] paradigm to prompt the model to com-            settings, demonstrating its capability to enhance LLM-based soft-
+pare each candidate against the issue description and choose the        ware issue resolution. In particular, EnAgent achieves a Pass@1
+best match. While prompting-based ensemble reasoning techniques         improvement ranging from 5.83% to 14.60%, where Pass@1 denotes
+have shown promise, they face fundamental limitations when ap-          the proportion of generated patches that pass all golden tests. We
+plied to complex repository-level issue resolution. These limitations   further investigate the impact of ensemble size, a critical hyper-
+become especially evident in the face of two key challenges: First,     parameter in ensemble reasoning. The results reveal that EnAgent
+prompting-based methods struggle with the optimal solution search       not only outperforms all baselines at each ensemble size but also
+in large ensemble spaces. As the number of candidate patches grows,     continues to improve with larger ensemble sizes, while baseline
+subtle behavioral differences between them become increasingly          methods exhibit varying degrees of performance degradation. Addi-
+difficult to distinguish using LLMs alone. Since patch selection is     tionally, we conduct comprehensive ablation studies by construct-
+typically performed through a single prompt, surface-level syntactic    ing five variants of EnAgent, each omitting a major component
+comparisons often fail to capture deeper semantic nuances. Second,      (i.e., patch pruning, patch deduplication, regression testing, selector
+these methods lack the capacity for repository-level understanding,     agent, and majority voting). The results confirm the effectiveness
+which is essential for accurately selecting patches in real-world       and necessity of each part of our framework.
+software systems. Issues and fixes frequently span multiple files           The main contributions of this paper are as follows:
+and modules, requiring cross-file reasoning, contextual awareness,       • Novel Approach: We propose EnAgent, the first agent-based
+and verification of patch correctness within the broader codebase.          ensemble reasoning framework for repository-level issue resolu-
+Prompting-based approaches operate in a stateless, single-turn              tion. EnAgent formulates our goal as an optimal solution search
+manner and lack persistent memory or tool integration, making it            problem and addresses two key challenges, i.e., large ensemble
+difficult to track dependencies, execute validation steps, or build a       spaces and repository-level understanding, through modular
+coherent global view of the repository.                                     agents for generation, pruning, and selection.
+   To overcome the limitations of prompting-based ensemble rea-          • Extensive Evaluation: We conduct extensive experiments on
+soning approaches, we propose the first agent-based ensemble                the SWE-bench benchmark using three state-of-the-art LLMs,
+reasoning approach for repository-level issue resolution, called            comparing EnAgent with four leading baselines. Results show
+EnAgent (Ensemble Agent). EnAgent is designed to enhance LLM-               that EnAgent consistently improves Pass@1 by 5.83%∼14.60%,
+based issue resolution by formulating it as an optimal solution             demonstrating its robust effectiveness across settings.
+search problem [10, 25] and addressing the two core challenges           • Practical Impact: EnAgent has been integrated into the Trae
+through a modular agent-based architecture. It consists of three key        Agent [22], driving it to achieve first place on the SWE-bench
+components: patch generation, patch pruning, and patch selection. A         Verified leaderboard as of January 2026, with a notable Pass@1
+coder agent first generates diverse candidate patches in parallel to        of 78.80%. Our associated GitHub repository has attracted over
+improve the ensemble diversity in line with prior work [11, 60]. To         10,000 stars, reflecting strong community interest and adoption.
+mitigate the difficulty of optimal solution search, EnAgent applies      • Data Availability: We publicly release the source code at [26]
+a hierarchical pruning strategy that combines patch deduplication           to support reproducibility and facilitate future research.
+and regression testing strategies to eliminate redundant or faulty
+patches, thereby reducing the ensemble space while preserving           2   Motivation
+promising candidates. To address the need for repository-level un-      Recently, DeepMind proposes Test-time Scaling [47], demonstrat-
+derstanding, EnAgent employs a selector agent that simulates a          ing that leveraging ensemble learning and increasing inference
+real-world program comprehension process [15, 18], encompassing         resources can substantially improve performance in mathematical
+both static review and dynamic verification. Specifically, this agent   reasoning tasks. Subsequent studies [17, 31, 60] extend this para-
+iteratively gathers and analyzes relevant code snippets (such as        digm to software engineering tasks (e.g., code generation and issue
+those referenced in the issue description, modified by patches, or      resolution). The underlying intuition is that, although an LLM’s av-
+related through dependencies) to build static understanding, and        erage resolution rate remains relatively stable across repeated runs,
+collects execution traces from automatically generated tests to build   the specific issues it successfully resolves vary across executions.
+dynamic understanding. Based on these insights, the agent applies          Figure 1 shows the performance of two ensemble reasoning tech-
+a majority voting strategy to select the most plausible patch. Due      niques (Augment and DeiBase) on the SWE-bench Verified using
+to its generalizable and modular design, EnAgent potentially pro-       three LLMs (Gemini 2.5 Pro, Claude 3.7 Sonnet, and GPT-4.1). Par-
+vides a solid foundation for advancing ensemble reasoning in other      ticularly, the Mixture setting refers to a round-robin combination
+complex software engineering tasks.                                     of these three LLMs for generating candidate patches, aiming to
+                                                                        enhance the diversity of the ensemble space. Taking Figure 1(1)
+                                                                        as an example, the x-axis denotes the ensemble size 𝑁 (i.e., the
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                                                                                                     ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                                                                                      80%              75%
+           75%                                                    75%
+                                                   Oracle                                               Oracle        Oracle
+                                                                                                                       65%                                    Oracle
+           65%                                                                                        70%                                                                                                                      Adversary
+                                                 65%                      55%                         60%                                                                                                                      Average
+  Pass@1
+
+
+
+
+           55%
+                                                 55%                                                  50%                                                                                                                      Oracle
+           45%                                                            45%                                                                                                                                                  Augment
+                                                                                                      40%
+                                                                                                                                                                                                                               DeiBase
+           35%                         Adversary 45%            Adversary 35%               Adversary 30%            Adversary
+           25%                                                            25%
+                         1 2 3 4 5 6 7 8 9 10 35% 1 2 3 4 5 6 7 8 9 10        1 2 3 4 5 6 7 8 9 10 20% 1 2 3 4 5 6 7 8 9 10
+                                  Ensemble Size (N)                                    Ensemble Size (N)                                   Ensemble Size (N)                                   Ensemble Size (N)
+                            (1) Gemini 2.5 Pro                                  (2) Claude 3.7 Sonnet                                        (3) GPT-4.1                                         (4) Mixture
+ Figure 1: Influence of ensemble size on the effectiveness of existing ensemble reasoning techniques in terms of Pass@1 (↑)
+             1.0                                                    1.0                                                  1.0                                                 1.0
+
+
+             0.8
+number of candidate patches generated by Gemini 2.5 Pro), while
+                                                                    0.8                                                  0.8
+                                                                                                                                           3 Approach                        0.8
+
+
+             0.6                                                    0.6                                                  0.6                                                 0.6
+the y-axis shows the Pass@1 (i.e., the proportion of patches that
+                                                                                                                                           3.1 Overview
+pass all golden tests). Following prior work [60], we report three ad-
+             0.4                                                    0.4                                                  0.4                                                 0.4
+
+
+ditional metrics: (1) Oracle, representing the best-case performance
+             0.2                                                    0.2                                                  0.2
+                                                                                                                                           In this paper, we propose a novel ensemble reasoning approach,
+                                                                                                                                                                             0.2
+
+
+where the correct patch is always selected if present among the 𝑁
+             0.0                                                    0.0                                                  0.0
+                                                                                                                                           EnAgent, designed to enhance the performance of LLMs in software
+                                                                                                                                                                             0.0
+                   0.0      0.2       0.4    0.6      0.8   1.0           0.0    0.2       0.4    0.6      0.8   1.0           0.0   0.2         0.4    0.6    0.8     1.0         0.0   0.2       0.4    0.6      0.8   1.0
+
+candidates; (2) Adversary, representing the worst-case performance                                                                         issue resolution. To the best of our knowledge, EnAgent is the first
+where an issue is only considered solved if all 𝑁 candidates are                                                                           agent-based ensemble reasoning approach for repository-level issue
+correct; and (3) Average, representing the expected performance of                                                                         resolution. Due to its generalizable and modular design, EnAgent
+randomly selecting one patch from the 𝑁 candidates.                                                                                        potentially provides a solid foundation for advancing ensemble
+   First, we observe that as the ensemble size increases, the perfor-                                                                      reasoning in other complex software engineering tasks. Figure 2 il-
+mance of Average remains relatively stable, while the Oracle value                                                                         lustrates the overall architecture of EnAgent, which comprises three
+consistently improves. Notably, when the ensemble size reaches 10,                                                                         main components: (1) Patch generation component (Section 3.2)
+Oracle achieves an average improvement of 20.80% over Average in                                                                           employs a coder agent to generate diverse candidate patches in
+terms of Pass@1. This observation strongly supports previous find-                                                                         parallel to improve the ensemble diversity; (2) Patch pruning
+ings that although the overall resolution rate remains stable across                                                                       component (Section 3.3) performs a hierarchical patch pruning
+repeated runs, the set of issues successfully resolved varies across                                                                       that combines patch deduplication and regression testing strate-
+executions [8, 31, 60]. This finding reflects the high diversity in the                                                                    gies to eliminate redundant or faulty patches, thereby reducing the
+candidate patches generated by LLMs. It motivates the significant                                                                          ensemble space while preserving promising candidates; (3) Patch
+potential of ensemble reasoning techniques as a promising direction                                                                        selection component (Section 3.4) employs a selector agent that
+for enhancing LLM-based software issue resolution.                                                                                         simulates a real-world program comprehension process [15, 18],
+   Moreover, we observe that as the ensemble size increases, the Ad-                                                                       constructing repository-level understanding by combining static
+versary value consistently declines. Specifically, when the ensemble                                                                       review with dynamic verification, and ultimately selecting the cor-
+size reaches 10, Adversary reduces by 27.01% on average compared                                                                           rect patch through a majority voting strategy. In the following, we
+to the Average in terms of Pass@1. This indicates that although                                                                            provide a detailed description of each component in EnAgent.
+the theoretical upper bound of ensemble performance (i.e., Oracle
+= 20.80%) improves as the number of candidate patches increases,                                                                           3.2         Patch Generation
+the theoretical lower bound (i.e., Adversary = 27.01%) deteriorates                                                                            Generate candidate patch. As illustrated in Figure 2, this compo-
+more significantly. This widening gap underscores the increasing                                                                           nent utilizes an LLM-based coder agent equipped with specialized
+difficulty of ensemble reasoning techniques as the ensemble size in-                                                                       agent tools (i.e., View, Create, Insert, StrReplace, UndoEdit, and
+creases. Indeed, as shown in Figure 1, the performance of Augment                                                                          Bash) to autonomously generate diverse candidate patches in par-
+and DeiBase initially improves with larger ensemble sizes but sub-                                                                         allel for each issue. Inspired by prior research [35, 43], the coder
+sequently degrades. It motivates the necessity of our patch pruning                                                                        agent’s system prompt defines a structured process comprising the
+component, which eliminates redundant and faulty patches, thereby                                                                          following tasks: (1) analyzing the issue description to understand
+reducing the ensemble space while preserving promising candidates.                                                                         the target problem; (2) exploring the codebase to locate files relevant
+   Additionally, on average, both Augment and DeiBase outperform                                                                           to the issue; (3) reproducing the bug to validate its manifestation; (4)
+the random selection strategy (i.e., Average) by 3.17% and 1.06%                                                                           diagnosing the root cause through code inspection; (5) generating a
+in terms of Pass@1, respectively. These results also confirm the                                                                           code patch to resolve the identified bug; (6) rerunning reproduction
+potential of ensemble reasoning techniques to enhance LLM per-                                                                             tests to verify patch correctness; and (7) summarizing the working
+formance in software issue resolution. However, in comparison,                                                                             process, emulating a realistic commit message. Finally, the coder
+Oracle achieves an average improvement of 29.49% and 36.29% over                                                                           agent effectively generates high-quality candidate patches.
+Augment and DeiBase, respectively. This substantial performance                                                                               Improve ensemble diversity. To further enhance the diversity of
+gap underscores the limitations of existing ensemble reasoning                                                                             generated candidate patches, EnAgent employs a high-temperature
+methods in accurately selecting the correct patch and highlights                                                                           sampling strategy [42, 66] across multiple independent runs of the
+significant potential for improvement. It motivates the necessity                                                                          coder agent, thereby improving the ensemble diversity. The coder
+of designing a more effective patch selection component to further                                                                         agent is instantiated with three state-of-the-art LLMs (Gemini 2.5
+improve LLM performance in software issue resolution.                                                                                      Pro, Claude 3.7 Sonnet, and GPT-4.1), which have been extensively
+                                                                                                                                           evaluated in our experiments. Furthermore, we introduce a Mix-
+                                                                                                                                           ture setting, in which the three LLMs are used in a round-robin
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                         Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+
+          Issue:                                      Codebase:                 Patch
+                                                                                            Pruned                    Agent Tools
+                                                      .                           Patch                                                                  Docker:
+      │ # <Description>: ...                          ├ tests                              Candidates
+      │ # <Expected Behavior>: ...                    │├ test_data.py                                                View      StrReplace
+                                                      │├ test_misc.py
+                                                                                                                                                               Terminal
+      │ # <How to Reproduce>: ...
+      │ # <Versions>: ...                             │├ test_parsing.py
+                                                                                          Regression                Create        Insert                   Codebase
+                          Agent                                                             Tests
+                          Tools                                  Passed                                              Bash       UndoEdit                 Environment
+                   Coder                                                                                        Execution             Function
+                                                            Initial                         Tester
+                   Agent                                                                                        Feedback               Calling          Repository-level
+                                                            Tests                           Agent                                                   Program Comprehension
+                         Diverse
+                        Sampling                          (2) Regression Testing                                              Selector                    Static Review
+                                                                                                                               Agent
+                                                                                                                                                       Dynamic Verification
+              Patch
+                Patch
+                  Patch                                                    Equivalence Detection
+                                                (1) Patch                                                                                              Patch
+                                                                                                                              Majority                             Final
+                                              Deduplication                Patch Normalization                                Voting                               Patch
+      Candidate Patches
+
+   1. Patch Generation                                        2. Patch Pruning                                                   3. Patch Selection
+                                                                      Figure 2: Overview of EnAgent
+fashion to generate patches, further increasing the diversity of can-                          unidiff [4] package to convert raw patches into structured rep-
+didates. The generation process terminates once the number of                                  resentations, facilitating precise and reliable patch normalization.
+generated candidate patches reaches a pre-defined ensemble size                                We then perform patch normalization to remove semantically irrel-
+𝑁 . This ensemble size is a critical hyper-parameter in all ensemble                           evant elements (such as extra spaces, line breaks, and comments)
+reasoning techniques, and its impact on performance is discussed                               without altering program behavior, yielding a normalized form for
+in Section 5.2. Overall, this patch generation component enables                               each patch. In particular, patches that fail to parse due to syntax er-
+EnAgent to produce diverse candidate patches, whose union con-                                 rors are deemed invalid and discarded. For subsequent equivalence
+sistently outperforms any individual generation.                                               detection, candidate patches that produce identical normalized rep-
+                                                                                               resentations are considered semantically equivalent, and redundant
+3.3      Patch Pruning                                                                         patches are eliminated accordingly. We acknowledge that, due to
+After generating candidate patches, EnAgent performs a hierarchi-                              the undecidability of program equivalence [29, 52], not all redun-
+cal patch pruning to reduce the ensemble space, thereby enhancing                              dant patches can be reliably identified and removed. However, our
+the effectiveness of the subsequent patch selection. As discussed                              comprehensive empirical evaluation (Sections 5.3 and 5.4) demon-
+in Section 2, increasing the ensemble size raises the theoretical                              strates that our proposed strategy effectively reduces redundancy
+upper bound of performance but also lowers the lower bound more                                by an average of 28.90% and significantly enhances the practical
+sharply, making accurate patch selection more challenging. Existing                            performance of ensemble reasoning techniques. Furthermore, we
+prompting-based ensemble methods struggle with the optimal solu-                               will discuss potential enhancements to the patch deduplication
+tion search in large ensemble spaces. Particularly, our experiments                            process in Section 6.4 to further enhance overall effectiveness.
+show that, on average, 40% of the candidate patches generated by                                  Perform regression testing. The primary objective of the regres-
+LLMs are either redundant or incorrect. To mitigate the difficulty of                          sion testing strategy is to eliminate faulty candidate patches that
+optimal solution search, we design a hierarchical pruning method                               fail to preserve existing functionality, thereby further reducing the
+that combines patch deduplication and regression testing strate-                               ensemble space. Specifically, EnAgent employs a tester agent that
+gies to eliminate redundant or faulty patches, thereby reducing the                            automatically retrieves and executes all available regression tests
+ensemble space while preserving promising candidates. Our experi-                              from the original codebase, and retains those that pass as the initial
+mental results (Section 5) confirm that both patch deduplication and                           regression tests. That is, regression tests that fail due to missing
+regression testing strategies significantly enhance the performance                            dependencies or project-specific setups are automatically excluded,
+of EnAgent, and benefit other ensemble reasoning techniques as                                 leaving the reliable initial tests. However, not all passing tests are
+well. Notably, we first introduce a novel patch pruning strategy                               classified as regression tests, as issue resolution may justifiably alter
+for ensemble reasoning, opening a promising direction for future                               certain existing functionalities, potentially causing some tests to
+research. The following sections present the design and implemen-                              fail. To address this, the tester agent further refines the initial tests
+tation of patch deduplication and regression testing strategies.                               by prompting the LLM to identify a smaller, relevant subset most
+   Perform patch deduplication. The primary objective of the patch                             likely to represent true regression tests, which are then designated
+deduplication strategy is to eliminate redundant candidate patches,                            as the final regression tests. This design enables EnAgent to effec-
+thereby reducing the ensemble space. Inspired by prior work on                                 tively handle diverse, large-scale codebases while maintaining test
+equivalent mutant detection [30, 39], we eliminate redundant can-                              executability, reducing the cost of executing extensive test suites,
+didates based on patch normalization and equivalence detection.                                and minimizing noise from irrelevant cases.
+Specifically, we first implement a patch parser leveraging the Python
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                                                              ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+ <Codebase Path>                                                                                             {                                    Generate tests
+                                                                                                                 "role": "assistant",
+ <Github Issue Description>
+                                                                                                     Agent       "content": "Let me now create unit tests:",
+ <Candidate Patches>                                                                                             "tool_calls": [{"index": 0, "id": "tooluse_aLCAXQHgTzAZyd", "type": "function",
+ <Agent Tools>                                                                                                                   "function": {"name": "str_replace_editor",
+ # ROLE:                                                                                                                         "arguments": "{\"command\":\"create\",
+ Act as an expert code selector. Given a codebase, an github issue and N candidate patches                                                        \"file_text\":\"<TEST_FILE_CONTENT>\",
+ proposed by your colleagues, your responsibility is to select the correct one to solve the issue.                                                \"path\":\"/opt/django__django/test_patches.py\"}"}}]
+                                                                                                             }
+ # WORK PROCESS:
+ You are given a software issue and multiple candidate patches. Your goal is to identify the                 {                                   Create test files
+ patch that correctly resolves the issue. Follow these steps methodically:                                       "role": "tool",
+ 1. Understand the Issue and Codebase: Carefully read the issue description to comprehend the                    "content": "File created successfully at: /opt/django__django/test_patches.py",          Tool
+ problem. You may need to examine the codebase for context, including: (1) Code referenced in                    "tool_call_id": "tooluse_aLCAXQHgTzAZyd"
+                                                                                                             }
+ the issue description; (2) The original code modified by each patch; (3) Unchanged parts of the
+ same file; (4) Related files, functions, or modules that interact with the affected code.                   {                                     Execute tests
+ 2. Analyze the Candidate Patches: For each patch, analyze its logic and intended fix. Consider                  "role": "assistant",
+ whether the changes align with the issue description and coding conventions.                        Agent       "content": "Now let me test these patches to understand their behavior:",
+ 3. Validate Functionality (Optional but Recommended): If needed, write and run unit tests to                    "tool_calls": [{"index": 0, "id": "tooluse_Znafp95AQDu7PX", "type": "function",
+                                                                                                                                 "function": {"name": "bash",
+ evaluate the correctness and potential side effects of each patch.                                                              "arguments": "{\"command\":\"cd /opt/django__django &&
+ 4. Select the Best Patch: Choose the patch that best resolves the issue with minimal risk of                                                                     python test_patches.py\"}\n""}}]
+ introducing new problems.                                                                                   }
+ # FINAL REPORT:
+ If you have successfully selected the correct patch, submit your answer in the following format:            {                                     Return results
+                                                                                                                 "role": "tool",
+ ### Status: succeed ### Result: Patch-x ### Analysis: [Explain why Patch-x is correct.]                         "content": "<TEST_RESULTS>",                                                             Tool
+                                                                                                                 "tool_call_id": "tooluse_Znafp95AQDu7PX"
+                                                                                                             }
+        Figure 3: Prompt template for the selector agent
+                                                                                                       Figure 4: An example of agent to execute generated tests
+    Subsequently, each candidate patch is applied to the original
+codebase, and the tester agent executes the final regression tests
+individually on each patch version. Patches that fail any regression
+test are discarded, and only those that pass all tests proceed to the                                to build the dynamic understanding. To achieve this, we equip
+patch selection stage. To further mitigate the impact of noisy or                                    the selector agent with tools that provide access to the complete
+unreliable tests, EnAgent adopts a conservative fallback strategy: if                                codebase and execution environment for each issue. Specifically,
+all candidate patches for an issue fail the selected regression tests,                               EnAgent integrates six agent tools: View (to list directory contents
+EnAgent retains the full candidate set to avoid prematurely discard-                                 or view file contents), Create (to create new files), Insert (to edit files
+ing potentially correct patches. We acknowledge that the regression                                  via text insertion), StrReplace (to edit files via string replacement),
+tests extracted from the original codebase may contain inaccura-                                     UndoEdit (to revert file modifications), and Bash (to execute shell
+cies, potentially introducing false positives during this pruning                                    commands). In addition to gathering and analyzing relevant code
+process. Nonetheless, our experiments (Section 6.2) empirically                                      snippets for static understanding, the selector agent leverages these
+demonstrate that the regression testing strategy effectively elimi-                                  tools to generate and execute unit tests, thereby facilitating dynamic
+nates faulty patches, achieving a low FN rate (i.e., correct patches                                 understanding, as illustrated in Figure 4. Specifically, the selector
+mistakenly discarded) of only 3.69%. Furthermore, the ablation stud-                                 agent interacts with these tools through function calling [1, 34],
+ies (Section 5.3) confirm that this strategy substantially enhances                                  which are automatically translated into concrete shell commands
+the practical performance of ensemble reasoning techniques, yield-                                   and executed within a tailored Docker-based environment. The
+ing an average improvement of 3.42%.                                                                 execution results are returned in JSON format, allowing the agent
+                                                                                                     to analyze the execution feedback and refine its understanding. The
+3.4      Patch Selection                                                                             selector agent iteratively leverages these tools until it obtains suffi-
+The primary goal of the patch selection component is to accurately                                   cient repository-level understanding to make a final patch selection.
+identify the correct patch from the pruned candidates. Real-world                                    Additionally, to control computational overhead and prevent ex-
+issues and fixes frequently span multiple files and modules, neces-                                  cessive token usage, we impose an upper bound of 30 interaction
+sitating cross-file reasoning, contextual awareness, and verification                                rounds between the selector agent and the agent tools.
+of patch correctness within the broader codebase. Therefore, effec-                                      Implement majority voting. To further mitigate the risk of LLM
+tive patch selection requires an accurate repository-level under-                                    hallucinations and enhance solution consistency, we implement a
+standing. However, existing prompting-based ensemble reasoning                                       majority voting strategy in the selector agent. Specifically, given
+approaches are typically stateless and single-turn, lacking persis-                                  𝑁 candidate patches, the selector agent is executed in parallel for
+tent memory and tool integration. These limitations hinder their                                     𝑁 iterations, and the patch receiving the highest number of votes
+ability to track dependencies, perform validation steps, and build a                                 is selected as the final output. To improve efficiency, if the first
+coherent, global understanding of the repository.                                                    ⌈ 𝑁2 ⌉ votes are unanimous, this consensus patch is immediately
+    Obtain repository-level understanding. To address the challenge of                               returned as the final result, and the remaining (𝑁 − ⌈ 𝑁2 ⌉) execu-
+repository-level understanding, EnAgent introduces a selector agent                                  tions are skipped. In cases where the 𝑁 votes are evenly distributed
+that simulates a real-world program comprehension process [15, 18].                                  across multiple candidate patches, potentially indicating the pres-
+Figure 3 shows the detailed prompt template for the selector agent.                                  ence of several correct solutions, EnAgent randomly selects one
+It iteratively gathers and analyzes relevant code snippets (such as                                  from among the top-voted candidates. The impact of this majority
+those referenced in the issue description, modified by patches, or                                   voting strategy is further analyzed in Section 5.3. Through this
+related through dependencies) to build the static understanding,                                     patch selection component, EnAgent can effectively select the most
+and collects execution traces from automatically generated tests                                     plausible patch to improve LLM-based issue resolution.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                              Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+4     Evaluation Design                                                 4.4    Implementation Details
+Our study aims to address the following research questions (RQs):       To evaluate the performance of EnAgent, we employ three state-of-
+                                                                        the-art LLMs: Gemini 2.5 Pro [14] (version gemini-2.5-pro-preview-
+• RQ1: How does EnAgent perform in terms of effectiveness and
+                                                                        06-05), Claude 3.7 Sonnet [2] (version claude-3-7-sonnet-20250219),
+  efficiency compared to the state-of-the-art techniques?
+                                                                        and GPT-4.1 [38] (version gpt-4.1-2025-04-14). These models are
+• RQ2: How do hyper-parameters affect EnAgent’s effectiveness?
+                                                                        used for patch generation. Among them, Claude 3.7 Sonnet demon-
+• RQ3: How does each main component in EnAgent contribute to
+                                                                        strated the best performance (shown in Figure 1); therefore, for
+  the overall effectiveness?
+                                                                        consistency and fair comparison, we adopt Claude 3.7 Sonnet as
+• RQ4: How does the ensemble space affect the effectiveness of
+                                                                        the base model for all ensemble reasoning techniques. Additionally,
+  patch selection?
+                                                                        we set the temperature to 0.2 to ensure low variability and increase
+• RQ5: How orthogonal is EnAgent to existing patch generation
+                                                                        determinism in outputs, and set the maximum token limit to 4,096
+  techniques?
+                                                                        to support sufficient reasoning length.
+
+4.1      Benchmarks                                                     5 Results and Analysis
+We evaluate the effectiveness of EnAgent on SWE-bench [27], a           5.1 RQ1: Effectiveness and Efficiency
+widely-used benchmark for automated software issue resolution.
+Following existing work [55, 57, 61], our evaluation focuses on its     5.1.1 Process: To answer RQ1, we evaluate the performance of
+verified version. For each issue, all evaluated techniques receive      EnAgent alongside four state-of-the-art ensemble reasoning base-
+only the issue description and the original codebase as input. SWE-     lines (Augment, Augment w/ Pruning, DeiBase, and DeiBase w/
+bench also provides some golden tests for each GitHub issue to          Pruning) across three leading LLMs (Gemini 2.5 Pro, Claude 3.7
+evaluate whether the generated patch solves the corresponding           Sonnet, and GPT-4.1). Additionally, we introduce a Mixture setting,
+issue. Note that all regression tests used by EnAgent are part of the   where the three LLMs generate patches in a round-robin manner to
+original codebase, ensuring a fair and realistic evaluation setting.    further enhance the diversity of the candidate patches. The effective-
+                                                                        ness of each technique is assessed on the widely-used SWE-bench
+4.2      Metrics                                                        Verified benchmark using two metrics (Pass@1 and the number
+We use Pass@1 to assess the effectiveness of the studied ensemble       of uniquely resolved issues). To evaluate the efficiency of each en-
+reasoning techniques. It measures the functional correctness of a       semble reasoning technique, we measure both the average time
+generated patch by determining whether it successfully resolves the     and token overhead. Moreover, we include three reference base-
+given software issue. For each issue, SWE-bench provides golden         lines (introduced in Section 2): Oracle (representing the best-case
+tests to verify patch correctness. In our evaluation, the ensemble      performance of an ensemble technique), Adversary (representing
+reasoning technique selects a single patch per issue; if this patch     the worst-case performance of an ensemble technique), and Aver-
+passes all associated tests in the SWE-bench, the issue is deemed       age (representing the expected performance of a random baseline).
+successfully resolved. It is worth noting that Pass@1 is a stringent    The ensemble size 𝑁 is set to 3. To further mitigate the impact of
+evaluation criterion, making improvements to this metric both tech-     randomness, each experiment is repeated three times.
+nically challenging and practically meaningful [43, 57]. In addition,
+we assess the efficiency of each technique by measuring the av-         5.1.2 Results: Table 1 presents a comprehensive comparison of
+erage time overhead and average token overhead, where the               all studied ensemble reasoning techniques in terms of both effec-
+latter includes both input and output token overhead.                   tiveness and efficiency. First, we observe that all five ensemble
+                                                                        reasoning techniques consistently outperform the Average baseline
+4.3      Compared Techniques                                            in terms of Pass@1, validating the effectiveness of ensemble rea-
+To comprehensively evaluate the performance of EnAgent, we com-         soning techniques and reinforcing the motivation for our design of
+pare it with state-of-the-art ensemble reasoning techniques:            EnAgent. Notably, EnAgent achieves the best performance across
+                                                                        all ensemble reasoning techniques. Specifically, it demonstrates
+• Augment [11]: implements a prompting-based ensemble tech-             an improvement of 5.01%∼12.86% compared to the baselines in
+  nique inspired by the LLM-as-a-judge paradigm. It prompts the         terms of Pass@1. Furthermore, we collect multiple paired overall
+  LLM to compare each candidate against the issue description           Pass@1 results for EnAgent and each baseline across repeated ex-
+  and choose the best match.                                            periments and different LLMs to evaluate the statistical significance
+• DeiBase [60]: prompts the LLM to generate detailed justifica-         of EnAgent’s improvements. The Wilcoxon Signed-Rank Test [56]
+  tions and assign confidence scores to each candidate patch, se-       (at a significance level of 0.05) yields p-values below 8.00 × 10 −6 ,
+  lecting the one with the highest score as the final patch.            confirming that EnAgent significantly outperforms all baselines
+To further demonstrate the effectiveness and generality of the patch    in terms of Pass@1. In addition, EnAgent exhibits strong stability,
+pruning component in our EnAgent, we integrate it into both en-         with an average standard deviation of only 0.19%, lower than those
+semble reasoning techniques, resulting in two enhanced baselines:       of other baselines (0.38%∼0.52%), thereby further reducing the im-
+Augment w/ Pruning and DeiBase w/ Pruning. To ensure a                  pact of randomness. Moreover, as shown in Figure 5, EnAgent also
+fair comparison, all ensemble reasoning techniques are evaluated        achieves the highest number of uniquely resolved issues, further
+using the same set of candidate patches generated by our patch          demonstrating its superior effectiveness compared to ensemble
+generation component.                                                   reasoning baselines.
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                                                  ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                                              Table 1: Effectiveness comparison in terms of Pass@1 (↑).
+                                                                                                            Augment                             DeiBase
+   LLM                             Adversary             Average           Oracle            Augment                          DeiBase                                 EnAgent
+                                                                                                           w/ Pruning                          w/ Pruning
+   Gemini 2.5 Pro                     39.60%                  53.40%       66.20%         55.40%±0.60%    59.27%±0.31%     53.53%±0.23%       57.33%±0.12%         62.27%±0.12%
+   Claude 3.7 Sonnet                  50.60%                  61.33%       70.00%         63.13%±0.31%    64.33%±0.42%     62.33%±0.42%       63.87%±0.31%         66.40%±0.20%
+   GPT-4.1                            38.80%                  51.40%       63.00%         54.87%±0.92%    56.60%±0.53%     53.13%±0.12%       56.00%±0.35%         59.00%±0.20%
+   Mixture                            38.00%                  56.33%       73.40%         58.93%±0.23%    61.07%±0.31%     55.87%±0.76%       58.07%±1.01%         65.67%±0.23%
+
+      Augment            Augment w/ Pruning         DeiBase        DeiBase w/ Pruning      EnAgent       Table 2: Efficiency comparison in terms of the average time
+             0                          1                          0                        1            overhead (↓) and the average token overhead (↓).
+          0     0                    0     0                    0     0                  0     0
+      7 01 1 120                 4 04 0 3 0                 7 02 0 4 0               9 03 0 6 0
+ 0 0               0        0 0               0        0 0               0      0 0               0
+  0               13 0       0               11 0       0               10 0     0               26 0     Metric   Technique              Gemini Claude GPT Mixture
+            238                        289                        246                      238
+   00             0 04        00             0 04        00             0 04      00             0 08
+   0                          0                          0                        0                                Augment                  3.04        3.58        3.12       3.48
+       22 6 0 0                   12 8 0 0                   14 8 0 0                 35 9 0 0
+     44 5 6 5 1                 55 3 0 0 0                 88 0 3 1 0               12 3 0 0 1
+                                                                                   12                     AVG.
+                                                                                                                   Augment w/ Pruning       14.61       15.15      14.69      15.05
+ (1) Gemini 2.5 Pro (2) Claude 3.7 Sonnet                 (3) GPT-4.1               (4) Mixture                    Deibase                  25.38       30.78      26.22      25.62
+                                                                                                          Time
+                                                                                                                   Deibase w/ Pruning       36.95       42.35      37.79      37.19
+Figure 5: Number of uniquely resolved issues across five stud-                                                     EnAgent                  22.73       22.01      22.73      23.27
+ied ensemble reasoning techniques on SWE-bench Verified                                                          Augment                    2.07        2.05        2.14       1.98
+                                                                                                                 Augment w/ Pruning         4.80        4.81        4.87       4.73
+    Secondly, Table 1 also shows that both Augment w/ Pruning and                                          AVG.
+                                                                                                                 Deibase                    34.28       34.10      34.03      33.92
+DeiBase w/ Pruning consistently outperform their original coun-                                           Tokens
+                                                                                                                 Deibase w/ Pruning         35.14       35.72      35.21      35.28
+terparts (Augment and DeiBase). On average, the patch pruning                                                    EnAgent                    25.00       26.81      22.32      26.46
+component improves the performance of Augment and DeiBase by
+3.91% and 4.72% in terms of Pass@1, respectively. This result empir-
+ically validates the effectiveness of our patch pruning component.                                       Specifically, for 1 ≤ 𝑁 ≤ 10, we evaluate and compare the effec-
+Furthermore, we collect multiple paired overall Pass@1 results                                           tiveness of EnAgent alongside four baselines in terms of Pass@1.
+for each baseline with and without the pruning component across
+repeated experiments and different LLMs to assess the statistical sig-                                   5.2.2 Results: Figure 6 illustrates the performance trends of differ-
+nificance of the pruning effect. The Wilcoxon Signed-Rank Test [56]                                      ent ensemble reasoning techniques as the ensemble size increases,
+(at a significance level of 0.05) yields p-values below 1.30×10 −5 , con-                                evaluated using the Pass@1 metric. Across all ensemble size set-
+firming that the patch pruning component significantly improves                                          tings, EnAgent consistently outperforms all four baselines, achiev-
+ensemble reasoning baselines in terms of Pass@1.                                                         ing an average improvement of 5.83%∼14.60% in terms of Pass@1.
+    In terms of efficiency metrics (i.e., the average time and token                                     These results demonstrate the stable effectiveness of EnAgent un-
+overhead), DeiBase and DeiBase w/ Pruning exhibit the highest                                            der varying ensemble size settings. Furthermore, we collect mul-
+costs, primarily due to the need to separately score each of the                                         tiple paired overall Pass@1 results for EnAgent and each baseline
+𝑁 candidate patches, requiring repeated LLM invocations. While                                           across different ensemble sizes and LLMs to assess the statisti-
+prompting-based Augment and Augment w/ Pruning demonstrate                                               cal significance of EnAgent’s improvements. The Wilcoxon Signed-
+better efficiency than EnAgent, the notable performance gains of                                         Rank Test [56] (at a significance level of 0.05) yields p-values below
+EnAgent justify its additional computational cost, indicating a fa-                                      3.74 × 10 −12 , validating that EnAgent significantly outperforms all
+vorable trade-off between effectiveness and efficiency. On average,                                      baselines across different ensemble sizes in terms of Pass@1.
+EnAgent incurs a token overhead of approximately 25K on Gemini                                               In addition, as the ensemble size increases, the performance of
+2.5 Pro, 27K on Claude 3.7 Sonnet, and 22K on GPT-4.1, corre-                                            the four baselines generally improves initially but subsequently de-
+sponding to costs of $0.17, $0.28, and $0.12 per issue, respectively.                                    clines. This trend can be attributed to two key factors: (1) while the
+Furthermore, the pruning component incurs an average of 11.6s                                            theoretical upper bound increases with larger ensemble sizes, the
+and 3.08K tokens, while the selection component requires 11.09s                                          lower bound degrades more rapidly (as discussed in Section 2); and
+and 22.07K tokens. Overall, the total per-issue cost of EnAgent av-                                      (2) the increasing context length required to process more candidate
+erages only $0.19, indicating that the overhead remains practical                                        patches leads to the dilution of relevant information, making accu-
+for real-world deployment. We further discuss potential efficiency                                       rate patch selection more difficult for LLMs. In contrast, EnAgent
+improvements (such as employing trajectory summarization to re-                                          consistently demonstrates an upward trajectory in terms of Pass@1
+duce token overhead and refining regression test selection to lower                                      with increasing ensemble size, demonstrating superior effectiveness
+time costs) in Section 6.4 as our future work.                                                           and scalability. We hypothesize that further scaling may continue
+                                                                                                         to enhance EnAgent’s effectiveness (see Section 6.4); however, this
+5.2      RQ2: Influence of Hyper-parameter                                                               entails a trade-off between effectiveness and computational cost.
+5.2.1 Setup: The ensemble size (𝑁 ) is a critical hyper-parameter                                            Additionally, we observe that Augment w/ Pruning and DeiBase
+in ensemble reasoning techniques. In this research question, we                                          w/ Pruning consistently outperform their original counterparts
+investigate the impact of the ensemble size on the performance                                           (Augment and DeiBase) across all ensemble size settings in terms
+of EnAgent and other compared ensemble reasoning techniques.                                             of Pass@1. This result further substantiates the effectiveness of
+ ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                                                            Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+                                                                     Augment                  Augment w/ Pruning                       DeiBase                                DeiBase w/ Pruning                                         EnAgent
+         70%                                                          70%                                                             65%                                                                                                75%
+
+         65%                                                                                                                                                                                                                             70%
+                                                                                                                                      60%
+Pass@1
+
+
+
+
+         60%                                                          65%                                                                                                                                                                65%
+                                                                                                                                      55%
+         55%                                                                                                                                                                                                                             60%
+
+         50%                                                          60%                                                             50%                                                                                                55%
+                1   2   3   4         5    6   7   8         9 10               1   2    3   4      5   6     7   8      9 10                            1   2         3     4          5     6          7     8          9 10                         1    2         3    4         5    6         7   8         9 10
+                            Ensemble Size                                                    Ensemble Size                                                                  Ensemble Size                                                                                 Ensemble Size
+                        (1) Gemini 2.5 Pro                                              (2) Claude 3.7 Sonnet                                                               (3) GPT-4.1                                                                                    (4) Mixture
+          1.0
+                                                                    Figure
+                                                                       1.0
+                                                                           6: Influence of the ensemble1.0 size in terms of Pass@1 (↑)                                                                                                     1.0
+
+
+ Table
+     0.8 3: Comparison between EnAgent
+                                  0.8  and its five ablation                                                                                 0.8
+                                                                                                                                                                       EnAgent_woP                                        EnAgent_woR0.8                         EnAgent_woD                                EnAgent
+ variants in terms of Pass@1 (↑).                                                                                                                      10        10.0                                        10.0                                 10.0                                   10.0
+          0.6                                                            0.6                                                                 0.6                                                                                           0.6
+
+                                                                                                                                                         8
+
+
+
+
+                                                                                                                                      Ensemble Space
+                                                                                                                                                                           7.27                                                                            7.34 7.00                            7.55 7.16
+     Technique
+       0.4
+                                 Gemini 2.5                   Claude 3.7
+                                                                     0.4
+                                                                                    GPT-4.1             Mixture                              0.4                                  6.78                              6.72 6.99              0.4
+                                                                                                                                                                                                                                                                                                              6.34
+                                                                                                                                                                                            5.98                                  5.91                                    6.11
+                                                                                                                                                         6
+     EnAgent
+       0.2     𝑤𝑜𝐷                        60.00%                64.00%0.2               57.00%              63.20%                           0.2                                                                                           0.2
+
+     EnAgent 𝑤𝑜𝑅                          60.20%                64.60%                  56.80%              63.40%                                       4
+       0.0                                                            0.0                                                                    0.0                                                                                           0.0
+     EnAgent
+           0.0  0.2
+               𝑤𝑜𝑃              0.4       58.40%
+                                             0.6       0.8      63.60%
+                                                                 1.0      0.0           56.20%0.4
+                                                                                        0.2                 61.80%
+                                                                                                            0.6    0.8          1.0                0.0
+                                                                                                                                                         2
+                                                                                                                                                                 0.2              0.4              0.6              0.8          1.0             0.0            0.2            0.4            0.6           0.8          1.0
+
+     EnAgent 𝐴                            59.80%                64.60%                  57.20%              61.80%
+     EnAgent 𝑤𝑜𝑀                          59.60%                63.60%                  57.40%              62.60%                                       0       Gemini 2.5 Pro                          Claude 3.7 Sonnet                                 GPT-4.1                              Mixture
+     EnAgent                              62.27%                66.40%                  59.00%              65.67%
+                                                                                                                                          Figure 7: Influence of the patch pruning component and its
+                                                                                                                                          patch deduplication and regression testing strategies in terms
+ the patch pruning component. On average, the patch pruning com-                                                                          of ensemble space (↓)
+ ponent yields improvements of 3.91% and 3.74% for Augment and                                                                            reinforce the critical role of the patch pruning component in enhanc-
+ DeiBase, respectively. Furthermore, we collect multiple paired over-                                                                     ing the overall performance of EnAgent. Furthermore, as shown
+ all Pass@1 results for each baseline with and without the pruning                                                                        in RQ1 and RQ2, incorporating the patch pruning component into
+ component across different ensemble sizes and LLMs to assess the                                                                         other ensemble reasoning techniques (i.e., Augment w/ Pruning
+ statistical significance of the pruning effect. The Wilcoxon Signed-                                                                     and DeiBase w/ Pruning) also leads to performance improvements,
+ Rank Test [56] (at a significance level of 0.05) yields p-values below                                                                   further validating its generalizability and utility.
+ 1.95 × 10 −11 , indicating that the patch pruning component sig-                                                                            Second, EnAgent achieves an average improvement of 4.08% over
+ nificantly improves ensemble reasoning baselines across different                                                                        EnAgent 𝐴 in terms of Pass@1, validating the effectiveness of the
+ ensemble sizes in terms of Pass@1.                                                                                                       selector agent and further demonstrating its superiority over exist-
+                                                                                                                                          ing prompting-based ensemble reasoning techniques. In addition,
+ 5.3            RQ3: Contribution of Main Components                                                                                      EnAgent outperforms EnAgent 𝑤𝑜𝑀 by an average of 4.14% in terms
+ 5.3.1 Variants: To assess the contributions of the main components                                                                       of Pass@1, highlighting the contribution of the majority voting
+ in EnAgent, we construct and evaluate five ablation variants. For the                                                                    strategy to enhance overall performance. This result confirms the
+ patch pruning component, which comprises both patch deduplica-                                                                           necessity of incorporating voting-based mechanisms to mitigate
+ tion and regression testing strategies, we design three variants: (1)                                                                    selection instability and reduce the impact of LLM hallucinations.
+ EnAgent 𝑤𝑜𝐷 , which removes the patch deduplication strategy; (2)                                                                           Furthermore, we collect multiple paired overall Pass@1 results
+ EnAgent 𝑤𝑜𝑅 , which removes the regression testing strategy; and                                                                         for EnAgent and each variant across different LLMs to evaluate the
+ (3) EnAgent 𝑤𝑜𝑃 , which removes the entire patch pruning compo-                                                                          statistical significance of EnAgent’s improvements. The Wilcoxon
+ nent. For the patch selection component, we construct two variants:                                                                      Signed-Rank Test [56] (at a significance level of 0.05) yields p-values
+ (4) EnAgent𝐴 , which replaces the selector agent in EnAgent with                                                                         below 7.32 × 10 −3 , confirming that EnAgent significantly outper-
+ the advanced prompting-based Augment, allowing us to evaluate                                                                            forms all variants in terms of Pass@1. Overall, all main components
+ the effectiveness of the selector agent; (5) EnAgent 𝑤𝑜𝑀 , which re-                                                                     contribute substantially to the overall effectiveness of EnAgent.
+ moves the majority voting strategy to assess its contribution within
+ the patch selection component.
+                                                                                                                                          5.4                RQ4: Influence of Ensemble Space
+                                                                                                                                          5.4.1 Process. To address RQ4, we first examine the impact of
+ 5.3.2 Results: Table 3 presents the comparison results of EnAgent                                                                        EnAgent and its three pruning-related variants (i.e., EnAgent 𝑤𝑜𝑃 ,
+ and its five ablation variants in terms of Pass@1. First, we observe                                                                     EnAgent 𝑤𝑜𝐷 , and EnAgent 𝑤𝑜𝑅 introduced in RQ3) on the ensemble
+ that EnAgent consistently outperforms the three pruning-related                                                                          space (i.e., the number of remaining candidate patches after patch
+ variants (EnAgent 𝑤𝑜𝑃 , EnAgent 𝑤𝑜𝐷 , and EnAgent 𝑤𝑜𝑅 ). Specifically,                                                                   pruning) and then conduct a in-depth correlation analysis between
+ EnAgent achieves average improvements of 5.57%, 3.73%, and 3.42%                                                                         ensemble space and selection effectiveness (measured by Pass@1).
+ overEnAgent 𝑤𝑜𝑃 , EnAgent 𝑤𝑜𝐷 , and EnAgent 𝑤𝑜𝑅 , respectively, demon-                                                                   Specifically, we fix the ensemble size to 10 and evaluate four tech-
+ strating the contributions of the patch pruning component and its                                                                        niques: EnAgent 𝑤𝑜𝑃 (which removes the entire patch pruning com-
+ patch deduplication and regression testing strategies. These results                                                                     ponent including both patch deduplication and regression testing
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                         ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+Table 4: Correlation coefficients between ensemble space                      Table 5: Orthogonality of ensemble-based techniques and
+and selection effectiveness. A correlation coefficient with an                existing patch generation techniques in terms of Pass@1.
+absolute value closer to 1.0 indicates a stronger correlation.                The relative improvement in this table is computed as
+                                                                              (𝑐𝑜𝑚𝑏𝑖𝑛𝑎𝑡𝑖𝑜𝑛 − 𝑒𝑛𝑠𝑒𝑚𝑏𝑙𝑒)/𝑒𝑛𝑠𝑒𝑚𝑏𝑙𝑒 × 100%.
+  Correlation       Gemini 2.5       Claude 3.7      GPT-4.1       Mixture
+                                                                              Technique                         Gemini 2.5       Claude 3.7        GPT-4.1
+  Pearson’s 𝑟            0.91            0.73           0.78           0.89
+  Spearman’s 𝜌           1.00            0.80           0.80           1.00   Agentless                           50.40%           54.40%           40.80%
+                                                                              SpecRover                           51.80%           55.60%           42.40%
+  Kendall’s 𝜏            1.00            0.67           0.67           1.00
+                                                                              Augment                             56.00%           63.40%           55.40%
+                                                                              DeiBase                             53.80%           62.80%           53.20%
+strategies), EnAgent 𝑤𝑜𝑅 (which removes the regression testing strat-         EnAgent                             62.40%           66.60%           59.20%
+egy while retaining the patch deduplication strategy), EnAgent 𝑤𝑜𝐷            Augment + Agentless             56.80%(↑1.43%) 64.80%(↑2.21%) 56.80%(↑2.53%)
+(which removes the patch deduplication strategy while retaining               Augment + SpecRover             57.20%(↑2.14%) 64.60%(↑1.89%) 57.00%(↑2.89%)
+                                                                              Augment + Agentless + SpecRover 57.60%(↑2.86%) 65.80%(↑3.79%) 58.00%(↑4.69%)
+the regression testing strategy), and EnAgent (which includes the             DeiBase + Agentless             54.40%(↑1.12%) 63.60%(↑1.27%) 54.60%(↑2.63%)
+complete patch pruning component).                                            DeiBase + SpecRover             54.60%(↑1.49%) 63.80%(↑1.59%) 54.40%(↑2.26%)
+   To further investigate the correlation between the ensemble                DeiBase + Agentless + SpecRover 55.00%(↑2.23%) 64.40%(↑2.55%) 55.60%(↑4.51%)
+                                                                              EnAgent + Agentless             63.20%(↑1.28%) 67.80%(↑1.80%) 61.20%(↑3.38%)
+space and effectiveness, we perform a statistical correlation analy-          EnAgent + SpecRover             63.40%(↑1.60%) 68.20%(↑2.40%) 61.40%(↑3.72%)
+sis [32, 46, 62] using three widely-adopted correlation coefficients:         EnAgent + Agentless + SpecRover 64.60%(↑3.53%) 69.00%(↑3.60%) 62.00%(↑4.73%)
+Pearson’s 𝑟 coefficient [12] (that measures linear correlation), Spear-
+man’s 𝜌 coefficient [48] (that captures monotonic relationships
+                                                                              experimental settings (e.g., LLMs, ensemble size) remain consistent
+and is closely related to Pearson’s 𝑟 coefficient), and Kendall’s 𝜏
+                                                                              with those in RQ1.
+coefficient [28] (that measures rank correlation). According to es-
+tablished thresholds in prior work [7, 45], a coefficient with an             5.5.2 Results: As shown in Table 5, EnAgent consistently outper-
+absolute value of 1.0 denotes perfect correlation; values in the range        forms Agentless and SpecRover in terms of Pass@1, achieving an av-
+[0.8,1.0) indicate very strong correlation, [0.6,0.8) strong correlation,     erage relative improvement of 28.53%. Moreover, all combined tech-
+[0.4,0.6) moderate correlation, [0.2,0.4) weak correlation, and (0,0.2)       niques achieve higher Pass@1 values than any individual patch gen-
+very weak correlation. A value of 0 indicates no correlation.                 eration or ensemble-based technique across all studied LLMs, con-
+5.4.2 Results. As shown in Figure 7, EnAgent, EnAgent 𝑤𝑜𝑅 , and               firming the orthogonality between the two classes of techniques. In
+EnAgent 𝑤𝑜𝐷 all reduce the ensemble space compared to EnAgent 𝑤𝑜𝑃 .           particular, the combined technique EnAgent+Agentless+SpecRover
+Specifically, they achieve average reductions of 27.80%, 30.22%, and          achieves the best overall performance, with an average relative
+39.15%, respectively. These results demonstrate that the patch prun-          improvement of 23.76% over the individual techniques, further vali-
+ing component, along with its patch deduplication and regression              dating that EnAgent can effectively collaborate with existing patch
+testing strategies, effectively reduces the ensemble space. Combined          generation techniques to achieve superior performance.
+with the findings in Table 3 (as discussed in RQ3), which show that
+these components contribute to improved selection effectiveness,              6 Discussion
+we can qualitatively conclude that reducing the ensemble space is             6.1 Practical Impact
+beneficial for enhancing patch selection performance.
+                                                                              Building autonomous agent-based systems for software engineer-
+     To further quantitatively assess the correlation between the en-
+                                                                              ing tasks has emerged as a leading research direction in recent years.
+semble space and selection effectiveness, we compute the Pearson’s
+                                                                              SWE-bench, a widely adopted benchmark, encompasses real-world
+𝑟 , Spearman’s 𝜌, and Kendall’s 𝜏 between the two metrics (ensemble
+                                                                              software engineering tasks such as bug fixing and feature imple-
+space and Pass@1). As shown in Table 4, the absolute values of
+                                                                              mentation. The SWE-bench leaderboard [3] continuously tracks the
+Pearson’s 𝑟 range from 0.73 to 0.91, Spearman’s 𝜌 range from 0.80
+                                                                              state-of-the-art progress in agent-based software engineering sys-
+to 1.00, and Kendall’s 𝜏 range from 0.67 to 1.00, respectively. These
+                                                                              tems. Our proposed framework, EnAgent, has been integrated
+results consistently indicate a strong correlation across all three
+                                                                              into Trae Agent [22], driving it to achieve the first place on
+correlation metrics, suggesting that reducing the ensemble space is
+                                                                              the SWE-bench Verified leaderboard as of January 2026, with
+closely associated with improved selection effectiveness.
+                                                                              a notable Pass@1 score of 78.80%. This configuration of EnAgent
+                                                                              slightly differs from that used in the main experiments. Specifically,
+5.5     RQ5: Orthogonality with existing patch                                the coder agent adopts the Mixture strategy, leveraging four LLMs
+        generation techniques                                                 (Claude 4 Sonnet, Claude 4 Opus, Claude 3.7 Sonnet, and Gemini 2.5
+5.5.1 Process: We first evaluate the performance of two state-of-             Pro) with an ensemble size of 16. Additionally, the tester and selec-
+the-art patch generation techniques (SpecRover [43] and Agent-                tor agents are based on Claude 4 Sonnet. The use of more advanced
+less [57]). To further investigate the orthogonality between ensemble-        LLMs, a larger ensemble size, and increased candidate diversity col-
+based techniques and patch generation techniques, we combine                  lectively enable EnAgent to achieve superior performance, further
+each ensemble-based technique with the patch generation tech-                 demonstrating its scalability and potential for continuous improve-
+niques and measure the resulting performance improvements. Specif-            ment. Furthermore, our associated GitHub repository has attracted
+ically, the patch generation techniques provide additional and more           over 10,000 stars, indicating substantial community interest and
+diverse candidate patches for the ensemble-based techniques. The              adoption. Our findings suggest that integrating ensemble reasoning
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                           Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+Table 6: Quality of regression tests in terms of Accuracy (↑),                      Table 7: Influence of the regression testing strategy in terms
+Precision (↑), Recall (↑), and F1-Score (↑).                                        of the ratios of all-correct (↑) and all-incorrect (↓) instances.
+   Metric                TP            TN              FP       FN          Total       Metric    Technique      Gemini 2.5 Claude 3.7 GPT-4.1 Mixture
+   # Instances         10,424         2,231           6,608     737        20,000        All-   w/o Regression     25.80%      38.40%      26.80%     24.20%
+                                                                                        correct w/ Regression      40.80%      48.00%      37.00%     37.40%
+   Accuracy = (TP+TN)/Total                                                63.28%
+   Precision = TP/(TP+FP)                                                  61.20%      All-   w/o Regression       24.00%      21.60%      28.20%     19.80%
+   Recall = TP/(TP+FN)                                                     93.40%   incorrect w/ Regression        28.60%      25.80%      32.40%     24.60%
+   F1-Score = (2×Precision×Recall)/(Precision+Recall)                      73.95%
+   * TP (true positive): patch passes regression tests and is correct;
+   * TN (true negative): patch does not pass regression tests and incorrect;
+                                                                                    6.3     Context Window Limitations of Agents
+   * FP (false positive): patch passes regression tests but is incorrect;           In our evaluation, EnAgent does not encounter truncation issues,
+   * FN (false negative): patch does not pass regression tests but is correct.      mainly due to the strong long-context capabilities of the underly-
+                                                                                    ing LLMs (200K/1M/1M tokens) and EnAgent’s effective program
+                                                                                    comprehension strategy, which collects contextual information in
+techniques into existing agent-based systems can significantly im-                  a concise and targeted manner. However, we acknowledge that
+prove their ability to resolve complex real-world issues. We believe                context management remains a fundamental challenge for all LLM-
+that this insight could serve as a guiding principle for the design of              based agents, particularly when dealing with larger-scale or more
+future agent-based software engineering frameworks.                                 highly complex codebases. As future work, we plan to develop a
+                                                                                    trajectory summarization strategy that compresses and summarizes
+6.2      Quality of Regression Tests                                                historical context while preserving essential information, providing
+In the patch pruning component, the regression tests selected by                    a promising direction to enhance the robustness and scalability of
+the tester agent play a critical role in determining the overall ef-                LLM-based agents.
+fectiveness of EnAgent. To evaluate the quality of these regression
+tests, we assess the consistency between their pruning decisions                    6.4     Future Work
+and the ground-truth results provided by the golden tests in the                    EnAgent is the first agent-based ensemble reasoning approach for
+SWE-bench. Specifically, we examine whether the regression tests                    repository-level issue resolution. While its effectiveness has been
+accurately determine the correctness of the candidate patches. As                   demonstrated through comprehensive empirical studies, several
+shown in Table 6, the regression tests achieve an Accuracy of 63.28%,               aspects of EnAgent can be further enhanced in future work:
+a Precision of 61.20%, a Recall of 93.40%, and an F1-Score of 73.95%,
+                                                                                    • Improving efficiency: To reduce the token overhead, we plan
+respectively. We further analyze the two types of regression test
+                                                                                      to explore trajectory summarization strategies [63, 65] that com-
+mispredictions (i.e., FP and FN), which directly affect the effective-
+                                                             +𝐹 𝑁 ) is                press the agent’s historical interactions without sacrificing es-
+ness of patch pruning. The overall misprediction rate ( 𝐹𝑇𝑃𝑜𝑡𝑎𝑙
+                                                                                      sential contextual information. In addition, we plan to develop
+36.73%. Among these, FP cases (i.e., incorrect patches mistakenly
+                                                                                      more accurate and efficient regression test selection methods
+passing the regression tests) can be viewed as a conservative patch
+                                                                                      and further reduce time overhead through parallel execution.
+pruning strategy that preserves erroneous patches for subsequent
+                                                                                    • Scaling ensemble size: Our current experiments (as discussed
+selection. In contrast, FN cases (i.e., correct patches mistakenly
+                                                                                      in RQ2) evaluate ensemble sizes ranging from 1 to 10, with results
+discarded) are more detrimental to overall effectiveness, as they
+                                                                                      showing a consistent performance improvement of EnAgent as
+reduce the correct candidate patches. In particular, the FP rate is
+                                                                                      the ensemble size increases. In future work, we plan to investi-
+33.04%, while the FN rate accounts for only 3.69%. This indicates
+                                                                                      gate the potential performance gains of larger ensemble sizes,
+that the risk of discarding correct patches is relatively low.
+                                                                                      while carefully considering cost-efficiency constraints.
+   In addition, we further investigate the impact of regression tests
+                                                                                    • Enhancing patch deduplication: Recent studies have explored
+on instance-level correctness. Specifically, each instance is asso-
+                                                                                      leveraging LLMs for program equivalence detection, such as
+ciated with multiple candidate patches. If all candidate patches
+                                                                                      identifying equivalent mutants [36, 51]. Building on this, we
+are correct, the instance is guaranteed to be resolved successfully;
+                                                                                      plan to investigate LLM-based patch deduplication techniques
+conversely, if all candidates are incorrect, the instance cannot be
+                                                                                      to further enhance the overall performance of EnAgent.
+resolved. Therefore, for ensemble reasoning techniques, it is desir-
+                                                                                    • Enhancing regression testing: Incorporating test coverage
+able to maximize the number of all-correct instances and minimize
+                                                                                      information can help identify tests directly affected by patch
+the number of all-incorrect instances. To this end, we evaluate the
+                                                                                      modifications, ensuring that pruning focuses on issue-relevant,
+ratios of all-correct and all-incorrect instances before and after
+                                                                                      high-impact tests, thereby improving patch selection accuracy.
+applying the regression testing strategy. As shown in Table 7, the
+                                                                                      Accordingly, we plan to integrate code coverage metrics to fur-
+regression testing strategy increases the ratio of all-incorrect in-
+                                                                                      ther enhance the effectiveness of regression test selection.
+stances by 4.45% on average, but more notably increases the ratio of
+all-correct instances by 12.00% on average. These findings further
+support the effectiveness of the regression testing strategy and pro-               7     Threats and Validity
+vide an in-depth explanation for its positive impact on the overall                 Construct Validity. This threat mainly arises from the inherent
+performance of EnAgent.                                                             randomness of LLMs. To mitigate this, we conduct a large-scale
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                  ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+empirical study and release the replication package for practition-       8.2    Ensemble Techniques for LLM
+ers. Moreover, we ensure consistency by repeating all experiments         Ensemble learning [40, 44] has been widely adopted in machine
+three times in RQ1. Notably, the standard deviations of Pass@1            learning and deep learning models to reduce prediction bias and
+for Augment, Augment w/ Pruning, DeiBase, DeiBase w/ Pruning,             improve generalization by selecting a consensus solution from
+and EnAgent are only 0.0052, 0.0039, 0.0038, 0.0044, and 0.0019,          multiple models, thereby mitigating the limitations inherent to
+respectively, indicating high robustness across runs. In addition, a      any single model. Traditional ensemble methods (e.g., bagging [6],
+Wilcoxon Signed-Rank Test [56] (at a significance level of 0.05) yields   boosting [21], and stacking [16]) have achieved notable success
+p-values exceeding 0.38 for all comparisons, indicating no statisti-      across a variety of domains, including image classification [9], nat-
+cally significant differences across the three repeated experimental      ural language processing [59], and anomaly detection [24].
+results and further strengthening the reliability of our findings.            Recent advances have demonstrated the potential of ensemble
+   External Validity. This threat mainly lies in our experimental         techniques to enhance the performance of LLM-based agent sys-
+subjects. To address this, we adopt the widely-used SWE-bench             tems across a range of tasks. In the mathematical reasoning domain,
+benchmark and multiple evaluation metrics commonly used in the            Snell et al. [47] conduct a comprehensive study and introduce the
+issue resolution domain [43, 54, 60, 64]. We further evaluate EnAgent     Best-of-N approach, which generates multiple solutions in paral-
+against four state-of-the-art ensemble reasoning techniques across        lel from a base LLM and employs a reward model to select the
+three leading LLMs and the widely-used SWE-bench benchmark,               highest-scoring solution. In the domain of competition-level code
+ensuring comprehensive comparisons. In future work, we plan               generation, Li et al. [31] propose S*, which leverages both execution
+to extend our evaluation to additional benchmarks and LLMs to             feedback from public and LLM-generated test cases, along with a
+further assess the generalizability and robustness of EnAgent across      clustering-based selection mechanism to guide the final code se-
+diverse settings.                                                         lection. In addition, Mahmud et al. [37] develop EnsLLM, which
+                                                                          utilizes CodeBLEU [41] for syntactic similarity and CrossHair [13]
+                                                                          (a property-based testing tool) for behavior similarity. Both simi-
+8 Related Work                                                            larities are then integrated using a voting mechanism to select the
+                                                                          most reliable candidate solution.
+8.1 Automatic Software Issue Resolution
+                                                                              In the more complex task of software issue resolution, Chen and
+Automatic software issue resolution is a critical task in software        Flaherty [8] propose Augment, an agent that applies the LLM-as-a-
+engineering and has attracted increasing research interest in recent      judge paradigm to assess the semantic alignment between the given
+years. Numerous techniques have been proposed, among which                GitHub issue and a set of candidate patches, ultimately selecting
+agent-based approaches have gained particular prominence.                 the most relevant patch. In addition, Zhang et al. [60] introduce
+   OpenDevin [54] (renamed OpenHands) is among the earliest               DeiBase, which prompts the LLM to generate detailed explanations
+agent-based frameworks, leveraging a planning mechanism based             and confidence scores for each candidate patch, thereby selecting
+on user requirements and utilizing tools (such as file editors, ter-      the one with the highest score. In contrast to existing ensemble
+minals, and web search engines) to iteratively accomplish complex         techniques, we propose EnAgent, the first agent-based ensemble
+tasks. SWE-agent [58] introduces a custom agent-computer inter-           reasoning approach for repository-level issue resolution. EnAgent
+face, enabling agents to interact with the codebase through opera-        is designed to enhance LLM-based issue resolution by formulating
+tions such as viewing and editing files. Moatless [67] enhances issue     it as an optimal search problem and enhancing LLM performance
+resolution by equipping agents with code search tools and retrieval       in issue resolution through a modular agent-based architecture.
+strategies to identify relevant code locations. AutoCodeRover [64]
+further refines the code search capability by representing software       9     Conclusion
+projects as abstract syntax trees, allowing agents to effectively
+retrieve contextual information and locate faults. Building on Au-        In this work, we present EnAgent, the first agent-based ensemble
+toCodeRover, SpecRover [43] improves the specification by gen-            reasoning approach for repository-level issue resolution, which
+erating function summaries, and also incorporates the generation          substantially improves the effectiveness of LLMs. EnAgent formu-
+of reproduction tests to assist in patch generation. Agentless [57]       lates ensemble reasoning as an optimal solution search problem
+adopts a standardized operational pipeline comprising fault local-        and tackles two fundamental challenges, i.e., large ensemble spaces
+ization, patch generation, and patch verification, without requiring      and repository-level understanding, through modular agents for
+agents to dynamically decide on future actions or interact with           generation, pruning, and selection. To comprehensively evaluate
+complex external tools. MarsCode [35] Agent combines advanced             its performance, we conduct extensive experiments using three
+code analysis techniques (i.e., code knowledge graph) with LLM            leading LLMs on the widely-used SWE-bench benchmark. The ex-
+capabilities to provide a systematic process for fault localization,      perimental results show that EnAgent consistently outperforms four
+candidate patch generation, and patch validation.                         state-of-the-art ensemble reasoning baselines across all evaluation
+   Unlike existing individual patch generation techniques, our EnA-       settings, demonstrating its effectiveness in enhancing LLM-based
+gent can be seamlessly integrated with them to build more effective       software issue resolution.
+ensemble reasoning systems (as shown in Section 5.5). Furthermore,
+due to its generalizable and modular design, EnAgent potentially          Acknowledgments
+provides a promising foundation for advancing ensemble reasoning          This work is supported by National Natural Science Foundation of
+in broader and more complex software engineering tasks.                   China (Grant No. 62322208).
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                        Zhao Tian, Pengfei Gao, Junjie Chen, and Chao Peng
+
+
+References                                                                                      Representations.
+ [1] Ibrahim Abdelaziz, Kinjal Basu, Mayank Agarwal, Sadhana Kumaravel, Matthew            [28] Maurice G Kendall. 1938. A new measure of rank correlation. Biometrika 30, 1-2
+     Stallone, Rameswar Panda, Yara Rizk, GP Shrivatsa Bhargav, Maxwell Crouse,                 (1938), 81–93.
+     Chulaka Gunasekara, et al. 2024. Granite-Function Calling Model: Introducing          [29] Jinhan Kim, Juyoung Jeon, Shin Hong, and Shin Yoo. 2022. Predictive mutation
+     Function Calling Abilities via Multi-task Learning of Granular Tasks. In Proceed-          analysis via the natural language channel in source code. ACM Transactions on
+     ings of the 2024 Conference on Empirical Methods in Natural Language Processing:           Software Engineering and Methodology (TOSEM) 31, 4 (2022), 1–27.
+     Industry Track. 1131–1139.                                                            [30] Marinos Kintis, Mike Papadakis, Yue Jia, Nicos Malevris, Yves Le Traon, and Mark
+ [2] Anthropic. 2025. Claude 3.7 Sonnet and Claude Code. https://www.anthropic.                 Harman. 2017. Detecting trivial mutant equivalences via compiler optimisations.
+     com/news/claude-3-7-sonnet.                                                                IEEE Transactions on Software Engineering 44, 4 (2017), 308–333.
+ [3] SWE bench Team. 2025. SWE-bench Leaderboard. https://www.swebench.com/.               [31] Dacheng Li, Shiyi Cao, Chengkun Cao, Xiuyu Li, Shangyin Tan, Kurt Keutzer,
+ [4] Matias Bordese. 2025. Unified diff python parsing/metadata extraction library.             Jiarong Xing, Joseph E Gonzalez, and Ion Stoica. 2025. S*: Test time scaling
+     https://github.com/matiasb/python-unidiff.                                                 for code generation. In Findings of the Association for Computational Linguistics:
+ [5] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. RepairAgent:                  EMNLP 2025.
+     An Autonomous, LLM-Based Agent for Program Repair . In 2025 IEEE/ACM 47th             [32] Xia Li and Lingming Zhang. 2017. Transforming programs and tests in tandem for
+     International Conference on Software Engineering (ICSE). IEEE, 2188–2200.                  fault localization. Proceedings of the ACM on Programming Languages 1, OOPSLA
+ [6] Leo Breiman. 1996. Bagging predictors. Machine learning 24 (1996), 123–140.                (2017), 1–30.
+ [7] Raymond PL Buse and Westley R Weimer. 2009. Learning a metric for code                [33] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. 2023. Is your
+     readability. IEEE Transactions on software engineering 36, 4 (2009), 546–558.              code generated by chatgpt really correct? rigorous evaluation of large language
+ [8] Tongfei Chen and Colin Flaherty. 2025. #1 open-source agent on SWE-Bench                   models for code generation. Advances in Neural Information Processing Systems
+     Verified by combining Claude 3.7 and O1. https://www.augmentcode.com/blog/1-               36 (2023), 21558–21572.
+     open-source-agent-on-swe-bench-verified-by-combining-claude-3-7-and-o1.               [34] Weiwen Liu, Xu Huang, Xingshan Zeng, xinlong hao, Shuai Yu, Dexun Li, Shuai
+ [9] Yushi Chen, Ying Wang, Yanfeng Gu, Xin He, Pedram Ghamisi, and Xiuping                     Wang, Weinan Gan, Zhengying Liu, Yuanqing Yu, Zezhong WANG, Yuxian Wang,
+     Jia. 2019. Deep learning ensemble for hyperspectral image classification. IEEE             Wu Ning, Yutai Hou, Bin Wang, Chuhan Wu, Wang Xinzhi, Yong Liu, Yasheng
+     Journal of Selected Topics in Applied Earth Observations and Remote Sensing 12, 6          Wang, Duyu Tang, Dandan Tu, Lifeng Shang, Xin Jiang, Ruiming Tang, Defu Lian,
+     (2019), 1882–1897.                                                                         Qun Liu, and Enhong Chen. 2025. ToolACE: Winning the Points of LLM Function
+[10] John Clarke, Jose Javier Dolado, Mark Harman, Rob Hierons, Bryan Jones, Mary               Calling. In The Thirteenth International Conference on Learning Representations.
+     Lumkin, Brian Mitchell, Spiros Mancoridis, Kearton Rees, Marc Roper, et al. 2003.     [35] Yizhou Liu, Pengfei Gao, Xinchen Wang, Jie Liu, Yexuan Shi, Zhao Zhang, and
+     Reformulating software engineering as a search problem. IEE Proceedings-software           Chao Peng. 2024. Marscode agent: Ai-native automated bug fixing. arXiv preprint
+     150, 3 (2003), 161–175.                                                                    arXiv:2409.00899 (2024).
+[11] Augment Code. 2025. Augment SWE-bench Verified Agent. https://github.com/             [36] Wei Ma, Shangqing Liu, Zhihao Lin, Wenhan Wang, Qiang Hu, Ye Liu, Cen Zhang,
+     augmentcode/augment-swebench-agent.                                                        Liming Nie, Li Li, and Yang Liu. 2023. LLMs: Understanding code syntax and
+[12] Israel Cohen, Yiteng Huang, Jingdong Chen, Jacob Benesty, Jacob Benesty, Jing-             semantics for code analysis. arXiv preprint arXiv:2305.12138 (2023).
+     dong Chen, Yiteng Huang, and Israel Cohen. 2009. Pearson correlation coefficient.     [37] Tarek Mahmud, Bin Duan, Corina Pasareanu, and Guowei Yang. 2025. Enhancing
+     Noise reduction in speech processing (2009), 1–4.                                          llm code generation with ensembles: A similarity-based selection approach. arXiv
+[13] CrossHair. 2025. An analysis tool for Python that blurs the line between testing           preprint arXiv:2503.15838 (2025).
+     and type systems. https://github.com/pschanely/CrossHair.                             [38] OpenAI. 2025. Introducing GPT-4.1 in the API. https://openai.com/index/gpt-4-
+[14] Google DeepMind. 2025. Gemini 2.5 Pro. https://deepmind.google/models/                     1/.
+     gemini/pro/.                                                                          [39] Mike Papadakis, Yue Jia, Mark Harman, and Yves Le Traon. 2015. Trivial compiler
+[15] Giuseppe A Di Lucca and Massimiliano Di Penta. 2005. Integrating static and                equivalence: A large scale empirical study of a simple, fast and effective equivalent
+     dynamic analysis to improve the comprehension of existing web applications. In             mutant detection technique. In 2015 IEEE/ACM 37th IEEE International Conference
+     Seventh IEEE International Symposium on Web Site Evolution. IEEE, 87–94.                   on Software Engineering, Vol. 1. IEEE, 936–946.
+[16] Saso Džeroski and Bernard Ženko. 2004. Is combining classifiers with stacking         [40] Robi Polikar. 2012. Ensemble learning. Ensemble machine learning: Methods and
+     better than selecting the best one? Machine learning 54 (2004), 255–273.                   applications (2012), 1–34.
+[17] Ryan Ehrlich, Bradley Brown, Jordan Juravsky, Ronald Clark, Christopher Ré,           [41] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sundare-
+     and Azalia Mirhoseini. 2025. CodeMonkeys: Scaling Test-Time Compute for                    san, Ming Zhou, Ambrosio Blanco, and Shuai Ma. 2020. Codebleu: a method for
+     Software Engineering. arXiv preprint arXiv:2501.14723 (2025).                              automatic evaluation of code synthesis. arXiv preprint arXiv:2009.10297 (2020).
+[18] Thomas Eisenbarth, Rainer Koschke, and Daniel Simon. 2001. Aiding program             [42] Matthew Renze. 2024. The effect of sampling temperature on problem solving in
+     comprehension by static and dynamic feature analysis. In Proceedings IEEE Inter-           large language models. In Findings of the association for computational linguistics:
+     national Conference on Software Maintenance. ICSM 2001. IEEE, 602–611.                     EMNLP 2024. 7346–7356.
+[19] Sarah Fakhoury, Saikat Chakraborty, Madanlal Musuvathi, and Shuvendu K Lahiri.        [43] Haifeng Ruan, Yuntong Zhang, and Abhik Roychoudhury. 2025. SpecRover: Code
+     2024. Nl2fix: Generating functionally correct code edits from bug descriptions.            Intent Extraction via LLMs. In 2025 IEEE/ACM 47th International Conference on
+     In Proceedings of the 2024 IEEE/ACM 46th International Conference on Software              Software Engineering (ICSE). IEEE, 963–974.
+     Engineering: Companion Proceedings. 410–411.                                          [44] Omer Sagi and Lior Rokach. 2018. Ensemble learning: A survey. Wiley interdisci-
+[20] Zhiyu Fan, Xiang Gao, Martin Mirchev, Abhik Roychoudhury, and Shin Hwei                    plinary reviews: data mining and knowledge discovery 8, 4 (2018), e1249.
+     Tan. 2023. Automated repair of programs from large language models. In 2023           [45] B Sebastian, C Christian, and P Alexander. 2017. Predicting the resilience of
+     IEEE/ACM 45th International Conference on Software Engineering (ICSE). IEEE,               obfuscated code against symbolic execution attacks via machine learning. In Pro-
+     1469–1481.                                                                                 ceedings of the 26th USENIX Security Symposium (USENIX Security 17), Vancouver,
+[21] Yoav Freund and Robert E Schapire. 1997. A decision-theoretic generalization of            BC, Canada. 16–18.
+     on-line learning and an application to boosting. Journal of computer and system       [46] Donghwan Shin, Shin Yoo, Mike Papadakis, and Doo-Hwan Bae. 2019. Empirical
+     sciences 55, 1 (1997), 119–139.                                                            evaluation of mutation-based test case prioritization techniques. Software Testing,
+[22] Pengfei Gao, Zhao Tian, Xiangxin Meng, Xinchen Wang, Ruida Hu, Yuanan Xiao,                Verification and Reliability 29, 1-2 (2019), e1695.
+     Yizhou Liu, Zhao Zhang, Junjie Chen, Cuiyun Gao, et al. 2025. Trae agent: An          [47] Charlie Victor Snell, Jaehoon Lee, Kelvin Xu, and Aviral Kumar. 2025. Scaling LLM
+     llm-based agent for software engineering with test-time scaling. arXiv preprint            test-time compute optimally can be more effective than scaling parameters for
+     arXiv:2507.23370 (2025).                                                                   reasoning. In The Thirteenth International Conference on Learning Representations.
+[23] Lianghong Guo, Wei Tao, Runhan Jiang, Yanlin Wang, Jiachi Chen, Xilin Liu,            [48] Charles Spearman. 1961. The proof and measurement of association between
+     Yuchi Ma, Mingzhi Mao, Hongyu Zhang, and Zibin Zheng. 2025. Omnigirl: A                    two things. (1961).
+     multilingual and multimodal benchmark for github issue resolution. Proceedings        [49] Zhao Tian and Junjie Chen. 2026. Aligning Requirement for Large Language
+     of the ACM on Software Engineering 2, ISSTA (2025), 24–46.                                 Model’s Code Generation. In 2026 IEEE/ACM 48th International Conference on
+[24] Xu Han, Xiaohui Chen, and Li-Ping Liu. 2021. Gan ensemble for anomaly de-                  Software Engineering (ICSE).
+     tection. In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 35.   [50] Zhao Tian, Junjie Chen, and Xiangyu Zhang. 2025. Fixing Large Language Models’
+     4090–4097.                                                                                 Specification Misunderstanding for Better Code Generation. In 2025 IEEE/ACM
+[25] Mark Harman and Bryan F Jones. 2001. Search-based software engineering.                    47th International Conference on Software Engineering (ICSE).
+     Information and software Technology 43, 14 (2001), 833–839.                           [51] Zhao Tian, Honglin Shu, Dong Wang, Xuejie Cao, Yasutaka Kamei, and Junjie
+[26] EnAgent Homepage. 2026. https://github.com/bytedance/trae-agent/tree/main/                 Chen. 2024. Large Language Models for Equivalent Mutant Detection: How Far
+     evaluation/patch_selection.                                                                Are We?. In Proceedings of the 33rd ACM SIGSOFT International Symposium on
+[27] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press,          Software Testing and Analysis. 1733–1745.
+     and Karthik R Narasimhan. 2023. SWE-bench: Can Language Models Resolve                [52] Thierry Titcheu Chekam, Mike Papadakis, Tegawendé F Bissyandé, Yves Le Traon,
+     Real-world Github Issues?. In The Twelfth International Conference on Learning             and Koushik Sen. 2020. Selecting fault revealing mutants. Empirical Software
+Agent-Based Ensemble Reasoning for Repository-Level Issue Resolution                                                            ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+     Engineering 25 (2020), 434–487.                                                             of big Data 11, 1 (2024), 25.
+[53] Ruiqi Wang, Jiyu Guo, Cuiyun Gao, Guodong Fan, Chun Yong Chong, and Xin                [60] Kexun Zhang, Weiran Yao, Zuxin Liu, Yihao Feng, Zhiwei Liu, Rithesh RN, Tian
+     Xia. 2025. Can llms replace human evaluators? an empirical study of llm-as-a-               Lan, Lei Li, Renze Lou, Jiacheng Xu, et al. 2024. Diversity empowers intelli-
+     judge in software engineering. Proceedings of the ACM on Software Engineering               gence: Integrating expertise of software engineering agents. In The Thirteenth
+     2, ISSTA (2025), 1955–1977.                                                                 International Conference on Learning Representations.
+[54] Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu, Xiangru Tang, Mingchen               [61] Kechi Zhang, Huangzhao Zhang, Ge Li, Jinliang You, Jia Li, Yunfei Zhao, and
+     Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, Hoang H. Tran, Fuqiang              Zhi Jin. 2026. SEAlign: Alignment training for software engineering agent. 2026
+     Li, Ren Ma, Mingzhang Zheng, Bill Qian, Yanjun Shao, Niklas Muennighoff,                    IEEE/ACM 47th International Conference on Software Engineering (ICSE).
+     Yizhe Zhang, Binyuan Hui, Junyang Lin, Robert Brennan, Hao Peng, Heng Ji,              [62] Yucheng Zhang and Ali Mesbah. 2015. Assertions are strongly correlated with test
+     and Graham Neubig. 2025. OpenHands: An Open Platform for AI Software                        suite effectiveness. In Proceedings of the 2015 10th Joint Meeting on Foundations
+     Developers as Generalist Agents. In The Thirteenth International Conference on              of Software Engineering. 214–224.
+     Learning Representations.                                                              [63] Yusen Zhang, Ansong Ni, Ziming Mao, Chen Henry Wu, Chenguang Zhu, Budha-
+[55] You Wang, Michael Pradel, and Zhongxin Liu. 2026. Are "Solved Issues" in                    ditya Deb, Ahmed Awadallah, Dragomir Radev, and Rui Zhang. 2022. SummN: A
+     SWE-bench Really Solved Correctly? An Empirical Study. 2026 IEEE/ACM 48th                   Multi-Stage Summarization Framework for Long Input Dialogues and Documents.
+     International Conference on Software Engineering (ICSE).                                    In Proceedings of the 60th Annual Meeting of the Association for Computational
+[56] Frank Wilcoxon, SK Katti, Roberta A Wilcox, et al. 1963. Critical values and                Linguistics (Volume 1: Long Papers). 1592–1604.
+     probability levels for the Wilcoxon rank sum test and the Wilcoxon signed rank test.   [64] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+     Vol. 1. American Cyanamid Pearl River, NY.                                                  tocoderover: Autonomous program improvement. In Proceedings of the 33rd ACM
+[57] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2025. De-                  SIGSOFT International Symposium on Software Testing and Analysis. 1592–1604.
+     mystifying LLM-Based Software Engineering Agents. Proc. ACM Softw. Eng. 2,             [65] Ming Zhong, Yang Liu, Yichong Xu, Chenguang Zhu, and Michael Zeng. 2022.
+     FSE (2025), 24 pages.                                                                       Dialoglm: Pre-trained model for long dialogue understanding and summarization.
+[58] John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik           In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 36. 11765–
+     Narasimhan, and Ofir Press. 2024. Swe-agent: Agent-computer interfaces enable               11773.
+     automated software engineering. Advances in Neural Information Processing              [66] Yuqi Zhu, Jia Li, Ge Li, YunFei Zhao, Zhi Jin, and Hong Mei. 2024. Hot or cold?
+     Systems 37 (2024), 50528–50652.                                                             adaptive temperature sampling for code generation with large language models.
+[59] Hongzhi Zhang and M Omair Shafiq. 2024. Survey of transformers and towards                  In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 38. 437–445.
+     ensemble learning using transformers for natural language processing. Journal          [67] Albert Örwall. 2025. Moatless Tools. https://github.com/aorwall/moatless-tools.
+

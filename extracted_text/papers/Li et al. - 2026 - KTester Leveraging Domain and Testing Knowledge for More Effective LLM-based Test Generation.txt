@@ -1,0 +1,947 @@
+                                            Knowledge Matters: Injecting Project and Testing Knowledge
+                                                      into LLM-based Unit Test Generation
+                                                          Anji Li                                 Mingwei Liu*                           Zhenxi Chen                              Zheng Pei
+                                                Sun Yat-sen University                       Sun Yat-sen University                  Sun Yat-sen University                Sun Yat-sen University
+                                                    Zhuhai, China                                Zhuhai, China                           Zhuhai, China                         Zhuhai, China
+
+                                                          Zike Li                                   Dekun Dai                            Yanlin Wang                            Zibin Zheng
+                                               Sun Yat-sen University                        Sun Yat-sen University                  Sun Yat-sen University                Sun Yat-sen University
+                                                   Zhuhai, China                                 Zhuhai, China                           Zhuhai, China                         Zhuhai, China
+                                        Abstract                                                                                    ACM Reference Format:
+                                                                                                                                    Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin
+arXiv:2511.14224v2 [cs.SE] 6 Feb 2026
+
+
+
+
+                                        Automated unit test generation using large language models (LLMs)
+                                                                                                                                    Wang, and Zibin Zheng. 2026. Knowledge Matters: Injecting Project and
+                                        holds great promise but often struggles with generating tests that
+                                                                                                                                    Testing Knowledge into LLM-based Unit Test Generation. In 2026 IEEE/ACM
+                                        are both correct and maintainable in real-world projects. This paper                        48th International Conference on Software Engineering (ICSE ’26), April 12–
+                                        presents KTester, a novel framework that integrates project-specific                        18, 2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 13 pages. https:
+                                        knowledge and testing domain knowledge to enhance LLM-based                                 //doi.org/10.1145/3744916.3787769
+                                        test generation. Our approach first extracts project structure and us-
+                                        age knowledge through static analysis, which provides rich context
+                                        for the model. It then employs a testing-domain-knowledge-guided
+                                        separation of test case design and test method generation, combined                         1    Introduction
+                                        with a multi-perspective prompting strategy that guides the LLM                             Unit testing is a fundamental practice in software development
+                                        to consider diverse testing heuristics. The generated tests follow                          that verifies whether a method behaves as expected, playing a
+                                        structured templates, improving clarity and maintainability. We                             key role in ensuring software correctness, maintainability, and
+                                        evaluate KTester on multiple open-source projects, comparing it                             enabling regression testing [39]. As the first line of defense in
+                                        against state-of-the-art LLM-based baselines using automatic cor-                           the development lifecycle, it helps detect and localize bugs early,
+                                        rectness and coverage metrics, as well as a human study assessing                           preventing their propagation [47]. However, writing high-quality
+                                        readability and maintainability. Results demonstrate that KTester                           unit tests manually is often time-consuming and error-prone, as it
+                                        significantly outperforms existing methods across six key metrics,                          requires developers to deeply understand the method’s behavior,
+                                        improving execution pass rate by 5.03% and line coverage by 11.67%                          construct valid input states, and define precise assertions [22].
+                                        over the strongest baseline, while requiring less time and generat-                            For a method under test (i.e., often called the focal method), a well-
+                                        ing fewer test cases. Human evaluators also rate the tests produced                         constructed unit test usually has two parts: the test prefix, which
+                                        by KTester significantly higher in terms of correctness, readability,                       prepares the objects and environment needed to bring the system
+                                        and maintainability, confirming the practical advantages of our                             into a testable state, and the test oracle, which verifies that the actual
+                                        knowledge-driven framework.                                                                 output matches the expected behavior [16]. High-quality unit tests
+                                                                                                                                    improve software reliability and also serve as living documentation,
+                                        CCS Concepts                                                                                facilitating code comprehension and maintenance [31].
+                                                                                                                                       To reduce manual effort, automated test generation techniques
+                                        • Software and its engineering → Software testing and debug-
+                                                                                                                                    have been proposed to generate a suite of unit tests with the
+                                        ging; Software development process management.
+                                                                                                                                    main goal of maximizing the coverage in the software under
+                                                                                                                                    test. Traditional unit test generation techniques include search-
+                                        Keywords
+                                                                                                                                    based [17, 24, 35], constraint-based methods [21, 28, 57], and
+                                        Unit Test, Large Language Models, Domain Knowledge                                          random-based strategies [44, 59]. While effective in achieving code
+                                                                                                                                    coverage, the generated tests are often hard to read and maintain,
+                                         *M. Liu is the corresponding author.                                                       limiting practical adoption [12].
+                                        A. Li, M. Liu, Z. Chen, P. Zheng, Z. Li, D. Dai, Y. Wang and Z. Zheng are with the School
+                                        of Software Engineering and the Zhuhai Key Laboratory of Trusted Large Language
+                                                                                                                                       Recently, large language models (LLMs) have shown great
+                                        Models, Sun Yat-sen University, Zhuhai, China.                                              promise in generating more human-like test code. These LLM-based
+                                        Email: lianj8@mail2.sysu.edu.cn, liumw26@mail.sysu.edu.cn, {chenzhx236, peizh3,             methods demonstrate promising capabilities in understanding code
+                                        lizk8,daidk}@mail2.sysu.edu.cn, {wangylin36, zhzibin}@mail.sysu.edu.cn.
+                                                                                                                                    semantics and synthesizing test code without explicit test speci-
+                                                                                                                                    fications. Despite this potential, current LLM-based methods still
+                                                                                                                                    suffer from key limitations that hinder their practical adoption due
+                                        This work is licensed under a Creative Commons Attribution-NonCommercial-                   to a fundamental lack of essential knowledge. In particular, these
+                                        NoDerivatives 4.0 International License.                                                    models often lack access to project-specific knowledge, such as
+                                        ICSE ’26, Rio de Janeiro, Brazil                                                            how to correctly instantiate and use classes, or how utility methods
+                                        © 2026 Copyright held by the owner/author(s).
+                                        ACM ISBN 979-8-4007-2025-3/2026/04                                                          and APIs interact across modules. They also overlook testing do-
+                                        https://doi.org/10.1145/3744916.3787769                                                     main knowledge, including core principles like boundary value
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                         Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+
+   Focal Method:                                                                              Focal Method:
+   public void copyFrom(SparkApplication sparkApplicationResource) {                          /** Puts a key-value mapping into Flat3Map<K, V>.
+     // get properties from Map<String, String> labels                                         * @param key the key to add
+     if (sparkApplicationResource                                                              * @param value the value to add
+           .getSpec().getDriver().getLabels()                                                  * @return the value previously mapped to this key, null if none
+           .containsKey(Constants.DAG_NAME_LABEL)) {                                           */
+       ...                                                                                    @Override
+   }                                                                                          public V put(final K key, final V value) { ...}
+
+   Test Code:                                                                                 Test Code:
+
+   @Test                                                                                      @Test
+   public void testCopyFromWithAllFields() {                                                  void testPut_NullKey_Size1() {
+     // Prepare SparkApplication Lables                                                         flat3Map.put(null, "Value1");
+     Map<String, String> labels = new HashMap<>();                                              String oldValue = flat3Map.put(null, "Value2");
+     labels.put("dagName", "testUser");   ❌ Incorrect label key fails to                        assertNotNull(oldValue);          ❌ Inadequate Verification. The
+                                          trigger the conditional branch.                       // expected return is old value   return value needs to be checked.
+                                                                                                assertEquals("Value1", oldValue);
+     labels.put(Constants.DAG_NAME_LABEL, "testQueue");                                                                             ✅ Proper validation
+                                                                                                // Verify size of map remains 1
+     ...
+   }
+                                                     ✅correct label key                         assertEquals(1, map.size());        enables fault detection.
+                                                                                              }
+
+
+
+Figure 1: Motivational Examples(a): Setting Tested Object                                 Figure 2: Motivational Examples(b): Insufficient Assert State-
+Incorrectly                                                                               ments
+
+
+
+analysis, exception handling, or the separation between test de-                          the pipeline leverages both the extracted project knowledge and
+sign and implementation. This lack of both project-specific and                           guidance from established software testing principles.
+testing-domain knowledge often results in test code that is                                  Our approach’s core innovations are twofold. First, the explicit
+unreliable and difficult to maintain.                                                     incorporation of project-aware knowledge provides the LLM
+   As illustrated in Figure 1-3, these issues commonly stem from                          with rich, contextualized information about the codebase,
+the lack of project-specific knowledge and test domain expertise in                       leading to more accurate and meaningful tests. Second, we intro-
+existing LLM-based test generation methods. For instance, Figure 1                        duce a testing domain knowledge–guided separation of test
+shows an incorrect construction of the labels Map used by SparkAp-                        design and test generation and multi-perspective test case de-
+plication, inserting the key “dragName” instead of the correct con-                       sign prompting strategy. By decoupling the “what to test” from
+stant Constants.DAG_NAME_LABE. This error arises from a lack of                           “how to test”, we make the testing intent explicit and improve the
+awareness of constructor dependencies and configuration require-                          semantic clarity and maintainability of the generated test code.
+ments. Figure 2 depicts a test with insufficient assert statements,                          We validate our approach on several real-world open-source
+weakening its effectiveness. Meanwhile, Figure 3 shows an incon-                          projects, comparing it against state-of-the-art LLM-based baselines
+sistent test structure with hard-coded values and missing essential                       using both automated metrics (e.g., execution pass rate, line cov-
+setup logic, which results in fragile and difficult-to-maintain code.                     erage) and a human study assessing readability, maintainability,
+   To overcome limitations in existing LLM-based unit test genera-                        and test intent clarity. Our findings show that (1) our method con-
+tion, we propose a novel framework that integrates project-specific                       sistently outperforms baselines across six key metrics, improving
+knowledge with software testing domain knowledge to guide the                             execution pass rate by 5.03% and line coverage by 11.67% compared
+test generation process. Our approach consists of two main phases:                        to the strongest baseline, while takes shorter time and generate
+an offline knowledge extraction phase and an online test generation                       less test cases; (2) the modular test case transformation component,
+pipeline. In the offline phase, we perform static analysis on the tar-                    which embodies the testing-principle-guided design, has the largest
+get project to extract two key types of knowledge: project structure                      individual impact, with removal causing a drop of 11.45% in execu-
+knowledge, which includes class definitions, method signatures,                           tion pass rate and 13.39% in line coverage; and (3) human evaluators
+and field declarations; and project usage knowledge, which cov-                           rate our generated tests significantly higher in correctness, read-
+ers invocation patterns, dependencies, and related functions. This                        ability, and maintainability, confirming the practical advantages of
+comprehensive project knowledge is used to provide rich contex-                           our knowledge-driven framework.
+tual information that improves the relevance and accuracy of the                             Our main contributions are:
+generated tests. The online test generation pipeline involves five                             • We propose a novel test generation framework that in-
+sequential steps: (1) test class framework generation, which sets                                tegrates project-specific knowledge with testing domain
+up reusable scaffolding such as setup and teardown methods; (2)                                  knowledge. By leveraging comprehensive project knowledge
+multi-perspective test case design, where test scenarios are created                             and applying a separation of test design and test code gen-
+from complementary testing heuristics; (3) test method transfor-                                 eration guided by testing domain knowledge, our approach
+mation, which converts structured test cases into executable test                                produces more accurate and maintainable test cases.
+methods; (4) test class integration, assembling all generated meth-                            • We introduce a multi-perspective prompting strategy along
+ods into a coherent test class; and (5) test class refinement, which                             with testing-domain-knowledge-guided separation of test
+improves code quality and maintainability. Throughout these steps,                               case design and test method implementation, enabling the
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                         ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+      Test Case with Hard Encoding:                                                              class Lexer_nextToken_Test {                      Test Class
+      @Test
+                                                                                                   private Lexer lexer;
+      void testFindMatchPattern_NormalCases() throws Exception {                                   private Token token;
+                                                                                                   ……                                                    Fields
+        Patterns pattern = new Patterns(MatchType.EXACT);
+        // Prepare InputCharacter array for the normal case 'EFG'                                  @BeforeEach
+        InputCharacter[] characters = new InputCharacter[] {                                       void setupBeforeEach() {
+           new InputCharacter(CharacterType.ALPHABET, 'E'),                                          // Initialize token for tests
+           new InputCharacter(CharacterType.ALPHABET, 'F'),                                          token = new Token(); ……;
+           new InputCharacter(CharacterType.ALPHABET, 'G')                                         }
+        };                                             ❌ Set specific values ​
+                                                                                                                                             Setup Method
+        // Call the focal method with inputs           for each character                            @AfterEach
+        NameState result = FindMatchPattern(characters, pattern);                                    void teardownAfterEach() {
+      }                                                                                                // Close lexer
+      Test Case with Logical Setup:                                                                    lexer.close(); ……;
+                                                                                                     }                                 Teardown Method
+      @Test
+      void testFindMatchPattern_exactMatch() throws Exception {                                      @Test
+        // Given                                                                                     void testNextToken_ValidTokenReturned() { …… }
+        ValuePatterns pattern = new ValuePatterns(MatchType.EXACT, "EFG");
+        InputCharacter[] characters = getParser().parse(
+                                                                                                     @Test
+          getParser().parse(MatchType.EXACT,
+            MatchType.EXACT, pattern.pattern());
+                                             pattern.pattern());
+                                                                                                     void testNextToken_CommentDetected() { …… }
+                                                 ✅ Set parameter value via the                       // more tests...
+        // When                                  focal class’s default parser
+        NameState result = FindMatchPattern(characters, pattern);                                }
+      }
+                                                                                                                                              Test Methods
+
+                                                                                                             Figure 4: Test Class Example
+Figure 3: Motivational Examples(c): Hard Encoding Values
+
+                                                                                       field access patterns, call relationships, and document comments.
+        LLM to generate semantically rich, logically structured, and
+                                                                                       This knowledge base provides a foundation for accurate, context-
+        purposeful tests.
+                                                                                       aware test generation. Second, in the online test generation stage
+     • We perform extensive evaluation, including automatic met-
+                                                                                       (Section 2.2), given a focal method, KTester retrieves relevant project
+        rics and human studies, demonstrating that our method con-
+                                                                                       knowledge and testing heuristics to construct a knowledge-rich
+        sistently outperforms existing LLM-based approaches in cor-
+                                                                                       prompt for the LLM. The LLM then produces a structured test class
+        rectness, readability, maintainability, and overall quality.
+                                                                                       framework along with diverse test cases, which are validated and op-
+    All data/code used in this study is provided in the package [9].                   tionally repaired to ensure correctness and completeness. Figure 4
+                                                                                       illustrates an example generated test class, including field declara-
+2    Approach                                                                          tions, setup and teardown methods, and multiple test methods.
+We present KTester, a knowledge-aware unit test generation frame-
+work that leverages both project-specific knowledge and testing                        2.1       Project Knowledge Extraction
+domain knowledge to guide LLMs in generating high-quality, se-                         To mitigate the limitations of LLMs in understanding project-
+mantically meaningful, and maintainable unit tests.                                    specific semantics, KTester performs a comprehensive offline anal-
+   Unlike prior LLM-based approaches that rely solely on the focal                     ysis to extract structured project knowledge from the codebase. This
+method as input and often generate brittle or unclear test cases,                      process is based on the assumption that unit tests are to be generated
+KTester decouples test design from test code generation, and injects                   for methods within a project, and thus, knowledge beyond the focal
+knowledge at multiple stages to address key deficiencies of prior                      method—such as class definitions, field usage, method invocations,
+work (see Figure 1, 2 and 3). In particular, KTester is designed around                and usage examples—is essential for meaningful test generation.
+the following core principles:                                                            Specifically, KTester conducts two key analyses to construct
+   Project Knowledge Awareness. We statically analyze the en-                          a reusable project knowledge base: project structure knowl-
+tire codebase to extract structured information about classes, meth-                   edge mining, which captures the static architecture of the code-
+ods, usage patterns, dependencies, and documentation. This knowl-                      base—including class hierarchies, method signatures, and inter-
+edge is later used to resolve object instantiation, locate related APIs,               method dependencies—and project usage knowledge mining, which
+and reduce hallucinations during code generation.                                      extracts realistic invocation contexts that reveal how focal methods
+   Testing Knowledge Awareness. We explicitly guide the                                are constructed, initialized, and invoked in real code scenarios.
+LLM to design test cases from multiple testing perspectives
+(e.g., control flow, boundary, exception handling), instead of                         2.1.1 Project Structure Knowledge Mining. To enable knowledge-
+treating the task as a black-box code-to-code translation.                             aware unit test generation, KTester statically analyzes the source
+   Modular Generation Pipeline. We separate test class frame-                          code to mine structured project structure knowledge. This includes
+work construction, scenario-specific test design, and final test                       the architectural, semantic, and dependency-level information nec-
+case synthesis into distinct stages, improving modularity,                             essary for understanding the focal method’s context and generating
+reusability, and interpretability of generated tests.                                  correct, maintainable test code. The analysis is based on abstract
+   The two-stages process of KTester generating the test class is                      syntax tree (AST) parsing and code graph construction, allowing
+showed in Figure 5. First, during the offline knowledge extraction                     us to systematically extract and index key properties of classes and
+stage (Section 2.1), we perform static analysis of the target project                  methods across the project.
+to build a structured knowledge base capturing essential project-                         Specifically, for each class and its methods or constructors, we
+specific information such as class hierarchies, method signatures,                     extract the following information:
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                       Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+
+
+                                  ①                                             ②
+                                                                                                                                 Project Knowledge
+                                   Project Structure       Project                Project Usage            Project Knowledge              Extraction
+                                  Knowledge Mining      Information             Knowledge Mining                  Base
+                 Project
+                                                                      Usage Knowledge
+                                                                                              Structure Knowledge
+
+                                  ③ Test Class                              ⑥                                            ⑦
+                                                        Test Class             Test Class               Test Class            Test Class
+                                      Framework
+                                                       Framework              Intergration                Draft              Refinement
+                                      Generation
+                Method                                                                                                                        Test Class
+               Under Test
+                                  ④                                         ⑤
+                                      Test Cases                              Test Method                                                  Test Class
+                                                       Test Cases                                     Test Methods
+                                        Design                               Transformation
+                                                                                                                                           Generation
+
+
+                                                          Figure 5: The Framework of KTester
+
+
+Structural Metadata. We collect the class name, package path,                           computations—rather than being hardcoded literals. By grounding
+field declarations, constructor signatures, and method signatures                       the generation process in real-world usage, this approach improves
+(including parameter types and return types). This information en-                      both the realism and maintainability of the generated test cases. As
+ables the model to understand how to instantiate the target class or                    the code snippet illustrated in Figure 6, the focal method findMatch-
+construct inputs for the method under test. For example, if a method                    Pattern(InputCharactor[], Patterns) is invoked inside findMatchPat-
+requires a parameter of type UserConfig, this metadata reveals how                      tern(ValuePatterns) after checking whether the variable pattern is
+UserConfig can be constructed via its fields and constructors.                          an instance of ValuePatterns class, and called a Parser to parse this
+Document Comments. We extract Javadoc-style comments as-                                pattern into an InputCharactor array. Such code would be extracted
+sociated with classes, constructors, and methods, as they often                         as representative usage knowledge.
+contain high-level semantic descriptions of behavior and usage                             To mine project usage knowledge, we first identify the relevant
+constraints. These comments help LLMs infer testing intent and                          caller context and then extract semantically meaningful execution
+expected behavior. For instance, a comment like /* Returns null                         traces showing how the focal method is invoked in practice.
+if no user is found */ suggests that null should be included                            Caller Method Discovery. For each focal method, we identify its
+as a valid return value in test oracles.                                                caller methods using the static call graph built during the offline
+Dependency Relations. For each method or constructor, we ex-                            analysis. When the focal method is private or not directly reachable
+tract the list of invoked methods and accessed fields. These re-                        from public APIs, we trace the shortest call chain from an externally
+lationships are fundamental for understanding how the method                            accessible method to the focal method. This ensures that the usage
+interacts with its internal state or other classes. For example,                        knowledge reflects a realistic and complete setup process, capturing
+if method updateBalance() internally calls validateAccount()                            how the focal method is constructed and triggered in actual usage.
+and accesses this.balance, such dependencies indicate that tests                        Path-sensitive Usage Trace Extraction. For each discovered
+should ensure the account is in a valid state and that balance updates                  caller method, we construct a Control Flow Graph (CFG) [11] and
+are properly asserted. These dependency relations also support the                      perform intra-procedural slicing to extract execution paths from the
+identification of functionally related methods (used later in Usage                     method’s entry point to the focal method invocation. By pruning
+Context Construction) and enable accurate call path tracing for                         unrelated branches and removing irrelevant operations, we isolate
+generating invocation examples (Section 2.1.2).                                         minimal yet semantically rich usage traces. These traces, which
+                                                                                        demonstrate how the focal class is instantiated and how arguments
+2.1.2 Project Usage Knowledge Mining. To mitigate the limitations
+                                                                                        are prepared, are incorporated into the generation prompt as part of
+of LLMs in understanding project-specific usage patterns, we ex-
+                                                                                        the Project Usage Knowledge. This provides the LLM with grounded,
+tract Project Usage Knowledge from the source code. This knowledge
+                                                                                        context-aware examples that help it synthesize test inputs aligned
+captures realistic invocation scenarios of the focal method, includ-
+                                                                                        with the project’s actual usage conventions.
+ing (1) how its input parameters are constructed and (2) how the
+target object is initialized—both of which are essential for generat-                   2.1.3 Function-Level Index Construction. To enable scalable and
+ing executable and semantically meaningful unit tests.                                  consistent test generation, each method or constructor is trans-
+    Such usage knowledge provides concrete, in-project examples                         formed into a knowledge unit with its signature, documentation, and
+that reflect actual calling contexts, enabling the LLM to synthesize                    dependencies (invoked methods and accessed fields). These units
+inputs that align with real usage scenarios. For example, it reveals                    are stored in an indexable format, forming a function-level knowl-
+how the focal class is typically constructed in the project, which                      edge base that enables efficient retrieval of related methods, usage
+may involve complex initialization logic or dependency injection.                       contexts, and class-level information during prompt construction.
+It also uncovers how input parameters are derived—such as being                            Unlike ad hoc, per-method extraction, our analysis is conducted
+composed from helper methods, shared resources, or intermediate                         once per project and reused across focal methods. The knowledge
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                               ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                                                                                        Prompt For Test Class Framework Generation
+  Invocation example of findPattern(IputCharactor[],Patterns):
+                                                                                             You are tasked with creating a framework for a test class in Java.
+   NameState findPattern(final Patterns pattern) {                                           Now analyze the following information, and complete the test
+     switch (pattern.type()) {                                                               class template in the following requirements:
+                                                                                             1.   Provide the code wrapped in a Markdown code block “```java” at the
+       case EXACT:                                                                                beginning and “```” at the end.
+       case WILDCARD:                                                                        2.   Initialize necessary fields and dependencies within setupBeforeAll() and
+           assert pattern instanceof ValuePatterns;                                               setupBeforeEach().
+                                                                                             3.   Handle any required cleanup in teardownAfterEach() and
+           return findMatchPattern((ValuePatterns) pattern);                                      teardownAfterAll().
+   }                                                                                         4.   ...                                                        Task Description
+                                                                                             @input{focal method and target class}
+   private NameState findMatchPattern(ValuePatterns pattern) {                               Here is the code of focal method, <method sigature>, with the focal
+     return findMatchPattern(                                                                class <class name>:
+       getParser().parse(pattern.type(), pattern.pattern()),                                                Class <class_name> {
+       pattern);                                                                                                dependent field declaration;
+                                                                                                                dependent method signature;
+   }                                                                                                            <method signature> {<code>} }            Code Under Test
+                                                                                             @input{related context}
+                                                                                             Document comment of focal class & focal method: <javadoc>
+                                                                                             Constructors of focal class: <constructor code>
+Figure 6: Illustration of extracting invocation examples from                                Constructors of param <param class>: <constructor code>
+a caller method via control flow pruning.                                                    Usage examples of focal method: <usage example code>
+                                                                                             Existing Test class: <example test code>    Relevant Project Knowledge
+                                                                                             @input{test class template}
+
+base is also incrementally updatable, requiring reprocessing only                                         package <package name>;
+                                                                                                          import ...;
+changed entities, which makes it practical for evolving codebases.                                        // Add other imports if necessary
+                                                                                                          Class <class_name> {
+While our method is language-agnostic, we focus on Java due to its                                            @BeforeAll
+                                                                                                              static void setupBeforeAll() {}
+popularity and mature analysis tooling[4, 7]. We use Spoon [7] to                                             @BeforeEach
+                                                                                                              void setupBeforeEach() {}
+efficiently extract ASTs, control flow, and dependency graphs.                                                @AfterEach
+                                                                                                              void teardownAfterEach() {}
+                                                                                                              @AfterAll
+                                                                                                              static void teardownAfterAll() {} }
+2.2     Test Class Generation
+                                                                                                                                                     Test Class Template
+As illustrated in Figure 5, KTester generates a complete and exe-
+cutable test class for a given focal method by leveraging offline-
+                                                                                           Figure 7: Prompt for test class framework generation.
+extracted project knowledge and domain-specific testing expertise.
+It constructs a rich generation context that integrates structural
+program information, usage patterns, and unit testing heuristics,
+                                                                                       ensuring syntactic correctness, thereby enabling a robust and main-
+guiding the LLM to produce high-quality, realistic unit tests. The
+                                                                                       tainable test framework. The focal method and class section
+generation pipeline consists of five steps: test class framework gen-
+                                                                                       specifies the method under test and its containing class, providing
+eration, test case design, test method transformation, test class
+                                                                                       the primary scope for framework generation. The output spec-
+integration, and test class refinement.
+                                                                                       ification section defines the expected format and content of the
+   Inspired by how developers and testers write unit tests in prac-
+                                                                                       generated framework, ensuring consistency and completeness.
+tice, KTester mimics the typical testing workflow—first planning
+                                                                                          To enrich the context, the relevant project knowledge section
+test cases based on expected behaviors and coverage goals, then
+                                                                                       of the prompt draws from an offline-constructed knowledge base
+gradually transforming them into executable test code—rather than
+                                                                                       that captures both semantic and structural details of the codebase.
+relying on a single-step code generation process.
+                                                                                       This includes document comments for the focal class and method,
+2.2.1 Test Class Framework Generation. The first step prompts the                      which describe functionality, preconditions, and side effects to in-
+LLM to generate a test class framework that establishes the neces-                     form meaningful setup and teardown procedures. It also comprises
+sary environment for unit testing. Unlike prior methods [20, 52] that                  constructors and parameter details, assisting the LLM in object in-
+directly prompt the LLM with a focal method and expect complete                        stantiation and input preparation, particularly in complex scenarios.
+test cases in one shot, KTester decouples the generation process by                    Additionally, usage knowledge mined from the codebase provides
+first constructing a reusable, project-aware test class framework.                     real-world usage patterns of the focal method and related classes,
+This decision is grounded in a key insight: test generation is not                     grounding the test framework in practical contexts. Finally, existing
+merely a method-level translation task, but a context-sensitive ac-                    test classes associated with the focal class are incorporated as ref-
+tivity requiring awareness of surrounding project structure, usage                     erences for mocking strategies, resource management, and testing
+conventions, and domain-specific testing patterns. As illustrated in                   conventions, with only setup logic and class-level configurations
+Figure 7, we design a prompt template grounded in project knowl-                       extracted to avoid redundancy.
+edge and test domain knowledge to guide this process. The prompt                          The test class template section outlines the structural skeleton,
+is composed of several key components, including core task and                         including annotations, lifecycle methods (e.g., setup and teardown),
+instructions, focal method and class, relevant project knowledge,                      and placeholders for field declarations. This template, informed by
+test class template, and output specification.                                         practical experience in writing test code, serves as a starting point
+   The core task and instructions section provides high-level                          for the LLM to fill in with project-specific logic and configurations.
+guidance to the LLM on setting up proper initialization and cleanup                       By integrating these components, KTester creates context-aware
+routines, enforcing access restrictions to target class internals, and                 prompts that enable the LLM to generate reusable, well-structured
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                          Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+                              Prompt For Test Cases Design                                                 mirrors human testing practices, where related scenarios are often
+       As a professional Java software testing expert, your task is to generate                            clustered for clarity and reuse.
+       formatted test cases for a focal method.
+       Following the guidance: <conditional branch> or <functional behavoir>
+                                                                                                              To guide the LLM, we design three types of prompts, each cor-
+       or <exception behavior>                                                                             responding to a classical testing perspective, as shown in Figure 8.
+          Conditional Branch         Functional Behavior         Exception-oriented                        These prompts share a common structure, with variations only in
+              Guidance                    Guidance                   Guidance
+         Create test cases to        Analyze the method's      Analyze method behavior
+                                                                                                           the design guidance section.
+         cover all conditional       functionality and         and identify ALL possible
+         branches in the target      identify possible input   exception scenarios,                             • Condition branch-driven prompt: This prompt encour-
+         method, including if,       combinations including    then design test cases that
+         else if, else, switch and   normal cases and          trigger each identified                            ages the LLM to explore different control-flow paths, such
+         case statements.            boundary conditions.      exception.                                         as conditional statements and loops, improving branch and
+       @input{focal method and target class}                                                                      path coverage.
+       Here is the code of focal method, <method sigature>, with the focal class
+       <class name>: <code under test>                                                                          • Functionality-driven prompt: This prompt focuses on the
+       @output{test cases}                                                                                        intended semantics of the method, helping the LLM generate
+       Follow the JSON format provided here for the output:                                                       test inputs that exercise typical behaviors and edge cases
+           [{
+             "group": "test name",
+                                                                                                                  derived from parameter types and return values.
+             "cases": [{                                                                                        • Exception-oriented prompt: This prompt drive the gen-
+               "input": [
+                 {"parameter": "param name", "value": "param value"},                                             eration of test cases for robustness and failure handling,
+                 {...}],
+               "expected": "expected exception or behavior",                                                      including invalid or unexpected inputs that should trigger
+               "description": "test scenario description"
+             }, {...}]                                                                                            exceptions or error states.
+           },{...}]
+                                                                                                              This multi-view prompt design is modular and extensible—new
+                                                                                                           testing views (e.g., performance, concurrency) can be incorporated
+       Figure 8: Prompts for multi-view test case design.                                                  by adding corresponding prompt templates. By separating test
+                                                                                                           planning from execution and grounding the design in testing theory,
+                                                                                                           this step enhances the quality, coverage, and interpretability of
+test class frameworks aligned with project conventions. This mod-                                          generated tests.
+ular approach enhances consistency and reduces errors common
+in one-shot generation. Separating framework from test logic also                                          2.2.3 Test Method Transformation. After designing structured
+enables reuse across methods, minimizing redundant effort and                                              test cases, KTester transforms each test case group into an exe-
+reflecting practical testing workflows.                                                                    cutable test method, aligning with how developers typically write
+                                                                                                           tests—first decide what to test, then implement the logic.
+2.2.2 Test Cases Design. After generating the test class framework,                                        Prompt Construction. We design a usage-aware prompt with
+the next step is to design high-quality test cases that cover different                                    several semantically distinct sections to guide the LLM in generat-
+functional and non-functional behaviors of the focal method. In                                            ing executable test methods, as shown in Figure 9. First, test case
+this phase, KTester focuses on the planning of test cases, rather                                          groups contain structured cases sharing a common testing intent
+than directly generating test code. Unlike the previous step, test                                         (e.g., valid inputs, edge cases, exceptions), each with a scenario, in-
+case design solely leverages domain-specific testing knowledge,                                            puts, and expected output. The LLM generates one test method per
+without relying on project-specific context. The only input is the                                         group to ensure modularity and clarity. Second, the usage context,
+focal method itself.                                                                                       retrieved from the project knowledge base (Section 2.1.2), provides
+   KTester adopts a multi-view guidance strategy grounded in estab-                                        focal method dependencies and related methods to guide realistic
+lished software testing principles. The LLM is explicitly instructed                                       invocation and assertion generation. Lastly, the test class frame-
+to design test cases from multiple perspectives—such as functional                                         work offers reusable setup/teardown code and field declarations,
+behavior, boundary conditions, and exception handling—and to or-                                           promoting consistency and eliminating redundancy.
+ganize them into logical groups based on shared testing intent. Each                                       Usage Context Retrieval. To enhance generation quality, we re-
+test case is represented internally in a machine-readable intermedi-                                       trieve methods that are functionally related to the focal method and
+ate format that records structured natural-language descriptions of                                        its dependencies, offering a broader context of real-world usage
+the scenario. In our implementation, this intermediate representa-                                         patterns. Based on our observations, related methods are identi-
+tion is realized using a lightweight JSON structure, and an illustra-                                      fied based on shared usage of functions and fields. We define the
+tive example is provided in our replication package [9]. This design                                       similarity between two functions 𝑎 and 𝑏 using a Jaccard-based
+intentionally decouples test intent from concrete executable code,                                         metric [36] by combining with method usage similarity 𝑆𝑖𝑚𝑚 (𝑎, 𝑏)
+improving clarity and maintainability. The intermediate representa-                                        and field usage similarity 𝑆𝑖𝑚 𝑓 (𝑎, 𝑏):
+tions are subsequently translated into framework-specific test code.
+   To facilitate structured generation, the LLM is required to output                                                        𝑆𝑖𝑚(𝑎, 𝑏) = 𝑆𝑖𝑚𝑚 (𝑎, 𝑏) + 𝑆𝑖𝑚 𝑓 (𝑎, 𝑏)                     (1)
+grouped test cases, where each group targets a distinct aspect of
+the focal method. For example, one group may cover valid inputs
+                                                                                                                                                    |𝑀 (𝑎) ∩ 𝑀 (𝑏)|
+for core functionality, another may focus on boundary values such                                                                𝑆𝑖𝑚𝑚 (𝑎, 𝑏) =                                          (2)
+as empty lists or null, and a third may address failure or exception-                                                                               |𝑀 (𝑎) ∪ 𝑀 (𝑏)|
+triggering scenarios. This grouped organization improves modular-                                                                                   |𝐹 (𝑎) ∩ 𝐹 (𝑏)|
+ity and controllability during subsequent transformation steps and                                                                 𝑆𝑖𝑚 𝑓 (𝑎, 𝑏) =                                       (3)
+                                                                                                                                                    |𝐹 (𝑎) ∪ 𝐹 (𝑏)|
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                               ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+   Here, 𝑀 (𝑎) and 𝐹 (𝑎) denote the sets of methods and fields used                                         Prompt For Test Method Transformation
+by function 𝑎, respectively. We select the top-N most similar func-                          You are a professional Java software testing expert. Your task is to
+                                                                                             generate unit test method for a focal method, based on existing
+tions to construct the context.                                                              test class framework and formatted test cases. Requirements are
+   For each related class, we include: (1) the class declaration, op-                        as follows:
+                                                                                             1.    Follow the given test class framework; do not modify @Before/@After
+tionally with Javadoc comments; (2) relevant field declarations                                    methods.
+                                                                                             2.    Create one test function per test case group, ensuring all cases are
+accessed by dependent or related methods; (3) signatures of de-                                    included. Use parameterized tests where appropriate.
+                                                                                             3.    …                                                       Task Description
+pendent methods with comments; and (4) signatures of related
+                                                                                             @input{focal method and target class}
+methods, annotated with markers indicating shared usage. This                                Here is the code of focal method, <method sigature>, with the
+context provides the LLM with concise, relevant information to                               focal class <class name>: <code under test>         Code Under Test
+support realistic test generation.                                                           @input{initial test class framework}
+                                                                                                                 <test class framework code>
+                                                                                             @input{existing test case}
+2.2.4 Test Class Integration. After transforming individual test                             Here's the existing test cases: <json test cases>
+                                                                                                                                                  Test Class Framework
+                                                                                                                                                 & Formatted Test Cases
+cases into test methods, the next step is to integrate them into a                           @input{related context}
+coherent and executable test class. This step ensures that all test                          Document comment of focal class & focal method: <javadoc>
+                                                                                             Dependent classes of focal method:
+methods, including newly generated ones and any accompanying
+                                                                                                    Class <class_name>:
+setup or teardown logic, are correctly incorporated into the test                                     relationship: param/return type /related class
+                                                                                                      accessed field: <field declaration>
+class framework without introducing redundancy or conflicts.                                          invoked method: <javadoc> + <method signature>
+    To achieve this, KTester performs static analysis on the gener-                                   related function: <function signature>
+                                                                                                                     related with <method signature>
+ated methods to identify their roles and resolve duplicates. The                                                                           Project Knowledge Context
+integration process proceeds as follows:
+    Setup/Teardown Merging. If a newly generated method is iden-
+                                                                                                  Figure 9: Prompt for test method trasformation.
+tified (via static analysis) as a setup or teardown method (e.g., an-
+notated with @Before, @BeforeEach, etc.), and an existing method
+of the same type already exists, we merge their bodies. Specifically,                  symbols. Leveraging the previously constructed project-level test
+any code in the new method that is not present in the original is ap-                  knowledge base, KTester can automatically resolve dependencies
+pended, ensuring initialization routines are preserved and extended                    by appending missing imports or correcting incorrect ones based on
+without duplication.                                                                   simple class names. The comprehensive indexing of classes, meth-
+    Test Method Deduplication. For test methods and general                            ods, and fields from the static analysis phase facilitates accurate
+helper methods, we identify duplicates by method name. When two                        dependency resolution without human intervention.
+methods share the same name, we further compare their bodies and                       LLM-based Repair. For errors arising from semantic misunder-
+retain the longer implementation as a proxy for logical richness.                      standings or subtle logic issues that cannot be fixed by static rules,
+This deduplication addresses a common pattern where the LLM                            KTester applies LLM-based repair using compile-time errors, run-
+first generates simple placeholder tests and later generates more                      time logs, and failing test feedback. This information, combined
+complete versions with the same or similar names, ensuring that                        with the focal method context and relevant function signatures, is
+the final output preserves the more comprehensive implementation.                      incorporated into a repair prompt that is fed back to the LLM. The
+    Non-conflicting Insertion. For all other non-conflicting meth-                     model then performs targeted correction of issues such as incor-
+ods, we append them directly to the test class. This modular ad-                       rect assertions, missing exception handling, or logic bugs causing
+dition supports test diversity and extensibility without disrupting                    runtime failures.
+the original structure. The integration process leverages standard                        Importantly, this refinement process extends beyond compilation
+AST-based static analysis tools to parse and manipulate the Java                       to include execution feedback. If runtime errors occur or tests fail
+code structure safely and consistently. This automation ensures that                   due to assertion mismatches, these failure details are fed into the
+the final test class is executable, maintainable, and free of duplicate                repair pipeline to enable iterative correction and improvement of
+or conflicting code.                                                                   the generated test code. This dynamic feedback loop helps ensure
+    By decoupling method generation from class integration, our ap-                    that the final test class is not only syntactically correct but also
+proach maintains modularity while aligning with practical software                     functionally robust and reliable.
+engineering workflows, where tests are often extended iteratively
+and merged across sessions or contributors.                                            3    Evaluation
+2.2.5 Test Class Refinement. In this stage, KTester validates the                      In this section, we evaluate the effectiveness of KTester by answer-
+generated test class by checking compilation and execution errors.                     ing the following research questions (RQs):
+Despite the rich contextual guidance, LLM outputs may still contain                       RQ1 (Effectiveness Comparison): Does KTester outperform
+issues such as hallucinated import statements, improper mocking,                       state-of-the-art baselines in terms of coverage scores and execution
+incorrect usage of private methods, or runtime errors during test                      pass rate when testing complex methods?
+execution. To address these problems, we adopt an iterative refine-                       RQ2 (Ablation Study): How do the key components of KTester
+ment process with static validation and dynamic repair.                                contribute to its overall performance?
+Rule-based Repair. Rule-based repair focuses on correcting                                RQ3 (User Study): Are the tests generated by KTester more
+straightforward and common errors detected by static analysis,                         readable and maintainable than those produced by baseline meth-
+such as hallucinated or missing import statements and unresolved                       ods?
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                     Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+         Table 1: Detailed Information of HITS Dataset                                3.2     RQ1: Effectiveness Comparison
+                                                                                      3.2.1 Design. We use the HITS dataset (Section 3.1.1), which con-
+ Project                        Domain                 Version          #MUT
+ Commons-CLI                    Cmd-line Interface     1.7.0-SNAPSHOT   2
+                                                                                      tains 110 test generation tasks from 10 open-source Java projects.
+ Commons-CSV                    Data processing        1.10.0           6             Our method builds the project knowledge base by analyzing the
+ Gson                           Serilization           2.10.1           20            corresponding project source code versions in the dataset. For these
+ Commons-codec                  Encoding               3a6873e          18            tasks, both KTester and baseline methods generate unit tests using
+ Commons-collections4           Utility                4.5.0-M1         14
+ JDom2                          Text Processing(XML)   2.0.6            21            GPT-4o-mini as the backbone model. For fair comparison, KTester
+ Datafaker                      Data Generation        1.9.0            6             and all baselines generate exactly one test class per focal method,
+ Event-ruler                    Event Engine           1.4.0            15            with no restriction on the number of test cases or generation time
+ windward                       Micoservices           1.5.1-SNAPSHOT   2
+                                                                                      within each class. This allows complex methods to achieve high
+ batch-processing-gateway       Cloud Computing        1.1              6
+                                                                                      coverage through diverse test cases. We limited automatic repair
+                                                                                      iterations to 5 in KTester. To mitigate the effect of randomness
+                                                                                      introduced by LLMs, we repeated each experiment five times and
+                                                                                      report the average results.
+3.1      Experimental Setup                                                              To systematically evaluate the effectiveness of generated unit
+                                                                                      tests, we adopt eight widely used metrics for unit test quality, cap-
+3.1.1 Dataset. To evaluate the effectiveness of KTester, we adopt                     turing correctness, sufficiency and efficiency [20, 32, 52, 58].
+the HITS dataset [52], which is constructed from 10 popular open-
+source Java projects spanning various domains (e.g., microservices,                         • Compile Pass Rate (CPR): percentage of test classes that
+command-line tools, event engines). This dataset specifically targets                         compile successfully.
+complex methods—defined as those with cyclomatic complexity                                 • Execution Pass Rate (EPR): percentage that run without
+greater than 10—making it well-suited for assessing how effectively                           runtime errors or assertion failures.
+LLMs handle methods with intricate control flow and dependencies.                           • Line Coverage (LC): ratio of executable lines in the focal
+The dataset comprises 110 tasks, each consisting of a focal method                            method covered by all generated tests.
+and its containing class.                                                                   • Branch Coverage (BC): percentage of conditional branches
+                                                                                              covered.
+3.1.2 Baselines. We compare KTester with 4 state-of-the-art test                            • Line Coverage of Passed Tests (LCP): line coverage com-
+generation methods: three are purely LLM-based, and one integrates                            puted only on tests that compile and execute successfully.
+search-based software testing (SBST) with LLMs. The LLM-based                               • Branch Coverage of Passed Tests (BCP): branch coverage
+baslines adopt distinct strategies for context construction and test                          computed similarly on passing tests.
+generation:                                                                                 • Average Time pre Task (AvT): average time required by a
+   ChatUnitTest [20] provides the focal method and handcrafted                                method to generate test class for a single task.
+context to the LLM, and applies iterative repair using error feedback                       • Average Test Cases Number (AvTC): average number of
+from failed executions.                                                                       test cases contained in each generated test class.
+   ChatTester [58] is similar to ChatUnitTest but differs in how it                      Coverage is measured using Jacoco [8], an open-source tool for
+constructs the focal method’s context, building it incrementally as                   measuring code coverage in Java projects, ensuring objective and
+needed.                                                                               consistent evaluation. By combining correctness (CPR, EPR), cover-
+   HITS [52] decomposes the focal method into slices and prompts                      age metrics (LC, BC, LCP, BCP) and efficiency metrics (AvT, AvTC),
+the LLM to generate test cases for each slice, which are then merged                  we provide a balanced and robust assessment of test quality, facili-
+into a complete test suite. This fine-grained approach helps miti-                    tating fair comparison between KTester and baseline approaches.
+gate the difficulty LLMs face when reasoning about complex logic
+holistically.                                                                         3.2.2 Results. Table 2 presents the effectiveness comparison across
+   For fair comparison, we adapt official or open-source imple-                       four methods. Overall, KTester achieves the best performance on
+mentations of these methods [5]. ChatUnitTest and ChatTester                          all six evaluation metrics, demonstrating its ability to generate
+generate one test class per focal method, while HITS’s slice-level                    high-quality unit tests both in terms of correctness and coverage.
+tests are merged into a single class to ensure consistent execu-                      Correctness. KTester reaches a perfect Compile Pass Rate (CPR)
+tion and setup. All baselines and KTester use the same LLM back-                      of 100%, indicating that all generated test classes are syntactically
+end—gpt-4o-mini [6]—with temperature=0.5, ensuring consis-                            valid and type-correct. While UTGen also achieves 100% CPR, the
+tency in generation quality, efficiency, and cost.                                    other LLM-based baselines fall short, suggesting potential issues in
+   The SBST–LLM hybrid method, UTGen [25], employs a tradi-                           code generation or dependency handling. Regarding the Execution
+tional SBST tool to generate initial test cases, then leverages an                    Pass Rate (EPR), which measures runtime correctness, KTester at-
+LLM to rename functions and variables in order to improve test                        tains 77.07%, slightly lower than UTGen. This is expected, as UTGen
+readability. Since UTGen rely on an LLM’s ability on code under-                      builds upon EvoSuite-generated tests, which provide a strong foun-
+standing instead of enhancing code coverage, we follow the initial                    dation for runtime correctness. Nevertheless, KTester still surpasses
+configuration provided in its replication package [10] (EvoSuite [30]                 all other LLM-based methods in EPR, demonstrating its effective-
+as the generation tool and CodeLlama-7b [2] used for refinement)                      ness in generating executable and correct test cases. This result
+when conducting our experiments to evaluate its performance.                          indicates that incorporating project knowledge yields substantial
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                           ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+   Table 2: Comparison of Effectiveness across Baselines
+                                                                                             Test Class (generated by HITS)
+                                                                                              public class Flat3Map_2_0_Test {
+             UTGen      ChatTester      ChatUniTest       HITS      KTester                      @Test
+ CPR         100        55.18           98.97             97.82     100                          void testGet_MatchingKey_ReturnsValue() {
+                                                                                                   Flat3Map<String, Integer> flat3Map=new Flat3Map<>();
+ EPR         90.05      50.17           65.26             71.38     76.41                          Field sizeField=Flat3Map.class.getDeclaredField("size");
+ LC          31.17      28.51           44.64             52.27     63.94                          sizeField.setAccessible(true);
+                                                                                                   sizeField.set(flat3Map, 1);     Using reflection to access
+ BC          28.72      24.94           38.06             45.93     55.46                          ...                             private fields
+ LCP         30.69      22.26           33.47             43.85     55.52                          Integer expectedValue = 100;
+                                                                                                   Integer actualValue = flat3Map.get("key1");
+ BCP         28.11      19.63           28.51             38.81     47.21                          assertEquals(expectedValue, actualValue);
+                                                                                              }}
+ AvT (s)     1068       354.83          200.96            625.69    152.68
+ AvTC        9.23       3.32            4.77              15.78     7.33                     Test Class (generated by KTester)
+                                                                                              class Flat3Map_get_Test {
+                                                                                                   private Flat3Map<Integer, String> flat3Map;
+                                                                                                   @BeforeEach
+Table 3: Comparison of Effectiveness across KTester imple-                                         void setupBeforeEach() {
+                                                                                                       flat3Map = new Flat3Map<>();
+mented with different models                                                                           flat3Map.put(1, "One");      Using related method to
+                                                                                                       flat3Map.put(2, "Two");      set up
+                                                                                                       flat3Map.put(3, "Three");
+              KTester-gpt      KTester-claude       KTester-deepseek                             } @Test
+                                                                                                   void testGet_ExistingKey() {
+     CPR         100                100                   93.92                                        assertEquals("One", flat3Map.get(1), "...");
+     EPR        76.41              81.75                  82.41                                        assertEquals("Two", flat3Map.get(2), "...");
+                                                                                                       assertEquals("Three", flat3Map.get(3), "...");
+     LC         63.94              66.46                  71.22                               }}
+     BC         55.46              60.66                  65.75
+     LCP        55.52              56.30                  65.19
+     BCP        47.21              50.76                  59.33                           Figure 10: Test Classes generated by HITS and KTester.
+
+
+
+benefits, as it more effectively guides LLMs toward generating exe-
+                                                                                       and the experimental results are reported in Table 3, which achieved
+cutable test code.
+                                                                                       even better results than gpt4o-mini, confirming its generalizability.
+Sufficiency. In terms of code coverage, KTester achieves the high-
+est Line Coverage (LC) of 63.94% and Branch Coverage (BC) of                             Finding 1: KTester outperforms all baselines across eight metrics.
+55.46%, significantly outperforming HITS (52.27% LC, 45.93% BC)                          Compared to the strongest baseline (HITS), and while generating
+while generating less test case (7.33 vs. 15.78). ChatTester yields the                  on average 8.45 fewer test cases, it improves execution pass rate
+lowest coverage, highlighting its limited ability to explore program                     by 5.03% and line coverage by 11.67%, demonstrating clear gains
+logic. UTGen is constrained by EvoSuite’s inability to operate on                        in both correctness and sufficiency.
+certain project-specific packages (e.g., com.apple.spark in the batch-
+processing-gateway project) and by the path-explosion problem
+inherent to SBST techniques. As a result, its coverage exceeds only                    3.3       RQ2: Ablation Study
+that of ChatTester. When restricting evaluation to only the tests                      3.3.1 Design. To assess the individual impact of key components
+that both compile and execute successfully, KTester maintains the                      in KTester on unit test generation, we conducted an ablation study.
+lead with 55.52% Line Coverage of Passed Tests (LCP) and 47.21%                        Four variants were created, each removing or modifying one com-
+Branch Coverage of Passed Tests (BCP), confirming the practical                        ponent while keeping the rest of the pipeline intact. This design
+adequacy of its outputs.                                                               isolates each component’s effect on correctness and coverage. The
+   These results provide evidence that integrating project-specific                    variants include:
+and test-domain knowledge into LLM-based generation pipelines
+                                                                                             • KTester-UTE: without the procedure of usage trace
+is associated with improved test adequacy and correctness, as re-
+                                                                                               extraction (section 2.1).
+flected by higher coverage and pass rates. In particular, KTester
+                                                                                             • KTester-FMR: without the step of functionally related
+demonstrates stronger capability in exercising program logic and
+                                                                                               method retrieval (section 2.1.2).
+control flow, making it a more effective and practical solution for
+                                                                                             • KTester-MVG: using only conditional branch guidance
+automated unit test generation.
+                                                                                               instead of the whole multi-view guidance strategy (sec-
+   Figure 10 shows the test class generated for the get() method
+                                                                                               tion 2.2.2).
+with HITS and KTester. HITS used reflection to access and set
+                                                                                             • KTester-DGT: replace the processes of test cases design
+private values, which increases the difficulty of understanding. In
+                                                                                               and test method transformation (section 2.2.3) with a single
+fact, since Flat3Map is a Map data structure, we can better modify
+                                                                                               process that directly generates test methods using a multi-
+private fields through the relevant methods put () in this class, thus
+                                                                                               view guidance strategy.
+covering every conditional branch during testing.
+Generalizability. To assess whether KTester maintains its perfor-                        Using the same experimental setup and metrics as in RQ1, we
+mance when implemented with alternative LLMs, we implemented                           evaluated all variants and compared their results to the original
+KTester using claude-3.5-haiku-20241022 [1] and deepseek-v3.1 [3],                     KTester to measure each component’s contribution to test quality.
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                    Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+Table 4: Comparison of Effectiveness across Variants and                                                 A: UTGen B: ChatTester C: ChatUniTest D: HITS E:KTester
+original KTester.                                                                                        A B C D E                           A B C D E                        A B C D E
+                                                                                                    1    0.03                               0.02                              0.02                               Score
+                                                                                                  0.9         0.19 0.21 0.21                0.17 0.23 0.25                         0.15 0.16                       Strongly Disagree
+                                                                                                                                                                                             0.26
+                                                                                                          0.3                0.34                                             0.28                                 Somewhat Disagree
+                       CPR        EPR        LC       BC      LCP     BCP                         0.8                                                           0.44                              0.39
+                                                                                                                                                                                                                   Somewhat Agree
+                                                                                                  0.7                                                                  0.57
+ KTester-UTE           93.63      62.00      57.53    51.27   45.37   39.83                                     0.31
+                                                                                                                                                                                     0.32
+                                                                                                                                                                                            0.41
+                                                                                                                                                                                                                   Strongly Agree
+                                                                                                  0.6                                       0.38
+ KTester-FMR           95.66      66.99      59.17    52.32   46.83   41.02
+
+
+
+
+                                                                                            egatnecreP
+                                                                                                                       0.42                        0.4
+                                                                                                         0.32                 0.51                                            0.33                 0.46
+                                                                                                  0.5                                                    0.49
+ KTester-MVG           97.45      75.31      53.67    46.26   45.48   39.36                                                          0.44                                                                 0.34
+                                                                                                  0.4
+ KTester-DGT           96.14      64.96      50.55    44.31   41.07   35.65                                                                                     0.42                 0.39
+                                                                                                  0.3           0.41                                                                        0.32
+ KTester               100        76.41      63.94    55.46   55.52   47.21                                            0.28                 0.43 0.31
+                                                                                                                                                                       0.35
+                                                                                                  0.2    0.35                                                                 0.37                 0.21 0.23
+                                                                                                                              0.24                       0.24
+                                                                                                  0.1                                0.21
+                                                                                                                                                             0.12                    0.14 0.11
+                                                                                                                0.09 0.09 0.04                     0.06 0.02 0.02 0.07                             0.07 0.04
+                                                                                                    0                                0.01                         0.01
+                                                                                                                Correctness                        Readability                 Maintainability
+3.3.2 Results. Table 4 summarizes the performance of KTester
+variants. All variants exhibit performance drops across correctness
+                                                                                     Figure 11: Score Distribution of Correctness, Readability and
+and coverage metrics, confirming that each component contributes
+                                                                                     Maintainability
+to KTester. Notably, KTester-UTE shows the largest correctness
+degradation, with CPR and EPR decreasing by 6.37% and 14.41%,
+respectively, highlighting the critical role of usage trace extrac-                         assertion per test method, and reliably detect functional
+tion in improving test correctness. KTester-DGT leads to the most                           faults through deterministic and repeatable execution?
+substantial coverage losses, with LC and BC dropping by 13.39%                          (2) To what extent do you agree that the unit test class is
+and 11.15%, respectively, indicating that separating test case de-                          highly readable? For instance, are the method and variable
+sign from test method generation is crucial for test adequacy. The                          names clear and descriptive? Does each test follow the Ar-
+other variants—KTester-FMR and KTester-MVG have comparatively                               range–Act–Assert structure to clearly communicate intent?
+smaller impacts across both correctness and coverage metrics, but                           Are assertion failure messages informative and helpful for
+also result in performance reductions.                                                      debugging?
+ Finding 2: Usage trace extraction (KTester-UTE) is the primary                         (3) To what extent do you agree that the unit test class is main-
+ contributor to test correctness, while modular test case transfor-                         tainable? For example, does it minimise redundancy or du-
+ mation (KTester-DGT) contributes most to test adequacy. Other                              plicated code? Is the test class support the easy addition of
+ components also contribute positively with smaller and less dis-                           new test cases? Can developers easily update affected tests
+ tinguishable effects.                                                                      when the source code changes?
+                                                                                        Each question is rated on a four-point Likert scale—strongly
+                                                                                     agree, somewhat agree, somewhat disagree, and strongly disagree.
+3.4      RQ3: User Study                                                             This setup enables quantitative comparison of subjective test quality
+3.4.1 Design. To investigate whether the tests generated by our                      across approaches. Following prior work [45, 58], we adopt an even-
+approach exhibit superior readability and maintainability, we con-                   numbered scale to avoid ambiguous “neutral” responses, and clearly
+ducted a user study targeting professional developers. We first                      separates positive from negative judgments.
+selected 10 tasks from the dataset where both KTester and the base-                  3.4.2 Results. Figure 11 presents the distribution of developer rat-
+line methods successfully produced compilable test cases. Ensur-                     ings across the three evaluation dimensions. Across all three dimen-
+ing compilability allows participants to concentrate on qualitative                  sions, our method (KTester, labeled as E) consistently outperforms
+properties of the test code—such as clarity, structure, and maintain-                the baselines in terms of perceived quality.
+ability—without being influenced by technical correctness issues.                       In the dimension of Correctness, KTester achieves the highest
+   We recruited participants through a public invitation distributed                 proportion of “Strong Agree” ratings (0.34), while keeping “strongly
+across the computer science departments of six universities. From                    disagree” scores low (0.01). This trend indicates a strong alignment
+the volunteers, we selected 15 participants (5 Ph.D. students and 10                 with expected test behavior as perceived by developers. In terms of
+Master’s students), all with 2–5 years of Java development experi-                   Readability, KTester demonstrates the most favorable distribution,
+ence. Participants received compensation to encourage careful and                    with over 90% of responses rated as “strongly Agree” (0.57) or
+unbiased evaluation.                                                                 “Somewhat Agree” (0.35), suggesting that participants found its tests
+   For each task, participants were presented with the focal method                  clearer and more accessible compared to those from other methods.
+under test, its API documentation and relevant class context, then                   For Maintainability, KTester has the highest proportion of "Strong
+the related test classes generated by different methods. To avoid                    Agree" responses (0.39) and the lowest proportion of “strongly
+bias, the identities of the methods were fully anonymised, and the                   disagree” scores (0.04). This suggests that developers found the
+presentation order was randomised. Participants were instructed to                   structure and logic of the tests generated by our approach easier to
+respond to the following three questions, each designed to target a                  understand and adapt.
+key quality dimension of the generated test code:                                       Interestingly, although UTGen uses an LLM to improve test read-
+   (1) To what extent do you agree that the unit test class is func-                 ability, it still received more than 67% negative responses across all
+       tionally correct? Specifically, does it adequately cover rel-                 dimensions. This is mainly due to (1) function signatures and vari-
+       evant input combinations, contain at least one meaningful                     able names often remaining unmodified, leaving the test code hard
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                          ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+to understand, and (2) UTGen’s EvoSuite component testing private                      and assertions for interactive prompting. Other work enriches con-
+methods via public callers, while LLM-based methods rely on reflec-                    text with bug-localized code [46], relevant identifiers [37, 54], stack
+tion, making participants feel hard to identify impacted tests after                   traces [33], and bug reports [29].
+source code changes and thus negatively affecting assessments of                          In parallel, retrieval-augmented generation (RAG) integrates ex-
+correctness and maintainability.                                                       ternal knowledge by retrieving relevant information from codebases
+                                                                                       or databases. For code completion, ReACC [41] retrieves semanti-
+ Finding 3: KTester outperforms all baselines in human evalua-
+                                                                                       cally similar code snippets, and Wu et al. [53] propose a selective
+ tion across correctness, readability, and maintainability.
+                                                                                       RAG framework to reduce redundancy. For code generation, recent
+                                                                                       work [14, 40] represents code repositories as graphs or structured
+                                                                                       knowledge to retrieve and add repository-level context to LLMs.
+4     Related Work
+In this section, we mainly introduce related work on LLM-based                         5    Threats to Validity
+unit test generation.
+                                                                                       A key threat lies in the use of LLMs. To ensure fairness, all ap-
+                                                                                       proaches are evaluated using the same model version. For baselines,
+4.1     LLM-based Unit Test Generation                                                 we rely on official implementations or carefully reimplement them
+Large language models (LLMs) have become a powerful tool for                           following published details, verifying outputs to align with reported
+automated unit test generation, offering human-like test code that                     results. Benchmark tasks and ground-truth tests are directly reused
+overcomes the readability and maintainability limitations of tradi-                    from prior work for consistency.
+tional methods [15, 18, 19, 34, 42]. Existing LLM-based approaches                        Another threat concerns generality and subjectivity. Although
+can be broadly categorized into two paradigms: fine-tuning and                         experiments focus on Java for comparability [52, 58], KTester is
+prompt-based methods.                                                                  not inherently tied to Java. Extending to other frameworks mainly
+   Fine-tuning approaches frame test generation as a supervised                        requires prompt and library updates, while supporting other lan-
+sequence-to-sequence task, learning mappings from focal methods                        guages only involves replacing the AST analysis tool (e.g., tree-
+to complete test cases using curated corpora, e.g., AthenaTest [51],                   sitter), resulting in low adaptation cost. Future work will explore
+TeCo [43], and subsequent variants [23, 26, 27], which explore                         such extensions. While correctness and coverage are objective met-
+different encoder–decoder architectures to capture the semantic                        rics, they may not fully capture clarity and structure. we mitigate
+relationships between code and tests. EXLONG [60] further fine-                        this via a user study on readability and maintainability with 14
+tunes CodeLlama for exception-oriented test generation. Unlike                         professional developers, though results may still reflect participant
+these approaches, our method injects project and testing knowledge                     bias and limited sampling. We believe this is sufficient, but a broader
+through prompt design and generation workflows, enabling greater                       sampling could further strengthen validity.
+flexibility and compatibility with future LLMs.
+   Prompt-based methods, in contrast, exploit the zero-shot rea-                       6    Conclusions
+soning abilities of instruction-tuned models. Systems such as Chat-                    We present KTester, a project-aware, testing-domain-knowledge-
+Tester [58], ChatUniTest [20], and ASTER [45] use carefully de-                        guided framework for LLM-based unit test generation. By extract-
+signed prompts and multi-step reasoning to guide models like GPT                       ing comprehensive project knowledge and decoupling test case
+in test identification, input generation, and assertion construction.                  design from test code generation, KTester effectively guides the
+Extensions incorporate additional context or search strategies, in-                    LLM to produce semantically rich and maintainable tests. Our multi-
+cluding documentation and usage examples in TestPilot [50] and                         perspective prompting strategy ensures diverse and thorough cov-
+IDE-based search in TestSpark [49].                                                    erage of testing scenarios, while structured test templates enhance
+   Recent work explores hybrid approaches that combine LLMs                            code clarity and reusability. Extensive evaluations on real-world
+with complementary techniques. CODAMOSA [38] integrates LLM-                           open-source projects show that KTester consistently outperforms
+generated test seeds with evolutionary algorithms to improve                           existing state-of-the-art methods in correctness, coverage, readabil-
+coverage-driven test generation, CoverUp [13] refines tests through                    ity, and maintainability. Future work explores integrating dynamic
+coverage-guided dialogues, and SymPrompt [48] leverages sym-                           analysis for enriching project knowledge and extending the ap-
+bolic execution to steer prompting.                                                    proach to other languages and testing paradigms.
+   Despite these advancements, most approaches lack project-
+specific context (e.g., instantiation patterns, dependencies, and API                  Acknowledgments
+usage) and overlook core testing principles such as boundary analy-                    This work was supported by National Natural Science Foundation
+sis, equivalence partitioning, and exception handling, yielding tests                  of China (Grant No. 62402113), the General Program of the Nat-
+without execution error but insufficiently validate functionality.                     ural Science Foundation of Guangdong Province, China (Grant
+                                                                                       No. 2025A1515011631), Social Science Planning Project (Grant No.
+4.2     Knowledge-enhanced LLMs for SE Tasks                                           SZ2025A002), and GMCC-SYSU Joint Lab for Smart Applications.
+Recent studies have explored enhancing LLM performance on SE
+tasks by incorporating task-relevant context. In APR, Xia et al. [55]
+                                                                                       References
+                                                                                        [1] 2024. claude-3-5-haiku-20241022 model overview. https://docs.claude.com/en/
+show that simply providing the buggy function can outperform                                docs/about-claude/models/overview#legacy-models
+traditional tools, while ChatRepair [56] leveraged failing test names                   [2] 2025. codellama-7b. https://ollama.com/library/codellama:7b
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                             Anji Li, Mingwei Liu*, Zhenxi Chen, Zheng Pei, Zike Li, Dekun Dai, Yanlin Wang, and Zibin Zheng
+
+
+ [3] 2025. deepseek-v3.1 Release. https://api-docs.deepseek.com/news/news250821               [28] Michael D Ernst, Jeff H Perkins, Philip J Guo, Stephen McCamant, Carlos Pacheco,
+ [4] 2025. http://javaparser.org/. (2025).                                                         Matthew S Tschantz, and Chen Xiao. 2007. The Daikon system for dynamic
+ [5] 2025. https://github.com/ZJU-ACES-ISE/chatunitest-maven-plugin. (2025).                       detection of likely invariants. Science of computer programming 69, 1-3 (2007),
+ [6] 2025. https://platform.openai.com. (2025).                                                    35–45. doi:10.1016/J.SCICO.2007.01.015
+ [7] 2025. https://spoon.gforge.inria.fr/about.html. (2025).                                  [29] Sarah Fakhoury, Saikat Chakraborty, Madanlal Musuvathi, and Shuvendu K.
+ [8] 2025. https://www.jacoco.org/jacoco/. (2025).                                                 Lahiri. 2024. NL2Fix: Generating Functionally Correct Code Edits from Bug
+ [9] 2025. KTester. https://github.com/SYSUSELab/KTester                                           Descriptions. In Proceedings of the 2024 IEEE/ACM 46th International Conference on
+[10] 2025. UTGen Replication Package. https://github.com/amirdeljouyi/UTGen                        Software Engineering: Companion Proceedings (Lisbon, Portugal) (ICSE-Companion
+[11] Frances E. Allen. 1970. Control flow analysis. SIGPLAN Not. 5, 7 (July 1970), 1–19.           ’24). Association for Computing Machinery, New York, NY, USA, 410–411. doi:10.
+     doi:10.1145/390013.808479                                                                     1145/3639478.3643526
+[12] M Moein Almasi, Hadi Hemmati, Gordon Fraser, Andrea Arcuri, and Janis Bene-              [30] Gordon Fraser and Andrea Arcuri. 2011. Evosuite: automatic test suite generation
+     felds. 2017. An industrial evaluation of unit test generation: Finding real faults            for object-oriented software. In Proceedings of the 19th ACM SIGSOFT symposium
+     in a financial application. In 2017 IEEE/ACM 39th International Conference on                 and the 13th European conference on Foundations of software engineering (Szeged,
+     Software Engineering: Software Engineering in Practice Track (ICSE-SEIP). IEEE,               Hungary) (ESEC/FSE ’11). Association for Computing Machinery, New York, NY,
+     263–272.                                                                                      USA, 416–419. doi:10.1145/2025113.2025179
+[13] Juan Altmayer Pizzorno and Emery D. Berger. 2025. CoverUp: Effective High                [31] Gordon Fraser and Andrea Arcuri. 2014. A Large-Scale Evaluation of Automated
+     Coverage Test Generation for Python. Proc. ACM Softw. Eng. 2, FSE, Article                    Unit Test Generation Using EvoSuite. ACM Trans. Softw. Eng. Methodol. 24, 2,
+     FSE128 (June 2025), 23 pages. doi:10.1145/3729398                                             Article 8 (Dec. 2014), 42 pages. doi:10.1145/2685612
+[14] Mihir Athale and Vishal Vaddina. 2025. Knowledge Graph Based Repository-Level            [32] Siqi Gu, Quanjun Zhang, Kecheng Li, Chunrong Fang, Fangyuan Tian, Liuchuan
+     Code Generation. In 2025 IEEE/ACM International Workshop on Large Language                    Zhu, Jianyi Zhou, and Zhenyu Chen. 2025. TestART: Improving LLM-based
+     Models for Code (LLM4Code). IEEE, 169–176. doi:10.1109/llm4code66737.2025.                    Unit Testing via Co-evolution of Automated Generation and Repair Iteration.
+     00026                                                                                         arXiv:2408.03095 [cs.SE] doi:10.48550/arXiv.2408.03095
+[15] Roberto Baldoni, Emilio Coppa, Daniele Cono D’elia, Camil Demetrescu, and                [33] Mirazul Haque, Petr Babkin, Farima Farmahinifarahani, and Manuela Veloso. 2025.
+     Irene Finocchi. 2018. A survey of symbolic execution techniques. ACM Computing                Towards Effectively Leveraging Execution Traces for Program Repair with Code
+     Surveys (CSUR) 51, 3 (2018), 50:1–50:39. doi:10.1145/3182657                                  LLMs. In Proceedings of the 4th International Workshop on Knowledge-Augmented
+[16] Earl T. Barr, Mark Harman, Phil McMinn, Muzammil Shahbaz, and Shin Yoo.                       Methods for Natural Language Processing, Weijia Shi, Wenhao Yu, Akari Asai,
+     2015. The Oracle Problem in Software Testing: A Survey. IEEE Trans. Software                  Meng Jiang, Greg Durrett, Hannaneh Hajishirzi, and Luke Zettlemoyer (Eds.).
+     Eng. 41, 5 (2015), 507–525. doi:10.1109/TSE.2014.2372785                                      Association for Computational Linguistics, Albuquerque, New Mexico, USA,
+[17] Arianna Blasi, Alessandra Gorla, Michael D Ernst, and Mauro Pezzè. 2023. Call Me              160–179. doi:10.18653/v1/2025.knowledgenlp-1.17
+     Maybe: Using NLP to Automatically Generate Unit Test Cases Respecting Tempo-             [34] Mark Harman, Yue Jia, and Yuanyuan Zhang. 2015. Achievements, open problems
+     ral Constraints. In Proceedings of the 37th IEEE/ACM International Conference on              and challenges for search based software testing. In 2015 IEEE 8th international
+     Automated Software Engineering (ASE ’22). Association for Computing Machinery,                conference on software testing, verification and validation (ICST). IEEE, 1–12.
+     New York, NY, USA, Article 19, 11 pages. doi:10.1145/3551349.3556961                     [35] Mark Harman and Phil McMinn. 2009. A theoretical and empirical study of
+[18] Cristian Cadar, Daniel Dunbar, and Dawson Engler. 2008. KLEE: unassisted                      search-based testing: Local, global, and hybrid search. IEEE Transactions on
+     and automatic generation of high-coverage tests for complex systems programs.                 Software Engineering 36, 2 (2009), 226–247. doi:10.1109/TSE.2009.71
+     In Proceedings of the 8th USENIX Conference on Operating Systems Design and              [36] Paul Jaccard. 1902. Lois de distribution florale dans la zone alpine. Bulletin de
+     Implementation (San Diego, California) (OSDI’08). USENIX Association, USA,                    la Société vaudoise des sciences naturelles 38 (01 1902), 69–130. doi:10.5169/seals-
+     209–224.                                                                                      266762
+[19] Sang Kil Cha, Thanassis Avgerinos, Alexandre Rebert, and David Brumley. 2012.            [37] Nan Jiang, Kevin Liu, Thibaud Lutellier, and Lin Tan. 2023. Impact of Code
+     Unleashing mayhem on binary code. In 2012 IEEE Symposium on Security and                      Language Models on Automated Program Repair. In Proceedings of the 45th
+     Privacy. IEEE Computer Society, 380–394. doi:10.1109/SP.2012.31                               International Conference on Software Engineering (Melbourne, Victoria, Australia)
+[20] Yinghao Chen, Zehao Hu, Chen Zhi, Junxiao Han, Shuiguang Deng, and Jianwei                    (ICSE ’23). IEEE Press, 1430–1442. doi:10.1109/ICSE48619.2023.00125
+     Yin. 2024. ChatUniTest: A Framework for LLM-Based Test Generation. In Com-               [38] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K. Lahiri, and Siddhartha
+     panion Proceedings of the 32nd ACM International Conference on the Foundations of             Sen. 2023. CodaMosa: Escaping Coverage Plateaus in Test Generation with
+     Software Engineering (Porto de Galinhas, Brazil) (FSE 2024). Association for Com-             Pre-Trained Large Language Models. In Proceedings of the 45th International
+     puting Machinery, New York, NY, USA, 572–576. doi:10.1145/3663529.3663801                     Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23).
+[21] Christoph Csallner, Nikolai Tillmann, and Yannis Smaragdakis. 2008. DySy:                     IEEE Press, 919–931. doi:10.1109/ICSE48619.2023.00085
+     Dynamic symbolic execution for invariant inference. In Proceedings of the 30th           [39] Hareton KN Leung and Lee White. 1989. Insights into regression testing (software
+     international conference on Software engineering (Leipzig, Germany) (ICSE ’08).               testing). In Proceedings. Conference on Software Maintenance-1989. IEEE, IEEE
+     Association for Computing Machinery, New York, NY, USA, 281–290. doi:10.                      Computer Society, Los Alamitos, CA, USA, 60–69. doi:10.1109/ICSM.1989.65194
+     1145/1368088.1368127                                                                     [40] Jia Li, Xianjie Shi, Kechi Zhang, Lei Li, Ge Li, Zhengwei Tao, Jia Li, Fang
+[22] Ermira Daka and Gordon Fraser. 2014. A survey on unit testing practices and                   Liu, Chongyang Tao, and Zhi Jin. 2025. CodeRAG: Supportive Code Retrieval
+     problems. In 2014 IEEE 25th International Symposium on Software Reliability                   on Bigraph for Real-World Code Generation. CoRR abs/2504.10046 (2025).
+     Engineering (ISSRE ’14). IEEE, IEEE Computer Society, USA, 201–211. doi:10.                   arXiv:2504.10046 doi:10.48550/ARXIV.2504.10046
+     1109/ISSRE.2014.11                                                                       [41] Shuai Lu, Nan Duan, Hojae Han, Daya Guo, Seung-won Hwang, and Alexey Svy-
+[23] Arghavan Moradi Dakhel, Amin Nikanjam, Vahid Majdinasab, Foutse Khomh,                        atkovskiy. 2022. ReACC: A Retrieval-Augmented Code Completion Framework.
+     and Michel C Desmarais. 2024. Effective test generation using pre-trained large               In Proceedings of the 60th Annual Meeting of the Association for Computational
+     language models and mutation testing. Information and Software Technology 171                 Linguistics (Volume 1: Long Papers), ACL 2022, Dublin, Ireland, May 22-27, 2022. As-
+     (2024), 107468. doi:10.1016/J.INFSOF.2024.107468                                              sociation for Computational Linguistics, 6227–6240. doi:10.18653/V1/2022.ACL-
+[24] Pedro Delgado-Pérez, Aurora Ramírez, Kevin J. Valle-Gómez, Inmaculada Medina-                 LONG.431
+     Bulo, and José Raúl Romero. 2023. InterEvo-TR: Interactive Evolutionary Test             [42] Phil McMinn. 2011. Search-based software testing: Past, present and future. In
+     Generation With Readability Assessment. IEEE Transactions on Software Engi-                   2011 IEEE Fourth International Conference on Software Testing, Verification and
+     neering 49, 4 (2023), 2580–2596. doi:10.1109/TSE.2022.3227418                                 Validation Workshops. IEEE Computer Society, 153–163. doi:10.1109/ICSTW.2011.
+[25] Amirhossein Deljouyi, Roham Koohestani, Maliheh Izadi, and Andy Zaidman.                      100
+     2025. Leveraging Large Language Models for Enhancing the Understandability of            [43] Pengyu Nie, Rahul Banerjee, Junyi Jessy Li, Raymond J. Mooney, and Milos
+     Generated Unit Tests. In Proceedings of the IEEE/ACM 47th International Confer-               Gligoric. 2023. Learning Deep Semantics for Test Completion. In 45th IEEE/ACM
+     ence on Software Engineering. IEEE, 1449–1461. doi:10.1109/ICSE55347.2025.00032               International Conference on Software Engineering, ICSE 2023, Melbourne, Australia,
+[26] Yinlin Deng, Chunqiu Steven Xia, Haoran Peng, Chenyuan Yang, and Lingming                     May 14-20, 2023. IEEE, 2111–2123. doi:10.1109/ICSE48619.2023.00178
+     Zhang. 2023. Large language models are zero-shot fuzzers: Fuzzing deep-learning          [44] Carlos Pacheco, Shuvendu K Lahiri, Michael D Ernst, and Thomas Ball. 2007.
+     libraries via large language models. In Proceedings of the 32nd ACM SIGSOFT                   Feedback-directed random test generation. In 29th International Conference on
+     international symposium on software testing and analysis. ACM, 423–435. doi:10.               Software Engineering (ICSE’07). IEEE, 75–84.
+     1145/3597926.3598067                                                                     [45] Rangeet Pan, Myeongsoo Kim, Rahul Krishna, Raju Pavuluri, and Saurabh Sinha.
+[27] Yinlin Deng, Chunqiu Steven Xia, Chenyuan Yang, Shizhuo Dylan Zhang, Shu-                     2025. ASTER: Natural and Multi-Language Unit Test Generation with LLMs. In
+     jing Yang, and Lingming Zhang. 2024. Large language models are edge-case                      2025 IEEE/ACM 47th International Conference on Software Engineering: Software
+     generators: Crafting unusual programs for fuzzing deep learning libraries. In                 Engineering in Practice (ICSE-SEIP). IEEE, 413–424. doi:10.1109/ICSE-SEIP66354.
+     Proceedings of the 46th IEEE/ACM international conference on software engineering.            2025.00042
+     ACM, 1–13. doi:10.1145/3597503.3623343                                                   [46] Julian Aron Prenner and Romain Robbes. 2024. Out of Context: How important
+                                                                                                   is Local Context in Neural Program Repair?. In Proceedings of the IEEE/ACM 46th
+Knowledge Matters: Injecting Project and Testing Knowledge into LLM-based Unit Test Generation                                 ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+     International Conference on Software Engineering. Association for Computing           [54] Chunqiu Steven Xia, Yifeng Ding, and Lingming Zhang. 2024. The Plastic Surgery
+     Machinery, New York, NY, USA. doi:10.1145/3597503.3639086                                  Hypothesis in the Era of Large Language Models. In Proceedings of the 38th
+[47] Per Runeson. 2006. A survey of unit testing practices. IEEE software 23, 4 (2006),         IEEE/ACM International Conference on Automated Software Engineering (Echter-
+     22–29. doi:10.1109/MS.2006.91                                                              nach, Luxembourg) (ASE ’23). IEEE Press, 522–534. doi:10.1109/ASE56229.2023.
+[48] Gabriel Ryan, Siddhartha Jain, Mingyue Shang, Shiqi Wang, Xiaofei Ma, Mu-                  00047
+     rali Krishna Ramanathan, and Baishakhi Ray. 2024. Code-Aware Prompting: A             [55] Chunqiu Steven Xia, Yuxiang Wei, and Lingming Zhang. 2023. Automated
+     Study of Coverage-Guided Test Generation in Regression Setting using LLM.                  Program Repair in the Era of Large Pre-Trained Language Models. In Proceedings
+     Proc. ACM Softw. Eng. 1, FSE, Article 43 (July 2024), 21 pages. doi:10.1145/3643769        of the 45th International Conference on Software Engineering (Melbourne, Victoria,
+[49] Arkadii Sapozhnikov, Mitchell Olsthoorn, Annibale Panichella, Vladimir Ko-                 Australia) (ICSE ’23). IEEE Press, 1482–1494. doi:10.1109/ICSE48619.2023.00129
+     valenko, and Pouria Derakhshanfar. 2024. Testspark: Intellij idea’s ultimate          [56] Chunqiu Steven Xia and Lingming Zhang. 2024. Automated Program Repair
+     test generation companion. In Proceedings of the 2024 IEEE/ACM 46th Interna-               via Conversation: Fixing 162 out of 337 Bugs for $0.42 Each using ChatGPT.
+     tional Conference on Software Engineering: Companion Proceedings. ACM, 30–34.              In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software
+     doi:10.1145/3639478.3640024                                                                Testing and Analysis (Vienna, Austria) (ISSTA 2024). Association for Computing
+[50] Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank Tip. 2023. An empirical                  Machinery, New York, NY, USA, 819–831. doi:10.1145/3650212.3680323
+     evaluation of using large language models for automated unit test generation.         [57] Xusheng Xiao, Sihan Li, Tao Xie, and Nikolai Tillmann. 2013. Characteristic
+     IEEE Transactions on Software Engineering 50, 1 (2023), 85–105. doi:10.1109/TSE.           studies of loop problems for structural test generation via symbolic execution. In
+     2023.3334955                                                                               2013 28th IEEE/ACM International Conference on Automated Software Engineering
+[51] Michele Tufano, Dawn Drain, Alexey Svyatkovskiy, Shao Kun Deng, and Neel                   (ASE). IEEE, 246–256.
+     Sundaresan. 2020. Unit test case generation with transformers and focal context.      [58] Zhiqiang Yuan, Yiling Lou, Mingwei Liu, Shiji Ding, Kaixin Wang, Yixuan Chen,
+     arXiv preprint arXiv:2009.05617 (2020). doi:10.48550/arXiv.2009.05617                      and Xin Peng. 2024. Evaluating and Improving ChatGPT for Unit Test Generation.
+[52] Zejun Wang, Kaibo Liu, Ge Li, and Zhi Jin. 2024. HITS: High-coverage LLM-based             Proc. ACM Softw. Eng. 1, FSE (2024), 24 pages. doi:10.1145/3660783
+     Unit Test Generation via Method Slicing. In Proceedings of the 39th IEEE/ACM          [59] Andreas Zeller, Rahul Gopinath, Marcel Böhme, Gordon Fraser, and Christian
+     International Conference on Automated Software Engineering (Sacramento, CA,                Holler. 2019. The fuzzing book. https://www.fuzzingbook.org
+     USA) (ASE ’24). Association for Computing Machinery, New York, NY, USA,               [60] Jiyang Zhang, Yu Liu, Pengyu Nie, Junyi Jessy Li, and Milos Gligoric. 2025. ex-
+     1258–1268. doi:10.1145/3691620.3695501                                                     Long: Generating exceptional behavior tests with large language models. In 47th
+[53] Di Wu, Wasi Uddin Ahmad, Dejiao Zhang, Murali Krishna Ramanathan, and                      IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa,
+     Xiaofei Ma. 2024. REPOFORMER: selective retrieval for repository-level code                ON, Canada, April 26 - May 6, 2025. IEEE, 1462–1474. doi:10.1109/ICSE55347.2025.
+     completion. In Proceedings of the 41st International Conference on Machine Learn-          00176
+     ing (Vienna, Austria) (ICML’24). JMLR.org, Article 2183, 21 pages.
+

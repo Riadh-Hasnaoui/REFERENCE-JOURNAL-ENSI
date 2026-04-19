@@ -1,0 +1,852 @@
+                                            RefAgent: A Multi-agent LLM-based Framework for Automatic
+                                                                Software Refactoring
+                                                    Khouloud Oueslati                                 Maxime Lamothe                                       Foutse Khomh
+                                               khouloud.oueslati@polymtl.ca                      maxime.lamothe@polymtl.ca                            foutse.khomh@polymtl.ca
+                                                  Polytechnique Montreal                           Polytechnique Montreal                              Polytechnique Montreal
+                                                     Montreal, Canada                                 Montreal, Canada                                    Montreal, Canada
+                                        Abstract                                                                      Since manual refactoring is error-prone, time-consuming, and
+                                        Recent advancements in Large Language Models (LLMs) have sub-              ineffective when extensive changes are needed [18, 54], various
+                                        stantially influenced various software engineering tasks, including        semi-automated and fully-automated techniques have been pro-
+                                        code generation, program repair, and software maintenance. Indeed,         posed over the past decade [2, 19, 33]. While IDEs offer built-in
+arXiv:2511.03153v2 [cs.SE] 4 Mar 2026
+
+
+
+
+                                        in the case of software refactoring, traditional LLMs have shown           refactoring options, they support only a limited set of refactorings
+                                        the ability to reduce development time and enhance code quality.           and still require manual effort. A Microsoft survey found that 28% of
+                                        However, these LLMs often rely on static, detailed instructions            developers face challenges with refactoring, especially in large code-
+                                        for specific tasks. In contrast, LLM-based agents can dynamically          bases and ensuring correctness [24]. Fully-automated techniques,
+                                        adapt to evolving contexts and autonomously make decisions by              such as search-based refactoring, offer an appealing alternative by
+                                        interacting with software tools and executing workflows. In this           formulating refactoring as an optimization problem to identify a
+                                        paper, we explore the potential of LLM-based agents in supporting          refactoring sequence that enhances the program based on a defined
+                                        refactoring activities. Specifically, we introduce RefAgent, a multi-      fitness function, which can involve factors such as code smells or
+                                        agent LLM-based framework for end-to-end software refactoring.             software quality metrics [37], but they often radically change pro-
+                                        RefAgent consists of specialized agents responsible for planning,          gram design [3], lack behavior preservation guarantees[4, 9], and
+                                        executing, testing, and iteratively refining refactorings using self-      support a limited range of refactoring types, and are computation-
+                                        reflection and tool-calling capabilities. We evaluate RefAgent on          ally prohibitive for large projects [5, 38].
+                                        eight open-source Java projects, comparing its effectiveness against          Recent breakthroughs in Large Language Models (LLMs) have
+                                        a single-agent approach, a search-based refactoring tool, and his-         sparked growing interest in applying generative AI to software
+                                        torical developer refactorings. Our assessment focuses on: (1) the         engineering tasks such as code generation [23], fault localization
+                                        impact of generated refactorings on software quality, (2) the ability      [11], and automatic program repair [27]. The emergence of LLM-
+                                        to identify refactoring opportunities, and (3) the contribution of         based commercial tools like GitHub Copilot1 and AutoCoderRover2
+                                        each LLM agent through an ablation study. Our results show that            highlights practitioners’ growing interest in LLM-powered auto-
+                                        RefAgent achieves a median unit test pass rate of 90%, reduces code        mated software development. Developer adoption of AI is rising
+                                        smells by a median of 52.5%, and improves key quality attributes           [16], with 76% using or planning to use it, and 92% having tried
+                                        (e.g., reusability) by a median of 8.6%. Additionally, it closely aligns   tools like Copilot. Early efforts have also explored the use of LLMs
+                                        with developer refactorings and the search-based tool in identifying       in refactoring [15, 28], showing promise in reducing developer ef-
+                                        refactoring opportunities, attaining a median F1-score of 79.15% and       fort and improving design quality. However, despite this progress,
+                                        72.7%, respectively. Compared to single-agent approaches, RefA-            fully automated refactoring remains a largely unsolved problem.
+                                        gent improves the median unit test pass rate by 64.7% and the              Existing techniques often suffer from one or more of the following
+                                        median compilation success rate by 40.1%. These findings highlight         limitations: poor scalability to large codebases, insufficient coverage
+                                        the promise of multi-agent architectures in advancing automated            of refactoring types, difficulty in maintaining behavioral correct-
+                                        software refactoring.                                                      ness, and brittleness when applying transformations in real-world
+                                                                                                                   systems [5, 24, 38].
+                                        Keywords                                                                      This persistent gap highlights the need for more dynamic, context-
+                                                                                                                   aware, and adaptive solutions that can not only propose refactor-
+                                        LLMs, Multi-agent, Code Refactoring, Software Quality, Code Smells
+                                                                                                                   ings but also coordinate complex, multi-step workflows involving
+                                                                                                                   validation, correction, and iterative refinement. In this context, LLM-
+                                        1    Introduction                                                          based agents, defined as entities that use LLMs as the cognitive core
+                                        Large-scale software systems tend to increase in complexity and            of the agent, can dynamically adapt to changing contexts, interact
+                                        become difficult to maintain as they evolve to adapt to changing           with tools, and execute workflows to achieve goals [22], offer a
+                                        requirements [26]. Software refactoring is a standard practice that        promising new direction for this challenge, not just because LLMs
+                                        aims to enhance code design without altering its observable behav-         are powerful, but because agents can be structured to simulate the
+                                        ior [20]. Neglecting refactoring is often associated with the accu-        reasoning and actions of skilled developers, distributing respon-
+                                        mulation of technical debt, leading to an increase in code smells          sibilities such as code analysis, transformation, compilation, and
+                                        [25, 55] or design flaws that violate design principles and compro-
+                                        mise the code understandability and maintainability [49, 52]. These
+                                        negative consequences ultimately lead to higher maintenance costs          1 https://github.com/features/copilot
+
+                                        [10, 12].                                                                  2 https://autocoderover.dev/
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                      Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+testing across specialized roles [29]. Compared to static prompt-       improvement rates using the Quality Model for Object-Oriented
+based LLMs, agents can reason, respond to intermediate feedback         Design (QMOOD) metrics across eight software projects.
+(e.g., test failures or compilation errors), and adjust plans dynami-      RQ3: What is the contribution of each component of our
+cally. They can generate code, reflect on its consequences, revise      framework? (Ablation study) To further showcase the effective-
+decisions, and collaborate with one another, mirroring the way          ness of RefAgent in improving software quality, we reuse the perfor-
+human developers iteratively and interactively perform refactor-        mance criteria from RQ1 to compare the performance of RefAgent
+ing in practice. Furthermore, agents enable modular reasoning: by       against single LLM-based approaches. Moreover, we investigate
+breaking the refactoring process into smaller, goal-directed tasks,     the contribution of key components in RefAgent by conducting an
+which reduces cognitive and computational complexity, improving         ablation study to evaluate the performance under different settings,
+both accuracy and interpretability [50, 51].                            focusing on the Context-aware Planner Agent and the impact of the
+   Critically, multi-agent systems bring an additional advantage:       iterations in the feedback loops.
+coordination across specialized roles. A single LLM may hallucinate        Overall, our findings underscore the potential of multi-agent
+over prolonged interactions, but a system of agents, each focused       LLM architectures for advancing automated refactoring.
+on a well-defined subtask, can collaboratively handle complexity
+through role specialization and communication. This design aligns
+closely with how real-world refactoring is performed: as a sequence     2   Background and Related Work
+of discrete, dependent steps that require both autonomy and col-        Recent advancements in Large Language Models (LLMs) have sub-
+laboration [22].                                                        stantially influenced various software engineering tasks [45, 53].
+   In this paper, we introduce RefAgent, a novel multi-agent, LLM-      Particularly, in the case of software refactoring, an empirical study
+based, fully automated framework for software refactoring. Our          by Cordeiro et al. [15] evaluated the refactorings generated by Star-
+approach simulates the sequential nature of software refactoring        Coder2 [30] against developers. They apply zero-shot and one-shot
+workflows by distributing tasks among agents, reducing develop-         prompting and assess the unit test pass rate using the pass@k met-
+ment time, mitigating hallucinations, and ensuring behavior preser-     ric. Their results show that LLMs effectively reduce code smells
+vation in complex software engineering environments. Our goal           and apply various refactoring types. While their study focused
+in creating and evaluating this approach is to determine the cur-       on a single LLM with a static prompt at commit-level granularity,
+rent status of the potential of LLM-based multi-agents for software     we introduce a fully automated multi-LLM agent approach that
+refactoring. RefAgent consists of four key components:                  leverages specialized LLM agents with tool-calling capabilities to re-
+   Context-Aware Planner Agent – Identifies refactoring opportuni-      trieve context, interact with compilation and testing environments,
+ties and generates a structured plan based on dependency analysis       and perform complex, context-aware refactorings without manual
+and code metrics.                                                       intervention.
+   Refactoring Generator Agent – Executes the refactoring plan             Furthermore, we base our approach on the work proposed by
+provided by the Context-Aware Planner Agent on the target class,        Choi et al. [13]. The authors present a single LLM approach that
+producing a refactored version of that class.                           iteratively refactors methods identified as having high cyclomatic
+   Compiler Agent – Interacts with the compilation environment          complexity by refining the LLM’s suggestions using the error stack
+and the Refactoring Generator Agent through an iterative feedback       trace from compilation and testing environment across 20 iterations.
+loop to ensure any compilation issues are addressed.                    However, their pipeline is limited due to sequential refactoring of
+   Tester Agent – Ensures that the refactored target class preserves    individual methods, while our approach refactors the projects by
+functionality using existing and auto-generated tests using Evo-        iterating through all classes of the project. In addition, we decen-
+suite, cooperating with the Refactoring Generator Agent to fix test     tralize the process by assigning distinct roles to specialized LLM
+failures.                                                               agents, each responsible for a specific subtask and environment
+   To evaluate the effectiveness of RefAgent, we ask the following      (e.g., compilation or testing). This modular design ensures that each
+research questions:                                                     agent receives and processes feedback (e.g., stack traces) within
+   RQ1: How effective is our approach in improving the quality          its relevant execution context. Moreover, the proposed pipeline
+of software projects? To evaluate the effectiveness of RefAgent         by Choi et al. lacks contextual input for the LLM to generate the
+in enhancing the quality of software projects, we measure code          refactoring. Yet, refactoring is a context-dependent problem [33],
+Smells Reduction Rates (SRR) along with compilation success rates,      thus we employ a context retrieval agent to help the LLM decide
+and unit test pass rates across eight software projects. Further-       and plan the refactorings effectively.
+more, we examine the prevalent refactoring types and discuss their         Multi-agent systems have shown promise in software mainte-
+implications for future improvements.                                   nance by leveraging specialized agents that work collaboratively
+   RQ2: How effective is our approach in identifying refactor-          or competitively to achieve a final goal while invoking external
+ing opportunities and improving software quality compared               tools to receive context and feedback to solve issues in real-world
+to search-based techniques and developers? We assess the ability        software projects. For example, agents like AutoCodeRover [56]
+of RefAgent in identifying refactoring opportunities by compar-         and Masai [7] use static and dynamic checks to validate gener-
+ing its refactoring patches across code regions against RefGen, a       ated patches, while others invoke tools such as those for syntactic
+search-based refactoring tool, and developers using precision, re-      correctness checking, code format checking [31], and vulnerabil-
+call, and F1-score. Moreover, we compare their software quality         ity detection [35]. However, the use of multi-agent systems for
+                                                                        end-to-end refactoring remains largely unexplored.
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                                                                          Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+
+                                                                                                  Refactoring generator agent
+                   Context retrieval tool                                                                                                                                     Compiler agent
+                                                                                         Prompt:{
+                   Run jdeps to build depndency graph using the class                    Query: Follow the instruction to generate a                4
+                   nameto identify first-degree dependent classes.                       refactored version of the target class.
+                   Run DesignateJava to compute class and method                         Instruction: Refactoring plan                                                                   Updated              If compiler fail return the error
+                                                                                                                                                                 Maven compiler
+                   quality metrics.                                                      Code Snippet: Source code of target class                                                                            message and request code fix
+                                                                                         Context: B       , C }
+                                                                                                                                                   20                  tool            java project
+                                                                                     3                                                                                                                        else return success
+                                                                                                                                                 Failed
+        1
+                   Context-aware planner agent                                                                                                                                                      5       Success
+                                                                               Context-aware Prompt                                                20
+                                                                               Prompt:{                                                                                          Tester agent
+                     A   Extract first-degree dependent classes
+                                                                               Query: Generate a refactoring plan for the                         Failed
+                     B   Extract quality metrics of the target class
+                                                                               java class
+                                                                                                                                                                    Test suite
+            2        C
+                         Extract source code of relevant class                 Code Snippet: Input source code                                                                       Class dependency       Maven test
+                                                                                                                                                                  generation tool
+                         from the project.                                     Context: B and C }                                                                                    graph: Extract tests      tool
+                                                                                                                                                                                                    6
+                   Code search module                                                                                                                           If all tests pass, we keep the applied refactored code
+                                search for the class             get dependent classes             Dependent class 1
+                                                                                                                                                                If test fails after 20 iterations, we keep the original code
+                                                                                                   Dependent class 2
+
+                                                 A Class dependency graph                          ...
+
+
+
+                                                                                         Figure 1: RefAgent Overview
+3 RefAgent Approach                                                                                                    Java code as input and returns a set of quality metrics (e.g, cyclo-
+                                                                                                                       matic complexity, lack of cohesion, etc.) that the Context-aware
+3.1 Overview
+                                                                                                                       Planner Agent will use for identifying refactoring opportunities
+In this section, we present an overview of the overall phases of                                                       and generating a refactoring plan for the target class. Note that
+RefAgent, a multi-agent framework that iteratively improves the                                                        within RefAgent, we do not use its code smell detection capabil-
+quality of each class in a given Java project. RefAgent is designed                                                    ities in the refactoring process itself. Instead, the planner agent
+to simulate the sequential nature of end-to-end refactoring, where                                                     leverages only the extracted code metrics to provide context for
+the goal is to improve weakly structured code through extensive                                                        the decision-making driven by the agent’s reasoning. We ensure
+refactoring, commonly known as Root-canal refactoring [18]. The                                                        that the planner’s decisions about which code regions to refactor
+framework allows users to run the workflow autonomously to                                                             are not biased by labeled smell instances from DesigniteJava.
+enhance the quality of a given codebase, significantly reducing
+the manual effort required for large-scale refactoring tasks. For a                                                      Query: You are a software engineer, expert in Java code improvement. Your primary task is to
+                                                                                                                         provide a detailed plan for refactoring a given target class.
+given project, a randomly-selected target class as a starting point,
+                                                                                                                         Context:
+the workflow of RefAgent leverages specialized LLM agents for                                                                  {target_class_code} (The source code of the target class)
+the context-aware identification of refactoring opportunities and                                                              {target_class_quality_metrics} (Computed quality metrics for the target class)
+planning as well as ensuring the compilation of the modified source                                                            {dependent_classes} (List of classes dependent on the target class)
+                                                                                                                         Output Format (JSON):
+code, and thorough testing to ensure that functionality is preserved
+                                                                                                                         {
+for the modified target class.                                                                                               "class_name": {
+                                                                                                                                "refactoring": true/false,
+   Particularly, following previous work [13], RefAgent iteratively                                                          },
+                                                                                                                                "instruction": "Detailed refactoring steps for the class."
+
+analyzes feedback across 20 iterations using external tools such                                                             "methods": {
+                                                                                                                                "method_name_1": {
+as the compilation and testing environments, and integrates lin-                                                                  "refactor": true/false,
+                                                                                                                                  "instruction": "Detailed instructions on how to refactor this method."
+                                                                                                                                }...
+guistic reflections to refine its refactoring suggestions [42]. This                                                     }
+iterative self-improvement mechanism enables RefAgent to dynam-
+ically adapt and enhance the quality of code transformations. The                                                                       Figure 2: Context-aware Planner Prompt
+following sections provide detailed descriptions of each of our four
+agents.                                                                                                                   After, the Context-aware Planner Agent calls the code-search
+                                                                                                                       module, which is a module that retrieves the source code of the
+                                                                                                                       target class as well as the source code of its first-degree dependent
+3.2    Context-aware Planner Agent                                                                                     classes. The module searches for the target source code and its direct
+RefAgent employs an LLM agent, the Context-aware Planner                                                               dependencies by taking as input the full name of the target class
+Agent, which uses a Java class as a starting point. The agent is                                                       (including its package) and the dependency graph provided by the
+equipped with tool-calling capabilities that allow the model to de-                                                    jdeps tool. It then iterates through the project folder to locate and
+tect when one or more tools should be called and respond with                                                          return the source code of the required classes. Therefore, the agent
+the inputs that should be passed to those tools. Specifically, it can                                                  considers information from related classes to suggest higher-level
+call the context-retrieval module that runs the dependency analysis                                                    design improvements or class-level refactorings when applicable.
+tool jdeps, passing the class name and the project path as inputs,                                                        Next, the Context-aware Planner Agent builds the prompt ac-
+which generates a class-level dependency graph. Next, following                                                        cording to the template as shown in Figure 2 for its core LLM to
+prior work [15], the agent invokes a code smell extraction tool                                                        identify refactoring opportunities and assign the proper refactor-
+DesigniteJava 2.5.2 [41] that also provides software metrics detailed                                                  ings for the various code regions (e.g., method, field, variable) of
+in Section 4.2.2. DesigniteJava then takes the path to the source                                                      the target class. Finally, the Context-aware Planner Agent provides
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                       Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+a refactoring plan comprising of the particular code regions identi-                       (1) After the Refactoring Generator agent proposes a refactor-
+fied for improvement along with explicit refactoring instructions                              ing, the compiler agent invokes the Maven compiler tool to
+designed to be interpretable by downstream LLM agents.                                         compile the updated refactored project. This tool executes
+                                                                                               the Maven compilation command on the operating system
+3.3     Refactoring Generator Agent                                                            without running tests, ensuring that the code syntax is cor-
+The primary objective of the Refactoring Generator Agent is to                                 rect.
+generate refactored Java code following the instructions of Context-                       (2) The Maven compiler tool then returns logs to the compiler
+aware Planner Agent, while ensuring the correctness and function-                              agent, detailing the compilation status.
+ality of the output.                                                                           – If compilation succeeds (100%), the compiler agent con-
+   This agent takes as input the original source code of the target                            firms success and proceeds to the Tester agent for further
+class, the source code of dependent classes, software metrics, and                             validation.
+the refactoring plan. It applies the refactoring plan to produce an                            – If compilation fails, the compiler agent analyzes the er-
+improved version of the class, updates the code, and initiates the                             ror logs, extracts the necessary debugging information, and
+compilation phase. The Refactoring Generator Agent should return                               generates a structured error summary.
+Java code as output as instructed in the prompt.                                           (3) The error summary, along with specific fixing instructions,
+   As shown in Figure 1, the Refactoring Generator Agent is in-                                are sent to the Refactoring Generator Agent, enabling it to
+voked by different agents, including the Compiler Agent and the                                reflect on the error, modify the code, and attempt a fix. This
+Tester Agent, in case of compilation or test failures in order to                              iterative process continues until successful compilation is
+dynamically adapts its prompt while maintaining the primary ob-                                achieved or the iteration limit is reached.
+jective of following the refactoring plan as shown in the Figure 2.
+The prompt context can vary depending on:
+                                                                                        3.5    Tester Agent
+   – Compilation errors (when called by the Compiler Agent)                             Code refactoring should not alter the external functionality of the
+   – Test failures (when called by the Tester Agent)                                    code [20]. It is thus necessary to execute tests to evaluate whether
+   – The original refactoring plan (when initially generating the                       the refactored code retains its original functionality. In this process,
+refactored class)                                                                       the Tester Agent uses the code search module to locate developer-
+   Regardless of the context, the Refactoring Generator Agent is                        written tests from the class-level dependency graph generated by
+required in the prompt to ensure that the refactoring instructions                      jdeps and employs the automated test suite generation tool EvoSuite
+from the planner remain the guiding principle. It continuously                          to generate additional regression tests, The regression tests are
+refines the code while ensuring that the final output is syntactically                  created based on the original program before any refactoring is
+correct, functional, and successfully passes compilation and testing.                   applied. We use these tests in an attempt to maximize the validation
+                                                                                        of the modified source code.
+Query: You are an expert Java software engineer. Your primary task is to refactor the      Similar to the Compiler Agent, the Tester Agent employs a feed-
+provided Java code following in details the refactoring plan.                           back loop of up to 20 iterations. If a test fails, it reads the logs,
+Instruction:                                                                            analyzes the errors, and generates a summary report. This report,
+{Tester agent instruction OR Compiler agent instruction } (if test/compiltion failed)
+                                                                                        along with the failing test cases, is sent to the Refactoring Generator
+Context:
+                                                                                        agent, requesting a fix as shown in Figure 3. If the refactoring patch
+      {Refactoring plan}                                                                continues to fail after all iterations, the agent excludes the target
+      {target_class_code}
+      {dependent_classes}                                                               class from further improvements and proceeds to the next iteration
+      {Test or Compilation_error_summary} (A summary of the error from
+      the Tester/Compiler agent)                                                        without applying the refactorings. The Tester agent interacts with
+Output Format:                                                                          three main tools:
+'''                                                                                        EvoSuite. Since some projects may lack developer-written test
+refactored java class code base                                                         cases, Tester Agent calls EvoSuite which takes the target class name
+'''                                                                                     as input and automatically generates unit tests optimized for max-
+                                                                                        imum code coverage (e.g, Line Coverage, Branch Coverage and
+Figure 3: Illustrative example of the Refactoring Generator                             Output Coverage). EvoSuite integrates JUnit 4 assertions to capture
+Agent prompt                                                                            and validate expected behavior in test cases.
+                                                                                           JDeps. The jdeps tool extracts the dependency graph of the
+3.4     Compiler Agent                                                                  project and identifies test cases that are directly related to the
+The Compiler Agent employs a self-reflection loop [42] by inter-                        target classes. This ensures that relevant developer-written tests
+acting with the Maven compiler tool to validate the syntax of the                       are identified and executed for validation.
+refactored code. If a compilation error occurs, the error message                          Maven Test Tool. Similar to the Maven compiler tool, the Maven
+is sent to the LLM, which analyzes the error, generates an error                        test tool interacts with the operating system to execute tests using
+summary, and forwards it to the Refactoring Generator Agent for                         Maven. The Tester Agent triggers the execution of both developer-
+reflection and correction. The feedback loop is set to a maximum                        written and EvoSuite-generated tests to ensure that the observable
+of 20 iterations, following previous work [13] to assess the extent                     behavior of the refactored code remains unchanged.
+to which it can effectively refine the generated refactorings. The                         Finally, this workflow is autonomously executed throughout all
+Compiler Agent’s reflection process is as follows:                                      the classes of the project. In Section 5, we evaluate the impact of
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                               Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+RefAgent on 8 software projects using various evaluation metrics.                   4.2     Impact on Software Quality Assessment
+We compare RefAgent against developers, a search-based refactor-                    4.2.1 Code Smells Extraction. Code smells are indicators of
+ing tool named RefGen [32], and single-agent scenarios. We also                     underlying design or implementation issues that may impact main-
+examine the performance of our framework RefAgent, using three                      tainability, readability, and overall software quality [43]. Since code
+LLMs, notably GPT-4o, StarCoder2 and DeepseekCoder.                                 refactoring is commonly associated with the elimination of code
+                                                                                    smells [52], we extract code smells from the Java projects to mea-
+4 Experimental Methodology                                                          sure the capabilities of RefAgent in reducing code smells. We use
+4.1 Studied Models and Dataset                                                      DesigniteJava 2.5.2 [41] to extract code smells from the source code
+                                                                                    before and after the project is refactored. DesigniteJava detects
+Models. We initially design RefAgent using the closed-source GPT-                   46 different types of code smells. We assess how well RefAgent
+4o model as its core LLM. To further assess its performance, we                     mitigates code smells compared to competing approaches. we focus
+benchmark RefAgent against two open-source models: StarCoder2-                      on the following categories:
+15B-instruct [30] and DeepSeekCoder-33B-instruct [17]. Prior work                   Design Smells: Poor adherence to design principles that hinder
+highlights StarCoder2’s effectiveness in refactoring, showing im-                   modularity and reusability (e.g., unnecessary abstraction).
+provements in code quality and unit test pass rates using zero-shot                 Implementation Smells: Code-level issues that make the code
+and one-shot prompting [15]. The study also mitigates data leakage                  harder to maintain (e.g., large classes, long methods).
+by filtering recent Java projects not present in the StackV2 training
+data [14, 30], an approach we follow in our setup.                                  4.2.2 Quality Metrics Computation. We use the Quality Model
+   DeepSeekCoder has demonstrated strong performance on code                        for Object-Oriented Design (QMOOD), proposed by the prior work
+generation and reasoning benchmarks. We include it to evaluate                      [8], which consists of a set of quality measures using the ISO 9126
+whether large instruction-tuned open models can match or outper-                    specification. It defines six high-level design quality attributes:
+form GPT-4o in automated refactoring.                                               reusability, flexibility, understandability, functionality, extensibility,
+   GPT-4o supports a 128K token context window, while StarCoder2                    and effectiveness that can be calculated using 11 lower-level design
+and DeepSeekCoder are limited to 8192 tokens. To ensure fair com-                   metrics as detailed in Table 2. We use QMOOD to estimate the effect
+parison, we run RefAgent only on classes under 4096 tokens, reserv-                 of the suggested refactoring solutions on quality attributes, simi-
+ing the remaining space for dependent code and agent instructions,                  larly to many prior works [3, 5]. Likewise, we calculate the Quality
+similar to OpenAI’s dynamic context handling in ChatGPT. We                         Improvement (QI) for each quality attribute using the following
+use a temperature of 0.7 for GPT-4o to balance consistency and                      formula.
+diversity.
+                                                                                                                       𝐴𝑞 (𝑝 ′ ) − 𝐴𝑞 (𝑝)
+                      Table 1: Dataset Overview                                                          𝑄𝐼 (𝐴𝑞 ) =                       × 100                  (1)
+                                                                                                                           |𝐴𝑞 (𝑝)|
+ Project name   Release     Release date   Nbr of classes   Nbr of Methods   KLOC   where 𝐴𝑞 (𝑝) represents the measurement of quality attribute 𝑞 for
+ JClouds        2.3.0       05-2024            9,972            44,797        646
+ Accumulo       1.10.4      11-2023            2,286            40,353        603   project 𝑝, and 𝑝 ′ denotes the refactored version of project 𝑝. The
+ systemml       3.2.0-rc1   02-2024            3,986            41,962        658   sign indicates an increase (+) or decrease (-), while the numerical
+ apex-core      3.7.0-rc1   07-2021            1,378             5,432        107   value represents the percentage of improvement. Since QMOOD
+ skywalking     9.7.0       11-2023            2,871             9,736        192
+ deltaspike     1.9.6       04-2022            2,155             6,471        139   attribute calculations may yield negative values in the original
+ Jmeter         5.6.3-rc1   12-2023            1,723            14,074        247   design, taking the absolute value of the divisor is essential.
+ openmeetings   7.2.0       12-2023            1,306             8,441        188      By analyzing each QMOOD attribute before and after refactoring,
+                                                                                    we assess the effectiveness of RefAgent in enhancing software
+                                                                                    maintainability, modularity, and overall design quality. We compute
+   Dataset. We randomly select eight open-source Apache Java
+                                                                                    the metrics using the tool available online.3
+projects, due to resource constraints, from a dataset widely used in
+prior research [14, 15]. We then filter out projects that are included
+in StarCoder2’s training dataset Stackv2 [30] to remove the risk of
+                                                                                    4.3     Identification of Refactoring opportunities
+data-leakage on that model. Unfortunately, due to the closed-source                 4.3.1 Experimental details. We employ RefactoringMiner 3.0
+nature of GPT-4o, we cannot ensure no data leakage for that model.                  [46, 47], which is a tool designed only to detect and classify refac-
+We therefore rely on StarCoder2 to determine the strength of our                    toring operations between version histories or commits, to examine
+approach in a more controlled setting. The details of the selected                  the refactorings applied by RefAgent. RefactoringMiner represents
+projects, including their size and characteristics, are summarized                  the state of the art in refactoring detection, supporting up to 59
+in Table 1.                                                                         different types of refactorings. The evaluation of RefactoringMiner
+   Hardware and Computational Resources. StarCoder2 ex-                             on this dataset, performed in previous work [34], shows an overall
+periments are conducted on a computing server with 80 GB of                         precision of 99.7% and a recall of 94.2%, confirming it as an accurate
+memory. The operating system used is Ubuntu 22.04.4 LTS. We use                     refactoring detection tool [48]. The process is as follows: for each
+a GPU-accelerated setup similar to previous work [15], leveraging                   project 𝑝 at release version 𝑣, we create a fork. After RefAgent
+the Nvidia A100 GPUs for efficient model inference and code gen-                    refactors a class, we commit the modified class to the fork.
+eration. The GPT4o-based experiments use GPT-4o via the OpenAI
+API, using cloud-based inference for model execution.                               3 https://github.com/dimizisis/metrics_calculator/
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                         Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+                                                      Table 2: QMOOD Computation Equations.
+     Quality Attribute    Quality Attribute Calculation
+     Reusability          -0.25 * DCC + 0.25 * CAM + 0.5 * CIS + 0.5 * DSC
+     Flexibility          0.25 * DAM - 0.25 * DCC + 0.5 * MOA + 0.5 * NOP
+                          -0.33 * ANA + 0.33 * DAM - 0.33 * DCC + 0.33 * CAM - 0.33 * NOP - 0.33 * NOM - 0.33 * DSC + 0.33 * CAM
+     Understandability
+                          - 0.33 * NOP - 0.33 * NOM - 0.33 * DSC
+     Effectiveness        0.2 * ANA + 0.2 * DAM + 0.2 * MOA + 0.2 * MFA + 0.2 * NOP
+     Extendibility        0.5 * ANA - 0.5 * DCC + 0.5 * MFA + 0.5 * NOS
+     Functionality        0.12 * MOA + 0.22 * MOP + 0.22 * CIS + 0.22 * DSC + 0.22 * NOH
+     Note: DSC is design size, NOM is number of methods, DCC is coupling, NOP is polymorphism, NOH is number of hierarchies,
+     CAM is cohesion among methods, ANA is avg. num. of ancestors, DAM is data access metric, MOA is measure of aggregation,
+     MFA is measure of functional abstraction, and CIS is class interface size.
+   For each commit corresponding to a refactored class in 𝑝, we            approaches.
+apply RefactoringMiner, which extracts the refactoring types and                                                𝑇𝑃
+their locations within the commit. RefactoringMiner returns de-                                   𝑃𝑟𝑒𝑐𝑖𝑠𝑖𝑜𝑛 =                               (2)
+                                                                                                             𝑇𝑃 + 𝐹𝑃
+tailed information, including the class name, method name, and
+                                                                           Recall: Measures the proportion of the baseline’s refactorings that
+the specific lines of code where each refactoring was applied. We
+                                                                           were also applied by RefAgent.
+leverage this information to match RefAgent’s refactorings with
+the extracted refactorings, allowing us to compare our results with                                             𝑇𝑃
+                                                                                                   𝑅𝑒𝑐𝑎𝑙𝑙 =                                     (3)
+developer-introduced changes. Furthermore, for each project 𝑝, we                                             𝑇𝑃 + 𝐹𝑁
+clone the next release 𝑣 n+1 and apply RefactoringMiner. Refactor-
+                                                                           F1-score: The harmonic mean of precision and recall, balancing
+ingMiner automatically extracts all commits in version 𝑣 n+1 and
+                                                                           correctness and completeness.
+returns the identified refactoring types and their locations. If no
+refactoring is found, it generates an empty folder containing only                                       𝑃𝑟𝑒𝑐𝑖𝑠𝑖𝑜𝑛 × 𝑅𝑒𝑐𝑎𝑙𝑙
+                                                                                              𝐹1 = 2 ×                                          (4)
+the commit ID. Note that in our study, RefactoringMiner is used                                          𝑃𝑟𝑒𝑐𝑖𝑠𝑖𝑜𝑛 + 𝑅𝑒𝑐𝑎𝑙𝑙
+exclusively in the evaluation of RefAgent.
+                                                                           A higher F1-score indicates strong alignment between RefAgent and
+                                                                           developers, or between RefAgent and RefGen tool, in identifying
+4.3.2 Relevance to Search-based Refactoring Approaches                     refactoring opportunities.
+and Developers. Previous work has shown that search-based
+refactoring approaches excel in identifying refactoring opportuni-
+                                                                           5 Results
+ties by using optimization algorithms that explore the search space
+of possible refactorings to maximize software quality [1]. Thus,           5.1 RQ1: How effective is our approach in
+we compare the refactoring opportunities identified by RefAgent                improving the quality of software projects
+with those made by RefGen, a search-based refactoring tool that            5.1.1 Motivation. Improving software quality is a core objective
+implements efficient refactoring scheduling based on partial order         of automated refactoring, yet existing techniques exhibit limitations
+reduction [32]. RefGen was initially developed as an Eclipse plug-in       such as producing behavior-breaking changes and a limited set of
+designed to suggest sequences of refactorings to improve the design        supported refactoring types. To evaluate whether RefAgent can
+quality of software systems by addressing anti-patterns and code           address these limitations, we examine its impact on key quality
+smells detected across different classes. The generated refactoring        indicators across 8 real-world software projects and discuss its
+sequence is ordered to maximize design quality improvement while           prevalent refactoring types.
+avoiding conflicts among the suggested refactorings.
+   RefGen provides an option to run the tool in simulation mode.           5.1.2 Approach. As indicated in Section 4, we evaluate RefAgent
+In this mode, RefGen constructs an abstract code design model,             using GPT-4o, DeepSeek-Coder and StarCoder2. Next, RefAgent
+identifies anti-patterns, and generates a sequence of refactoring          runs autonomously with LLM agents collaborating towards a shared
+candidates, which are then applied to the design model rather than         goal, which is refactoring the codebase by iterating through classes
+the actual code. This simulation capability is particularly useful for     while preserving the behavior. As detailed in Section 3, RefAgent
+our analysis, as it allows us to evaluate the proposed refactoring         starts by identifying refactoring opportunities, planning the appro-
+solutions and estimate the potential design quality improvements           priate refactoring solutions, and executing the rest of the workflow.
+resulting from applying a complete refactoring sequence.                      To evaluate the effectiveness of RefAgent in improving soft-
+   The objective is to determine whether RefAgent applies refactor-        ware quality, we measure its impact on code smells, compilation
+ings in the same class, method, and location as baseline approaches,       success rates, and unit test pass rates. First, a Java project is
+notably the developers and the RefGen tool.                                selected, then we use DesigniteJava to detect and record the code
+   To quantify the alignment between RefAgent and baseline ap-             smells. For the purpose of our study, we manually ensure that the
+proaches, we compute the following evaluation metrics:                     project before refactoring is initially compilable and has a 100%
+Precision: Measures the proportion of refactorings suggested by            unit test pass rate with regards to its existing developer-written
+RefAgent that are also present in the selections done by baseline          test suites.
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                       Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+   The gain in each metric is assessed using the Improvement Rate                at handling abstraction and implementing simpler fixes at the im-
+(IR), following the approach used in previous studies [15]. It is                plementation level (e.g., removing unnecessary elements, such as
+calculated as follows:                                                           magic numbers).
+
+                           𝑚 before − 𝑚 after
+                      𝐼𝑅 =                    × 100                 (5)
+                                𝑚 before
+where 𝑚 before represents the initial metric value (e.g., code smell
+count or quality metric), and 𝑚 after represents the corresponding
+metric value after refactoring. This formula allows us to quantify
+the relative improvement introduced by RefAgent across different
+software quality dimensions.
+   Furthermore, we identify code smells in both the original and
+refactored projects, as described in Section 4.2.1. We compute the
+Improvement Rate (IR) for each code smell type, grouping them
+by category to analyze which type is most effectively reduced by
+RefAgent.                                                                        Figure 4: Comparison of Design and Implementation Code
+   To assess the statistical differences in improvements for code                Smell Reduction Rate (SRR) for RefAgent-GPT, RefAgent-
+smells and unit tests relative to the baseline across all projects, we           DeepSeek-coder and RefAgent-Starcoder.
+use the Wilcoxon signed-rank test [6], as the measurements being
+compared are paired. A significance threshold of p < 0.05 is used
+to determine statistical significance.                                              Next, we use RefactoringMiner to identify the refactoring types
+   .                                                                             applied by RefAgent. A total of 23 refactoring types were detected
+                                                                                 across projects. Figure 5 shows the distribution of the top 12 refactor-
+Table 3: RefAgent Performance Evaluation Across 8 Projects
+                                                                                 ing types that RefAgent performs. We show that GPT-4o, DeepSeek-
+                       Unit Test        Compilation           Smell              Coder, and Starcoder have comparable refactoring behaviors in Ex-
+                       Pass Rate         Pass Rate       reduction rate          tract Method, Invert Condition, Parameterize Variable, and Merge
+      RefAgent
+                      Median Avg        Median Avg       Median Avg
+                                                                                 Conditional. However, RefAgent using GPT-4o and DeepSeek-Coder
+        GPT             90      86.8      87      89.6     52.5      53.75
+     Starcoder          85      83.8      84      83.6      50        50.3
+                                                                                 applies Rename Attribute and Change Method Access Modifier 30%
+  DeepSeek-coder        90      98.5      88      91.8     53.5      52.54       more than Starcoder. In contrast, RefAgent-Starcoder takes a more
+      p-value             0.053             0.064              0.252             conservative stance, performing Remove Variable Modifier and
+                                                                                 Replace Conditional With Ternary 60% less than RefAgent-GPT
+5.1.3 Findings. RefAgent exhibits high unit test and com-                        or RefAgent-DeepSeek-Coder, suggesting a reluctance to modify
+pilation pass rates, indicating that a multi-agent approach                      variables and conditional structures.
+can preserve functionality and syntactic correctness, while                         RefAgent’s refactoring behavior varies depending on the un-
+effectively reducing code smells.                                                derlying LLM, with GPT-4o and DeepSeek-Coder favoring more
+   As shown in Table 3, RefAgent achieves a median unit test pass                structural changes while Starcoder adopts a more conservative
+rate of 90% and 90.5% when using GPT-4o and DeepSeekCoder, re-                   approach, suggesting that the choice of LLM can influence the bal-
+spectively, while RefAgent-StarCoder achieves around 85%. Compi-                 ance between code transformation and preservation in automated
+lation pass rates follow a similar trend, with RefAgent-DeepSeeker-              refactoring.
+coder and RefAgent-GPT attaining a median of 87% and 88%, respec-
+tively, compared to 84% for RefAgent-StarCoder. The consistently
+high unit test pass rates and compilation success rates suggest that
+our multi-agent approach effectively preserves functionality across
+refactored projects, ensuring that structural improvements do not
+compromise correctness and syntactic integrity, while achieving an
+average code smell reduction of 52.5%, 53.5%, and 50% for RefAgent
+using GPT-4o, DeepSeek-Coder, and StarCoder, respectively.
+   RefAgent operates agnostically to the underlying LLM.                         Figure 5: Comparison of Top 12 Refactoring Types counts
+When evaluating unit test pass rates, compilation success,                       across 8 projects
+and smell reduction rates, no statistically significant differ-
+ences were observed between GPT-4o, DeepSeek-Coder, and
+                                                                                     RefAgent exhibits a high median unit test rate (median
+StarCoder (p > 0.05). Figure 4 shows the effectiveness of RefA-
+                                                                                     90%) and compilation pass rates (median 87%), indicating
+gent using GPT-4o, DeepSeek-Coder, and StarCoder in reducing
+                                                                                     that a multi-agent approach can preserve functionality
+different categories of code smells. RefAgent using GPT-4o and
+                                                                                     and syntactic correctness while effectively reducing code
+DeepSeek-coder are more effective in improving modularization
+                                                                                     smells. RefAgent operates agnostically to the underlying
+and reducing complexity, which may suggest that they have a better
+                                                                                     LLM. Moreover, RefAgent performs 23 types of refactoring.
+structural understanding. In contrast, RefAgent-Starcoder is better
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                          Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+5.2     RQ2: How effective is our approach in                                              that RefAgent achieves a high median recall of 81% and a median
+        identifying refactoring opportunities and                                          F1-score of 80% when compared to developers, demonstrating its
+        improving software quality compared to                                             ability to identify refactoring opportunities and mimicking develop-
+                                                                                           ers’ intuition. Precision remains slightly lower with a median value
+        search-based techniques and developers?                                            of 78%, suggesting that while RefAgent identifies a broad range
+5.2.1 Motivation. RefAgent relies on the reasoning capabilities                            of changes, some improvement may still be needed. Additionally,
+of LLM-based agents, which can reason over the given context,                              we observe that RefAgent shows strong alignment with the opti-
+generate, and validate refactorings through dynamic workflows.                             mized search-based tool RefGen, achieving a median F1-score of
+Specifically, the Context-aware Planner Agent is responsible for                           72%. When using GPT-4o, DeepSeek-Coder, and StarCoder, RefA-
+identifying refactoring opportunities and assigning the proper refac-                      gent maintains a consistent performance with F1-score 80%, 80%
+torings for the various code regions (e.g., method, field, variable)                       and 69% respectively, demonstrating its ability to generalize well
+of the target class. To examine the effectiveness of RefAgent, we                          across different LLM architectures. Since GPT-4o, being a closed-
+compare its ability to identify and apply meaningful refactorings                          source model, faces the risk of data leakage. We therefore rely on
+against both automated baselines and developer-applied changes.                            StarCoder2 to determine the strength of our approach in a more
+5.2.2 Approach. To evaluate RefAgent’s ability in identifying                              controlled setting.
+refactoring opportunities, we compare its refactoring selections                              While precision, recall, and F1-score provide useful insights into
+with those made by developers and RefGen [32], a search-based                              RefAgent’s effectiveness, their interpretation should be approached
+refactoring algorithm that was shown to effectively identify refac-                        with nuance. These metrics assume that developers and RefGen
+toring opportunities. The objective is to determine whether RefA-                          serve as definitive references, yet they may also overlook meaning-
+gent applies refactorings in the same class, method, and location as                       ful refactorings that RefAgent successfully identifies. As a result,
+developers and RefGen.                                                                     some misalignment does not necessarily indicate that RefAgent
+   First, for every class refactored by RefAgent, we extract refactor-                     produced incorrect or suboptimal results, particularly if the applied
+ing locations and types from our 8 projects using Refactoring Miner                        refactorings lead to improved code quality. Given that search-based
+as discussed in Section 4.3. Second, we execute the search-based                           approaches aim to generate optimal solutions, it is important to
+refactoring tool RefGen on the projects, from which we extract the                         acknowledge that multiple valid refactoring solutions may exist.
+refactored classes. Finally, in the case for developers, we select the                     Therefore, rather than viewing misalignments strictly as errors,
+next release for each of our eight projects, then run Refactoring-                         they should be carefully analyzed to assess whether RefAgent is
+Miner on it to collect historical refactoring commits that contain                         capturing valuable transformations beyond those identified by de-
+the refactored classes, methods as well as the types.                                      velopers and RefGen. In future work, we will further investigate this
+   We present two scenarios:                                                               aspect to better understand the impact of RefAgent’s refactorings.
+Scenario 1: We determine a match between RefAgent’s and devel-                             Table 5: QMOOD Improvement Rates (IR) values across dif-
+opers’ refactorings by comparing the class name, method name,                              ferent attributes for RefAgent vs RefGen.
+line of code range, and refactoring type: if all attributes align, it is
+                                                                                                                 RefAgent    RefAgent       RefAgent
+a match; otherwise, it is not a match.                                                       QMOOD
+                                                                                                                  GPT-4o     Starcoder    Deepseek-coder
+                                                                                                                                                            RefGen
+Scenario 2: Since RefGen tool does not provide location and code                             Reusability              8.16         5.48              8.19      16.5
+change details, we determine a match if RefGen and RefAgent apply                            Flexibility             -0.62        -0.35             -0.63      -5.9
+the same refactoring type to the same class and method.                                      Understandability      -14.34       -13.47            -14.44     -19.7
+                                                                                             Functionality            4.75         0.49              4.75         0
+   Finally, we compute Precision, Recall, and F1-score, as discussed                         Extendibility               0            0                 0       5.9
+in Section 4.3, to quantify the degree of alignment, determining                             Effectiveness            4.28         3.39              4.29      -9.7
+whether RefAgent more closely follows developer decisions or                                 p-value                 0.843        0.687             0.852         -
+search-based approaches.
+                                                                                              From Table 5, we observe that RefAgent improves reusability,
+5.2.3 Findings. RefAgent effectively identifies refactoring                                understandability, and functionality compared to RefGen. Given
+opportunities, achieving strong alignment with both devel-                                 the metric definitions in Table 2, these improvements indicate that
+opers (78% median across our subject systems) and RefGen                                   RefAgent enhances method cohesion, which aligns with our find-
+(72% median across our subject systems).                                                   ings in RQ1 5.1, where RefAgent frequently applies Extract Method
+                                                                                           refactorings or modifies method access modifiers.
+Table 4: Median values of Precision, Recall, F1-score of RefA-
+                                                                                              Additionally, while understandability is lower in RefAgent than
+gent compared to developers vs Refgen
+                                                                                           in RefGen, the difference remains comparable. This can be attrib-
+                              Developer                            RefGen
+ Refagent
+                   # Precision # Recall # F1-Score   # Precision   # Recall   # F1-Score
+                                                                                           uted to RefAgent’s effectiveness in reducing complexity compared
+ GPT-4o                78         81        80           75           70          72       to RefGen, as lower complexity can lead to reduced understandabil-
+ DeepSeek-coder        79         81        80           75           70          72       ity despite improved cohesion.
+ StarCoder             72         73        73           69           68          69
+ Median                78         81        80           75           70          72          Moreover, compared to RefGen, RefAgent shows an increase
+ # Median value, rounded number                                                            in effectiveness and a slight increase in flexibility. This can be ex-
+                                                                                           plained by RefAgent’s improvement in the number of polymorphic
+  In table 4, we compare the precision, recall, and F1-score of                            methods, as polymorphism positively impacts both metrics by en-
+RefAgent against developers and RefGen. The results highlight                              hancing method adaptability and reusability within the design.
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                        Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+   Overall, RefAgent’s structured refinement process through multi-              choice of LLM. For instance, in GPT-4o and DeepSeek-Coder, RefA-
+agent collaboration demonstrates refactoring improvements that                   gent achieves a unit test pass rate of 90% compared to 44.5% in
+are competitive and comparable (p-value ≥ 0.05) with the search-                 Pass@1, while in Starcoder2, RefAgent improves the compilation
+based optimization approach of RefGen.                                           pass rate to 84%, significantly outperforming single-LLM agents in
+                                                                                 the Pass@1 scenario. These improvements, backed by statistically
+      RefAgent presents a fully autonomous means to identify                     significant p-values confirm the effectiveness of RefAgent when
+      refactoring opportunities and improve software quality,                    compared to single-agent approaches.
+      with performance comparable to developers (median F1-
+      score 80%) and RefAgent (median F1-score 72%). Moreover,                   Table 6: Comparison of test pass rates and compilation pass
+      RefAgent shows comparable performance in QMOOD im-                         rates for single agent approach vs RefAgent.
+      provements compared to RefGen (p-value>0.05)
+                                                                                                            Unit test      Compilation           Smell
+                                                                                                            pass rate        pass rate      reduction rate
+                                                                                        Refactoring
+5.3     RQ3: What is the contribution of each                                                             Median Avg       Median Avg       Median Avg
+                                                                                               RefAgent     90      86.8     87      89.6     52.5      53.75
+        component of our framework?                                                   GPT       Pass@1     44.5     44.3     48      48.4     38.1       41.2
+5.3.1 Motivation. While multi-agent architectures offer modular-                                Pass@3      56       60      62      64.6     42.5       43.1
+                                                                                    P-value        -          0.001            0.007              0.039
+ity and the ability to decompose complex tasks, they also introduce                            RefAgent     85      83.8     84      83.6      50        50.3
+design and orchestration overhead. Without a clear understand-                     Starcoder    Pass@1      33      35.2     45      45.4     37.5        39
+ing of the role of each component, it becomes difficult to justify                              Pass@3     52.5      51      56       59      48.3        50
+                                                                                    P-value        -           0.02            0.007              0.039
+this complexity or optimize the framework. Prior work in software                              RefAgent    90.5     87.3    88.5     89.2     53.5       54.1
+engineering and LLM-based systems highlights the importance                        DeepSeek
+                                                                                                Pass@1     44.5     45.2     50      49.5     40.5       42.3
+                                                                                    coder
+of component-level analysis and ablation studies to quantify the                                Pass@3      58       61      63      65.2     49.2       51.6
+                                                                                    P-value        -          0.004            0.005              0.039
+effectiveness of individual elements [36].
+5.3.2 Comparison of RefAgent with single LLM-based ap-                              RefAgent consistently and significantly with (p-value<
+proaches. To assess the performance of RefAgent, we compare                      0.05) outperforms the single-agent approaches across all
+its refactored outputs against single-agent approaches, which are                QMOOD metrics, demonstrating that the multi-agent ap-
+based on previous work [15], in terms of software quality improve-               proach is important to improve software quality. From figure 6,
+ments. The comparison focuses on key metrics used in RQ1, RQ2 (                  we show that RefAgent with subject LLMs shows similar improve-
+unit test Pass Rate, compilation success rate, Smell Reduction Rate              ments over the single-agent counterpart. This suggests that the
+(SRR), and QMOOD metrics). For the single-agent baseline, we eval-               effectiveness of RefAgent is not dependent on the specific LLM used
+uate the effectiveness of an LLM-based refactoring agent given the               but rather on the multi-agent collaboration itself. This indicates
+same context as RefAgent to ensure a fair comparison. Similarly                  that RefAgent enhances reusability and functionality attributes, and
+to previous work, we use for the unit test pass rate evaluation the              overall code quality beyond what a single-agent model can achieve
+pass @k metric defined as follows:                                               alone. The Figure 6 further suggests that multi-agent coordination
+                                                                                 introduces something more to the refactoring process, leading to
+     • Pass@1: We generate a single refactored solution for the tar-             better software design decisions.
+        get class. If it passes the unit test, it is considered a successful
+        refactoring under the Pass@1 criterion.
+     • Pass@3: We generate three refactored solutions for each
+        target class. Each solution is independently evaluated by
+        running the corresponding unit tests. If at least one of these
+        three refactored versions passes all unit tests, the refactoring
+        is considered successful under pass@3.
+   This setup ensures that RefAgent is fairly compared fairly to a
+single-agent LLM. Similarly to RQ1 and RQ2, we evaluate this RQ
+on all of the classes of our 8 subject systems presented in Table 1.
+5.3.3 Findings. RefAgent significantly outperforms the sin-
+gle agent approach in terms of unit test pass rate, compilation
+pass rates, and code quality improvement across 8 software
+projects.
+   From Table 6, we can identify that incorporating feedback loops               Figure 6: Improvement rate of QMood Metrics: RefAgent-
+in a RefAgent and decoupling the planner and execution agents                    GPT vs single agents and RefAgent-Starcoder vs Single agents.
+enhances the robustness and correctness of code refactoring, lead-               The Wilcoxon t-test yields a p-value of 0.046
+ing to better overall software quality. In fact, RefAgent shows a                5.3.4 Ablation study. We conduct an ablation study by system-
+high improvement rate across all metrics with GPT4o, Deepseek-                   atically removing key components of RefAgent and analyzing its
+Coder and Starcoder2, when compared to single-agent Pass@1 and                   performance. Specifically, we assess the impact of eliminating con-
+Pass@3, demonstrating that the approach is not sensitive to the                  text retrieval, dependency analysis, and the code search module
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                         Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+from the framework. We analyze the unit test pass rates and com-           correct errors in refactoring recommendations and improve code
+pilation pass rates across each scenario.                                  structure. Ultimately, iterating is essential for achieving stable and
+   Furthermore, we analyze the impact of the feedback loop by              high-quality software outputs for RefAgent.
+evaluating the unit test pass rate and compilation pass rate over
+20 iterations. This will help determine how the iterative refine-              RefAgent significantly outperforms the single-agent ap-
+ment process influences model performance and stability over 20                proach in terms of unit test pass rate, compilation pass
+iterations.                                                                    rates, and QMOOD quality improvements across 8 soft-
+   By conducting these experiments, we aim to isolate the contri-              ware projects. This demonstrates the usefulness of a multi-
+bution of each component and understand their role in enhancing                agent approach over a single agent approach when im-
+the quality and effectiveness of the generated refactoring.                    proving software quality. Furthermore, the ablation study
+                                                                               highlights the importance of context retrieval and iterative
+                                                                               refinement for maintaining high test and compilation pass
+                                                                               rates with agentic software refactoring.
+
+                                                                           6   Discussion
+                                                                           In this section, we ensure that our evaluation is not adversely af-
+                                                                           fected by tool-specific limitations. Thus, we perform manual valida-
+                                                                           tion of a representative sample of the outputs from DesigniteJava,
+                                                                           EvoSuite, and RefactoringMiner.
+
+
+Figure 7: Distribution of test pass rates and compilation pass
+rates for RefAgent with and without context, highlighting
+variations in performance across different configurations.
+
+
+
+                                                                           Figure 9: True Positive and False Positive rates of the tools
+                                                                           used in our study, based on manual validation of a statisti-
+                                                                           cally representative sample.
+                                                                           Manual analysis of the Evosuite’s generated tests. In RefAgent,
+                                                                           EvoSuite is invoked by the Tester agent to generate tests for the
+                                                                           refactored classes when developer-written tests are missing or in-
+                                                                           sufficient.
+                                                                              To assess the reliability of Evosuite, we randomly select a statis-
+Figure 8: Test and Compilation Pass Rate Across Iterations                 tically significant sample, averaging 374 classes per project from
+(GPT-4o vs. Starcoder vs. DeepSeek-Coder)                                  each of the eight open-source projects (95% confidence, 5% margin
+                                                                           of error). For each class, we manually review all generated test cases
+5.3.5 Findings. Context retrieval is essential for maintain-               to determine whether they were True Positives (TP), i.e., seman-
+ing high test and compilation pass rates in RefAgent, as its               tically correct and passing, or False Positives (FP), i.e., incorrect
+removal leads to significant performance degradation and                   but still passing. As shown in Figure 9, an average of 91% of tests
+increased variability. Figure 7 presents results of the ablation           were TP, closely aligning with EvoSuite’s reported accuracy and
+study on context retrieval components, comparing RefAgent-GPT,             prior studies [15, 39, 40]. The average FP rate was only 1.2%, con-
+RefAgent-DeepSeek-Coder, and RefAgent-Starcoder with and with-             firming the low risk of misleading results. These findings support
+out context. Figure 7 shows that removing context leads to a signif-       the reliability of EvoSuite within RefAgent. While FPs are a known
+icant drop in both unit test pass rates and compilation pass rates,        limitation in automated test generation, their minimal presence
+highlighting the critical role of context in ensuring refactoring effec-   suggests a limited impact on decision-making. Future work may
+tiveness. RefAgent using subject LLMs exhibits high performance            incorporate mutation testing or enhanced test oracles to better
+when context is included, but without it, performance becomes              validate behavioral correctness. Additionally, leveraging LLM-as-
+highly unstable, with increased variance and a lower median pass           a-judge approaches can help assess semantic soundness beyond
+rate.                                                                      pass/fail outcomes [21].
+   RefAgent progressively enhances the unit test pass rates                Impact of False Positives in RefAgent Evaluation. While static
+across 20 iterations with the 3 subject LLMs. From Figure 8, one           tools such as DesigniteJavaonly detect code smells based on heuris-
+can observe that the median test and compilation pass rate steadily        tic rules or pattern matching, RefAgent orchestrates an end-to-end
+increase with each iteration, stabilizing at 90% and 89% after 12          workflow that includes planning, transformation, validation, and
+iterations, demonstrating the compounding benefits of iterative            iterative correction through reasoning and collaboration, which
+refinement. This iterative approach allows RefAgent to identify and        traditional static tools are not equipped to perform. We use tools
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                       Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+like DesigniteJava and RefactoringMiner for evaluation purposes.                 datasets to further validate and broaden the applicability of our
+However, the planner agent does use the tool DesigniteJava only to               findings.
+extract low-level code metrics to augment the prompt and enrich                     Internal Validity. Our study is based on the latest version of
+context, which can be replaced with any available tool that com-                 DeepSeeker-coder-33b, StarCoder2-15B-Instruct-v0.1 and GPT4o,
+putes code metrics, yet the core decision-making in the planner                  as available at the time of analysis. While our results indicate that
+agent is driven by agent reasoning, enabling adaptability and gener-             RefAgent performs well agnostically from the used LLM, , our eval-
+alization across diverse codebases and scenarios. This design choice             uation approach is designed to be adaptable and can be applied to
+prioritizes autonomy, interpretability, and the ability to evolve in-            future versions of StarCoder2, GPT, and other LLMs from different
+dependently of static tool limitations.                                          vendors. However, differences in hardware setups can impact model
+To ensure the integrity of our evaluation, we manually analyzed a                performance, potentially leading to different results.
+randomly-selected, statistically representative sample of 380 refac-                While LLMs may hallucinate invalid code, RefAgent mitigates
+tored classes across eight projects, applying the same sample to                 this through a multi-agent design with reflection loops and tools
+both refactoring and code smell detection.                                       like EvoSuite for validation. Though EvoSuite may introduce false
+    For refactoring detection, as shown in Figure 9, RefactoringMiner            positives, we manually validated samples and found minimal impact.
+yielded a TP rate of 98.24% and a FP rate of just 0.12%, confirming              Also, our study is designed to apply refactored code only if existing
+its reliability of the tool being aligned with the results reported by           developer-written tests and auto-generated tests pass.
+the authors of RefactoringMiner [46] However, a few false positives,                Construct Validity. Our assessment of refactoring quality pri-
+typically benign cases like formatting changes being misclassified               marily relies on code smell reduction, improvements in code quality
+as refactorings, may introduce minor noise.                                      metrics, and unit test pass rates. However, these metrics may not
+    For code smells, as shown in Figure 9, DesigniteJava reported                comprehensively capture all aspects of code quality. This limitation
+a TP rate of 93.6% (implementation smells) and 92.9% (design                     could impact the robustness of our conclusions across a broader
+smells), with corresponding FP rates of 1.64% and 1.73% respec-                  spectrum of quality indicators. We utilized Rminer3.0 and Designite-
+tively. These results align with prior works [41]. While generally               Java in Java code analysis to collect our metrics. However, different
+low, these false positives can slightly overestimate the number of               tools may yield varying results.
+smells detected or removed, particularly in borderline cases.
+    These findings highlight a broader challenge in automated eval-              8   Conclusion
+uations: the trade-off between scalability and semantic precision.               This paper introduces RefAgent, a fully automated, multi-agent
+Since RefAgent operates as a fully automated framework, develop-                 refactoring framework that aims to enhance software quality across
+ers are not required to run static analysis tools before or after refac-         multiple software quality dimensions. Our approach leverages spe-
+toring. Instead, we employ these tools solely for empirical evalua-              cialized LLM-based agents equipped with tool calling capabilities
+tion, to quantitatively assess the improvements in code quality (e.g.,           to dynamically retrieve context, interact with the compilation and
+reduction of code smells, refactoring types). The developer is not in-           testing environment, and perform more complex context-aware
+volved in this validation loop. In practice, RefAgent autonomously               refactoring tasks without additional manual oversight. Through our
+performs refactoring, testing, and validation using agent reason-                extensive evaluation of eight real-world open-source Java projects,
+ing and tool-calling when needed. Therefore, the manual effort                   RefAgent not only achieves significant reductions in code smells
+required from developers is significantly reduced. However, this                 and improvements in quality attributes but also preserves function-
+paves the way for future work to introduce a human-in-the-loop                   ality, as demonstrated by high unit test and compilation pass rates.
+review mechanism [44] that interacts with agents, which can fur-                 Future work should look into balancing quality improvements with
+ther ensure reliability. An example is an agent-human collaboration              potential trade-offs in design flexibility and understandability. To
+mechanism in which it can request input at specific conversation                 the best of our knowledge, this is the first multi-agent approach
+rounds based on the configuration. The default user proxy agent                  specifically designed for software refactoring.
+should enable customizable involvement, allowing users to define
+how often and under what conditions human input is requested,                    9   Data Availability
+including the option to skip providing input. These strategies offer a           Our data, and the scripts necessary to replicate our work, is avail-
+promising path toward balancing automation with trustworthiness                  able, under an open license, using the following link: https://github.
+in evaluating intelligent software engineering systems.                          com/anonymAgent/RefAgent
+
+7    Threats to Validity
+In this section, we discuss potential threats to the validity of our
+study and the measures we have taken to mitigate them.
+   External Validity. In this study, we focused exclusively on
+datasets from Apache projects, which may limit the generalizability
+of our findings across different software development environments.
+However, this choice ensures consistency with related work [15],
+enabling direct comparison and enhancing the validity and compa-
+rability of our results. Future research should explore more diverse
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                             Khouloud Oueslati, Maxime Lamothe, and Foutse Khomh
+
+
+References                                                                                [23] Juyong Jiang, Fan Wang, Jiasi Shen, Sungju Kim, and Sunghun Kim. 2024. A
+ [1] Jehad Al Dallal. 2015. Identifying refactoring opportunities in object-oriented           Survey on Large Language Models for Code Generation. arXiv:2406.00515 [cs.CL]
+     code: A systematic literature review. Information and Software Technology 58              https://arxiv.org/abs/2406.00515
+     (2015), 231–249. doi:10.1016/j.infsof.2014.08.002                                    [24] Miryung Kim, Thomas Zimmermann, and Nachiappan Nagappan. 2014. An Em-
+ [2] Maha Alharbi and Mohammad Alshayeb. 2024. A Comparative Study of Au-                      pirical Study of RefactoringChallenges and Benefits at Microsoft. IEEE Transac-
+     tomated Refactoring Tools. IEEE Access 12 (2024), 18764–18781. doi:10.1109/               tions on Software Engineering 40, 7 (2014), 633–649. doi:10.1109/TSE.2014.2318734
+     ACCESS.2024.3361314                                                                  [25] Guilherme Lacerda, Fabio Petrillo, Marcelo Pimenta, and Yann Gaël Guéhéneuc.
+ [3] Vahid Alizadeh, Marouane Kessentini, Mohamed Wiem Mkaouer, Mel Ocinneide,                 2020. Code smells and refactoring: A tertiary systematic review of challenges
+     Ali Ouni, and Yuanfang Cai. 2020. An Interactive and Dynamic Search-Based                 and observations. Journal of Systems and Software 167 (2020), 110610. doi:10.
+     Approach to Software Refactoring Recommendations. IEEE Transactions on                    1016/j.jss.2020.110610
+     Software Engineering 46 (09 2020), 932–961. doi:10.1109/TSE.2018.2872711             [26] M.M. Lehman. 1984. Program evolution. Information Processing & Management
+ [4] Eman Abdullah AlOmar, Mohamed Wiem Mkaouer, Christian Newman, and Ali                     20, 1 (1984), 19–36. doi:10.1016/0306-4573(84)90037-2 Special Issue Empirical
+     Ouni. 2021. On Preserving the Behavior in Software Refactoring: A Systematic              Foundations of Information and Software Science.
+     Mapping Study. arXiv:2106.13900 [cs.SE] https://arxiv.org/abs/2106.13900             [27] Fengjie Li, Jiajun Jiang, Jiajun Sun, and Hongyu Zhang. 2024. Hybrid Automated
+ [5] Rodrigo Morales Alvarado. 2017. Automated Improvement of Software Design by               Program Repair by Combining Large Language Models and Program Analysis.
+     Search-Based Refactoring. Ph. D. Dissertation. École Polytechnique de Montréal.           arXiv:2406.00992 [cs.SE] https://arxiv.org/abs/2406.00992
+     https://publications.polymtl.ca/2878/                                                [28] Bo Liu, Yanjie Jiang, Yuxia Zhang, Nan Niu, Guangjie Li, and Hui Liu. 2024. An
+ [6] Andrea Arcuri and Lionel Briand. 2011. A practical guide for using statistical            Empirical Study on the Potential of LLMs in Automated Software Refactoring.
+     tests to assess randomized algorithms in software engineering. In Proceedings             arXiv:2411.04444 [cs.SE] https://arxiv.org/abs/2411.04444
+     of the 33rd International Conference on Software Engineering (Waikiki, Honolulu,     [29] Junwei Liu, Kaixin Wang, Yixuan Chen, Xin Peng, Zhenpeng Chen, Lingming
+     HI, USA) (ICSE ’11). Association for Computing Machinery, New York, NY, USA,              Zhang, and Yiling Lou. 2024. Large Language Model-Based Agents for Software
+     1–10. doi:10.1145/1985793.1985795                                                         Engineering: A Survey. arXiv:2409.02977 [cs.SE] https://arxiv.org/abs/2409.02977
+ [7] Daman Arora, Atharv Sonwane, Nalin Wadhwa, Abhav Mehrotra, Saiteja Utpala,           [30] Anton Lozhkov, Raymond Li, Loubna Ben Allal, Federico Cassano, Joel Lamy-
+     Ramakrishna Bairi, Aditya Kanade, and Nagarajan Natarajan. 2024. MASAI: Mod-              Poirier, Nouamane Tazi, Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,
+     ular Architecture for Software-engineering AI Agents. arXiv:2406.11638 [cs.AI]            Tianyang Liu, Max Tian, Denis Kocetkov, Arthur Zucker, Younes Belkada, Zi-
+     https://arxiv.org/abs/2406.11638                                                          jian Wang, Qian Liu, Dmitry Abulkhanov, Indraneil Paul, Zhuang Li, Wen-Ding
+ [8] J. Bansiya and C.G. Davis. 2002. A hierarchical model for object-oriented design          Li, Megan Risdal, Jia Li, Jian Zhu, Terry Yue Zhuo, Evgenii Zheltonozhskii, Nii
+     quality assessment. IEEE Transactions on Software Engineering 28, 1 (2002), 4–17.         Osae Osae Dade, Wenhao Yu, Lucas Krauß, Naman Jain, Yixuan Su, Xuanli He,
+     doi:10.1109/32.979986                                                                     Manan Dey, Edoardo Abati, Yekun Chai, Niklas Muennighoff, Xiangru Tang, Muh-
+ [9] Abdulrahman Ahmed Bobakr Baqais and Mohammad Alshayeb. 2020. Automatic                    tasham Oblokulov, Christopher Akiki, Marc Marone, Chenghao Mou, Mayank
+     software refactoring: a systematic literature review. Software Quality Journal 28,        Mishra, Alex Gu, Binyuan Hui, Tri Dao, Armel Zebaze, Olivier Dehaene, Nicolas
+     2 (June 2020), 459–502. doi:10.1007/s11219-019-09477-y                                    Patry, Canwen Xu, Julian McAuley, Han Hu, Torsten Scholak, Sebastien Paquet,
+[10] L. A. Belady and M. M. Lehman. 1976. A model of large program development.                Jennifer Robinson, Carolyn Jane Anderson, Nicolas Chapados, Mostofa Patwary,
+     IBM Syst. J. 15, 3 (Sept. 1976), 225–252. doi:10.1147/sj.153.0225                         Nima Tajbakhsh, Yacine Jernite, Carlos Muñoz Ferrandis, Lingming Zhang, Sean
+[11] Sardar Bin Murtaza, Aidan Mccoy, Zhiyuan Ren, Aidan Murphy, and Wolfgang                  Hughes, Thomas Wolf, Arjun Guha, Leandro von Werra, and Harm de Vries. 2024.
+     Banzhaf. 2024. LLM Fault Localisation within Evolutionary Computation Based               StarCoder 2 and The Stack v2: The Next Generation. arXiv:2402.19173 [cs.SE]
+     Automated Program Repair. In Proceedings of the Genetic and Evolutionary Com-             https://arxiv.org/abs/2402.19173
+     putation Conference Companion (Melbourne, VIC, Australia) (GECCO ’24 Com-            [31] Yingwei Ma, Qingping Yang, Rongyu Cao, Binhua Li, Fei Huang, and Yongbin
+     panion). Association for Computing Machinery, New York, NY, USA, 1824–1829.               Li. 2025. Alibaba LingmaAgent: Improving Automated Issue Resolution via
+     doi:10.1145/3638530.3664174                                                               Comprehensive Repository Exploration. arXiv:2406.01422 [cs.SE] https://arxiv.
+[12] Jie Chen, Junchao Xiao, Qing Wang, Leon J. Osterweil, and Mingshu Li. 2016.               org/abs/2406.01422
+     Perspectives on refactoring planning and practice: an empirical study. Empirical     [32] Rodrigo Morales, Francisco Chicano, Foutse Khomh, and Giuliano Antoniol. 2018.
+     Software Engineering 21, 3 (2016), 1397–1436. doi:10.1007/s10664-015-9390-8               Efficient refactoring scheduling based on partial order reduction. Journal of
+[13] Jinsu Choi, Gabin An, and Shin Yoo. 2024. Iterative Refactoring of Real-World             Systems and Software 145 (2018), 25–51. doi:10.1016/j.jss.2018.07.076
+     Open-Source Programs with Large Language Models. In Search-Based Software En-        [33] Rodrigo Morales, Zéphyrin Soh, Foutse Khomh, Giuliano Antoniol, and Francisco
+     gineering, Gunel Jahangirova and Foutse Khomh (Eds.). Springer Nature Switzer-            Chicano. 2017. On the use of developers’ context for automatic refactoring of
+     land, Cham, 49–55.                                                                        software anti-patterns. Journal of Systems and Software 128 (2017), 236–251.
+[14] Maëlick Claes and Mika V. Mäntylä. 2020. 20-MAD: 20 Years of Issues and Com-              doi:10.1016/j.jss.2016.05.042
+     mits of Mozilla and Apache Development (MSR ’20). Association for Computing          [34] Shayan Noei, Heng Li, Stefanos Georgiou, and Ying Zou. 2023. An Empirical Study
+     Machinery, New York, NY, USA, 503–507. doi:10.1145/3379597.3387487                        of Refactoring Rhythms and Tactics in the Software Development Process. IEEE
+[15] Jonathan Cordeiro, Shayan Noei, and Ying Zou. 2024. An Empirical Study on the             Trans. Softw. Eng. 49, 12 (Dec. 2023), 5103–5119. doi:10.1109/TSE.2023.3326775
+     Code Refactoring Capability of Large Language Models. arXiv:2411.02320 [cs.SE]       [35] Ana Nunez, Nafis Tanveer Islam, Sumit Jha, and Peyman Najafirad. 2024. Au-
+     https://arxiv.org/abs/2411.02320                                                          toSafeCoder: A Multi-Agent Framework for Securing LLM Code Generation
+[16] Kyle Daigle and GitHub Staff. 2024. Survey: The AI wave continues to grow on              through Static Analysis and Fuzz Testing. doi:10.48550/arXiv.2409.10737
+     software development teams. GitHub Blog (20 Aug. 2024). https://github.blog/         [36] Ana Nunez, Nafis Tanveer Islam, Sumit Kumar Jha, and Peyman Najafirad. 2024.
+     news-insights/research/survey-ai-wave-grows/ Updated April 15, 2025.                      AutoSafeCoder: A Multi-Agent Framework for Securing LLM Code Generation
+[17] DeepSeek. 2024. DeepSeekCoder: Unlocking the Power of Large Language Models               through Static Analysis and Fuzz Testing. arXiv:2409.10737 [cs.SE] https://arxiv.
+     for Code Generation. https://github.com/deepseek-ai/DeepSeek-Coder                        org/abs/2409.10737
+[18] Eduardo Fernandes, Alexander Chávez, Alessandro Garcia, Isabella Ferreira,           [37] Ali Ouni, Marouane Kessentini, Houari Sahraoui, Katsuro Inoue, and Mo-
+     Diego Cedrim, Leonardo Sousa, and Willian Oizumi. 2020. Refactoring effect                hamed Salah Hamdi. 2015. Improving multi-objective code-smells correc-
+     on internal quality attributes: What haven’t they told you yet? Information and           tion using development history. J. Syst. Softw. 105, C (July 2015), 18–39.
+     Software Technology 126 (2020), 106347. doi:10.1016/j.infsof.2020.106347                  doi:10.1016/j.jss.2015.03.040
+[19] Marios Fokaefs, Nikolaos Tsantalis, Eleni Stroulia, and Alexander Chatzigeorgiou.    [38] Gustavo H. Pinto and Fernando Kamei. 2013. What programmers say about
+     2011. JDeodorant: identification and application of extract class refactorings.           refactoring tools? an empirical investigation of stack overflow. In Proceedings of
+     In 2011 33rd International Conference on Software Engineering (ICSE). 1037–1039.          the 2013 ACM Workshop on Workshop on Refactoring Tools (Indianapolis, Indiana,
+     doi:10.1145/1985793.1985989                                                               USA) (WRT ’13). Association for Computing Machinery, New York, NY, USA,
+[20] Martin Fowler, Kent Beck, John Brant, William Opdyke, and Don Roberts. 1999.              33–36. doi:10.1145/2541348.2541357
+     Refactoring: Improving the Design of Existing Code. Addison-Wesley Professional,     [39] Sebastian Schweikl, Gordon Fraser, and Andrea Arcuri. 2023. EvoSuite at the
+     Berkeley, CA, USA.                                                                        SBST 2022 tool competition. In Proceedings of the 15th Workshop on Search-Based
+[21] Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan, Xuehao Zhai, Chengjin Xu,               Software Testing (Pittsburgh, Pennsylvania) (SBST ’22). Association for Computing
+     Wei Li, Yinghan Shen, Shengjie Ma, Honghao Liu, Saizhuo Wang, Kun Zhang,                  Machinery, New York, NY, USA, 33–34. doi:10.1145/3526072.3527526
+     Yuanzhuo Wang, Wen Gao, Lionel Ni, and Jian Guo. 2025. A Survey on LLM-as-           [40] Sara Shamshiri, Gordon Fraser, Andreas Zeller, and et al. 2015. Do automatically
+     a-Judge. arXiv:2411.15594 [cs.CL] https://arxiv.org/abs/2411.15594                        generated unit tests find real faults? An empirical study of effectiveness and
+[22] Junda He, Christoph Treude, and David Lo. 2024. LLM-Based Multi-Agent Sys-                challenges. In Proceedings of the 30th IEEE/ACM International Conference on
+     tems for Software Engineering: Literature Review, Vision and the Road Ahead.              Automated Software Engineering (ASE). IEEE, 201–211.
+     arXiv:2404.04834 [cs.SE] https://arxiv.org/abs/2404.04834                            [41] Tushar Sharma. 2024. Multi-faceted Code Smell Detection at Scale using
+                                                                                               DesigniteJava 2.0. In 21st IEEE/ACM International Conference on Mining Soft-
+                                                                                               ware Repositories, MSR 2024, Lisbon, Portugal, April 15-16, 2024. ACM, 284–288.
+RefAgent: A Multi-agent LLM-based Framework for Automatic Software Refactoring                                      Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+     doi:10.1145/3643991.3644881                                                            [49] E. van Emden and L. Moonen. 2002. Java quality assurance by detecting code
+[42] Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik                       smells. In Ninth Working Conference on Reverse Engineering, 2002. Proceedings.
+     Narasimhan, and Shunyu Yao. 2023. Reflexion: Language Agents with Verbal                    97–106. doi:10.1109/WCRE.2002.1173068
+     Reinforcement Learning. arXiv:2303.11366 [cs.AI] https://arxiv.org/abs/2303.           [50] Yanlin Wang, Wanjun Zhong, Yanxian Huang, Ensheng Shi, Min Yang, Jiachi
+     11366                                                                                       Chen, Hui Li, Yuchi Ma, Qianxiang Wang, and Zibin Zheng. 2024. Agents in
+[43] Girish Suryanarayana, Ganesh Samarthyam, and Tushar Sharma. 2014. Refac-                    Software Engineering: Survey, Landscape, and Vision. arXiv:2409.09030 [cs.SE]
+     toring for Software Design Smells: Managing Technical Debt (1st ed.). Morgan                https://arxiv.org/abs/2409.09030
+     Kaufmann Publishers Inc., San Francisco, CA, USA.                                      [51] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang.
+[44] Wannita Takerngsaksiri, Jirat Pasuksmit, Patanamon Thongtanunam, Chakkrit                   2024. Agentless: Demystifying LLM-based Software Engineering Agents.
+     Tantithamthavorn, Ruixiong Zhang, Fan Jiang, Jing Li, Evan Cook, Kun Chen,                  arXiv:2407.01489 [cs.SE] https://arxiv.org/abs/2407.01489
+     and Ming Wu. 2025. Human-In-the-Loop Software Development Agents.                      [52] Aiko Yamashita and Steve Counsell. 2013. Code smells as system-level indicators
+     arXiv:2411.12924 [cs.SE] https://arxiv.org/abs/2411.12924                                   of maintainability: An empirical study. Journal of Systems and Software 86, 10
+[45] Zhao Tian, Junjie Chen, and Xiangyu Zhang. 2024. Fixing Large Lan-                          (2013), 2639–2653. doi:10.1016/j.jss.2013.05.007
+     guage Models’ Specification Misunderstanding for Better Code Generation.               [53] Guang Yang, Yu Zhou, Xiang Chen, Xiangyu Zhang, Terry Yue Zhuo, and Taolue
+     arXiv:2309.16120 [cs.SE] https://arxiv.org/abs/2309.16120                                   Chen. 2024. Chain-of-Thought in Neural Code Generation: From and For Light-
+[46] Nikolaos Tsantalis, Ameya Ketkar, and Danny Dig. 2022. RefactoringMiner 2.0.                weight Language Models. arXiv:2312.05562 [cs.SE] https://arxiv.org/abs/2312.
+     IEEE Transactions on Software Engineering 48, 3 (2022), 930–950. doi:10.1109/TSE.           05562
+     2020.3007722                                                                           [54] Linchao Yang, Tomoyuki Kamiya, Kazunori Sakamoto, Hironori Washizaki, and
+[47] Nikolaos Tsantalis, Matin Mansouri, Laleh Eshkevari, Davood Mazinanian, and                 Yoshiaki Fukazawa. 2014. RefactoringScript: A Script and Its Processor for Com-
+     Danny Dig. 2018. Accurate and Efficient Refactoring Detection in Commit History.            posite Refactoring. Proceedings of the International Conference on Software Engi-
+     In 2018 IEEE/ACM 40th International Conference on Software Engineering (ICSE).              neering and Knowledge Engineering, SEKE 2014.
+     483–494. doi:10.1145/3180155.3180206                                                   [55] Norihiro Yoshida, Tsubasa Saika, Eunjong Choi, Ali Ouni, and Katsuro Inoue.
+[48] Nikolaos Tsantalis, Matin Mansouri, Laleh M. Eshkevari, Davood Mazinanian,                  2016. Revisiting the relationship between code smells and refactoring. In 2016
+     and Danny Dig. 2018. Accurate and efficient refactoring detection in commit                 IEEE 24th International Conference on Program Comprehension (ICPC). 1–4. doi:10.
+     history. In Proceedings of the 40th International Conference on Software Engineering        1109/ICPC.2016.7503738
+     (Gothenburg, Sweden) (ICSE ’18). Association for Computing Machinery, New              [56] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+     York, NY, USA, 483–494. doi:10.1145/3180155.3180206                                         toCodeRover: Autonomous Program Improvement. arXiv:2404.05427 [cs.SE]
+                                                                                                 https://arxiv.org/abs/2404.05427
+

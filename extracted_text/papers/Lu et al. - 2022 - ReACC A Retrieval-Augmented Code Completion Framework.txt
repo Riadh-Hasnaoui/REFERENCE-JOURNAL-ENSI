@@ -1,0 +1,955 @@
+           ReACC: A Retrieval-Augmented Code Completion Framework
+                            Shuai Lu1 , Nan Duan1 , Hojae Han2∗, Daya Guo3∗ ,
+                               Seung-won Hwang2 , Alexey Svyatkovskiy4
+                          1
+                            Microsoft Research Asia 2 Seoul National University
+                               3
+                                 Sun Yat-sen University 4 Microsoft Devdiv
+                         {shuailu,nanduan,alsvyatk}@microsoft.com
+                                {stovecat,seungwonh}@snu.ac.kr
+                                    guody5@mail2.sysu.edu.cn
+
+                         Abstract                                   Code completion is considered as an essential
+                                                                 feature towards efficient software development
+    Code completion, which aims to predict the                   in modern Integrated Development Environments
+    following code token(s) according to the code                (IDEs). The task is formulated by predicting the
+    context, can improve the productivity of soft-               following code token(s) based on the code context.
+    ware development. Recent work has proved
+                                                                 Traditionally, code completion requires real-time
+    that statistical language modeling with trans-
+    formers can greatly improve the performance                  program analysis and recommends type-correct
+    in the code completion task via learning from                code tokens (Tu et al., 2014). Recently, statisti-
+    large-scale source code datasets. However,                   cal language models trained on large-scale source
+    current approaches focus only on code context                code data have shown high accuracy in the code
+    within the file or project, i.e. internal context.           completion task. Primitive approaches take the
+    Our distinction is utilizing “external” context,             given context only (Liu et al., 2016; Karampatsis
+    inspired by human behaviors of copying from
+                                                                 et al., 2020), some methods use richer information,
+    the related code snippets when writing code.
+    Specifically, we propose a retrieval-augmented               e.g., adding code token types (Liu et al., 2020), ab-
+    code completion framework, leveraging both                   stract syntax tree (AST) structures (Li et al., 2018;
+    lexical copying and referring to code with sim-              Kim et al., 2021), or extended hierarchical context
+    ilar semantics by retrieval. We adopt a stage-               (Clement et al., 2021). However, one key limita-
+    wise training approach that combines a source                tion of existing methods is the scope of information
+    code retriever and an auto-regressive language               they utilize; all the information is bounded in the
+    model for programming language. We evalu-                    given input file. This is unnatural from human per-
+    ate our approach in the code completion task
+                                                                 spective, as studies demonstrate that programmers
+    in Python and Java programming languages,
+    achieving a state-of-the-art performance on                  tend to reuse an existing code snippet by copying
+    CodeXGLUE benchmark.                                         part of code with or without minor modifications to
+                                                                 accelerate software development (Roy and Cordy,
+1   Introduction                                                 2008; Baker, 2007), leading a software repository
+                                                                 usually containing 7-23% cloned codes (Svajlenko
+With the growth of software engineering field,                   and Roy, 2015).
+large-scale source code corpus gives a chance to
+                                                                    Motivated by this phenomenon, in this paper,
+train language models in code domain (Hindle
+                                                                 we argue the utility of extending the information
+et al., 2016; Tu et al., 2014). And benefiting from
+                                                                 scope beyond the input file, i.e., into a large code-
+the large transformer models (Vaswani et al., 2017)
+                                                                 base. We conjecture that using codes with simi-
+and pre-training techniques (Devlin et al., 2018;
+                                                                 lar semantics as auxiliary information are benefi-
+Radford et al., 2018), a rapid progress has been
+                                                                 cial to predict the following code tokens. There-
+made in many code-related tasks like code search
+                                                                 fore, we propose ReACC – a Retrieval-Augmented
+(Feng et al., 2020; Guo et al., 2020), code summa-
+                                                                 Code Completion framework (See Figure 1). The
+rization (Clement et al., 2020; Ahmad et al., 2020),
+                                                                 code completion task under our framework can be
+bug fixing (Mashhadi and Hemmati, 2021; Drain
+                                                                 re-formulated by, given a source code corpus for
+et al., 2021) and code completion (Svyatkovskiy
+                                                                 search and an unfinished code snippet to complete,
+et al., 2020; Liu et al., 2020; Kim et al., 2021;
+                                                                 using the unfinished code as a query to retrieve
+Clement et al., 2020).
+                                                                 similar code snippets from search corpus, and pre-
+    ∗
+        Work done during internship at Microsoft.                dicting the following code tokens by reusing the
+                                                            6227
+                    Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics
+                                           Volume 1: Long Papers, pages 6227 - 6240
+                             May 22-27, 2022 c 2022 Association for Computational Linguistics
+                                      Source code
+                                       database
+
+               Unfinished code                                                      Retrieved similar code
+
+      def read_as_jsonl(self, json_file):                             def read_jsonl(filename):
+         lines = open(json_file).readlines()                             with open(filename) as f:
+         for line in lines:                          Retriever             dataset = [json.loads(line) for line in f]
+            content =                                                    return dataset
+
+
+                                                                                  Completed code
+
+                                                     Generator              ... = json.loads(line)
+
+
+
+
+Figure 1: An illustration of ReACC framework. Given an unfinished code snippet to complete, ReACC first
+retrieves the similar code from source code database. Then the similar code is concatenated with the unfinished
+code, the completed code will be generated based on them.
+
+
+retrieved code. ReACC consists of two core compo-                 pre-training the retriever by contrastive learning
+nents: (1) a dual-encoder model served as the code-               to enhance sentence embedding. As the labeled
+to-code search retriever (2) an auto-regressive lan-              data containing similar code pairs is rare, we uti-
+guage model served as the code completion gener-                  lize various transformations to generate programs
+ator. ReACC adopts the stage-wise training strat-                 with similar functionality for data augmentation.
+egy which is widely used in other tasks like open-                   We implement the generator with a decoder-only
+domain question answering (Karpukhin et al., 2020;                transformer model. To incorporate the external in-
+Izacard and Grave, 2021), natural language to code                formation from retrieved similar code, we concate-
+generation (Hashimoto et al., 2018; Parvez et al.,                nate the obtained code and code context as input.
+2021), etc.                                                       The generator is initialized by CodeGPT-adapted
+                                                                  (Lu et al., 2021) which is a domain-adaptation
+   The simplest technique for retrieving code is to               model from GPT-2 (Radford et al., 2018) pre-
+build a sparse vector retriever like TF-IDF or BM25               trained on code corpus.
+(Robertson and Zaragoza, 2009) which are both                        We evaluate our ReACC framework on two
+based on keyword matching algorithms. The sparse                  benchmark datasets – CodeXGLUE (Lu et al.,
+retriever can capture lexical information and is sen-             2021) and CodeNet (Puri et al., 2021), in Python
+sitive to the names of code identifiers. The dense                and Java programming languages.            ReACC
+retriever, on the contrary, can capture syntactic and             achieves a state-of-the-art performance on both
+semantic information by mapping a code snippet                    datasets. The experimental results demonstrate that
+to a dense vector. In the code completion task,                   external source code retrieved by our retriever is
+the code retriever is expected to comprehend the                  useful for auto-completing the partial code.
+source code’s intent in order to retrieve the semanti-               To summarize, our main contributions are:
+cally similar codes. On the other hand, considering
+programmers are prone to copy-and-paste existing                     • We propose a retrieval-augmented method to
+code, the retriever should evaluate lexical similarity                 assist the code auto-completion task. 1
+as well. To that end, we adopt the hybrid retriever                  • To adapt to the code completion scenario,
+(Karpukhin et al., 2020; Ma et al., 2021), which                       where the retrieval query is an unfinished code
+combines results of dense and sparse retriever. We                     snippet, we propose the partial code-to-code
+employ a dual-encoder model architecture as the                        search task and create datasets for evaluation.
+dense retriever since the cross-encoder model has
+a high computational complexity. To achieve a bet-                   • We adopt semantic-preserving transforma-
+ter understanding ability, we initialize our dense                     tions for data augmentation to pre-train the
+retriever with GraphCodeBERT (Guo et al., 2020),                       code retrieval model.
+which is a pre-trained BERT-based programming                       1
+                                                                      Our codes are available at https://github.com/
+language understanding model. Then we continue                    celbree/ReACC
+
+                                                             6228
+2   Related Work                                         natural language description as a query (Arwan
+                                                         et al., 2015; Gu et al., 2018; Cambronero et al.,
+2.1 Code completion                                      2019). As for other code intelligence tasks, Hayati
+Code completion is an essential task for code in-        et al. (2018) propose an action subtree retrieval
+telligence. Hindle et al. (2016) are the first to use    method called ReCode for generating general-
+language model for code completion by N-gram             purpose code. Hashimoto et al. (2018) propose
+technique. Deep neural networks (Liu et al., 2016;       a retrieve-and-edit framework for code autocom-
+Alon et al., 2020; Karampatsis et al., 2020) and pre-    pletion and code generation. Luan et al. (2019) pro-
+training approaches (Liu et al., 2020; Svyatkovskiy      pose Aroma, which utilizes code-to-code structural
+et al., 2020) are later frequently utilized to accom-    search and intersecting candidate code snippets to
+plish this. Besides considering source code as code      recommend relevant code given another code snip-
+token sequences, some research focuses on com-           pet as a query. Both Wei et al. (2020) and Li et al.
+pleting an abstract syntax tree (AST) by anticipat-      (2021) leverage the retrieve-and-edit/refine frame-
+ing the next node in the flattened tree (Li et al.,      work to improve model’s performance in code sum-
+2018; Kim et al., 2021). Guo et al. (2021) com-          marization. Parvez et al. (2021) propose RED-
+plete codes by generating sketches, i.e. code snip-      CODER, using a dense retriever trained on paired
+pets with “holes”. Svyatkovskiy et al. (2021) and        NL-code pairs to retrieve relevant comments or
+Clement et al. (2021), on the other hand, investi-       codes as a supplement for code summarization or
+gate ways to improve the efficiency and long-range       code generation tasks.
+modeling in the code completion task, respectively.         In most circumstances where a dense retriever
+   All of these works employ previously written          is utilized, a natural language comment is treated
+code context as inputs, along with AST structural        as a query to retrieve code. In the code comple-
+information or token types. But none of them has         tion scenario, however, we focus on using code as
+attempted to leverage existing external code as aux-     query, particularly partial code, which is a more
+iliary information.                                      difficult task since there are few labeled data with
+                                                         semantically similar code pairs and in partial code
+2.2 Retrieval on code intelligence                       search, semantics in query is incomplete.
+Contrastive learning on code Inspired by the
+great success of contrastive learning in other do-       3     Approach
+mains (Wu et al., 2018; Reimers and Gurevych,
+                                                         We first introduce the formulation of retrieval-
+2019; Fang et al., 2020; Chen et al., 2020; He et al.,
+                                                         augmented code completion task. Then we give
+2020; Radford et al., 2021; Gao et al., 2021), re-
+                                                         detailed descriptions on the retriever and gener-
+searchers have deployed this technique to source
+                                                         ator in ReACC. We show how we continue pre-
+code for better code fragment understanding. Jain
+                                                         training GraphCodeBERT (Guo et al., 2020) with
+et al. (2020) and Bui et al. (2021) propose Contra-
+                                                         contrastive learning on code and how we address
+Code and Corder, respectively. Both models use
+                                                         the problem that there is no labeled data for pos-
+the self-supervised contrastive learning framework
+                                                         itive instances of similar programs in section 3.2.
+and generate code snippets as data augmentations
+                                                         In section 3.3 we talk about the way to aggregate
+via compiler-based semantic-preserving transfor-
+                                                         retrieved code and code context in the generator.
+mations. Their models have shown the effective-
+ness of contrastive learning in code clone detection,    3.1    Task Formulation
+code search and code summarization tasks. S YN -
+C O BERT (Wang et al., 2022) and UniXcoder (Guo          Assume that we have a source code database con-
+et al., 2022) are both pre-training models that uti-     taining a large collection of software repositories,
+lize multi-modal data, including code, comment,          which consist of D source code files, f1 , f2 , ..., fD .
+and AST, for better code fragment representation         Following the Dense Passage Retriever (DPR)
+through contrastive learning.                            model (Karpukhin et al., 2020), we split each of
+                                                         the files into code fragments of equal lengths as the
+Retrieval for code-related tasks Many code in-           basic retrieval units. Such splitting not only leads
+telligence tasks benefit from information retrieval      to a better retrieval results as stated by Karpukhin
+(Xia et al., 2017). A common scenario for informa-       et al. (2020), but also supports extreme long code
+tion retrieval in code domain is code search with        files where each part of a file represents differ-
+                                                     6229
+                                             Maximize
+                                Minimize
+                                                                                                 The query is encoded by EQ . We take the represen-
+                                                                                                 tation of [CLS] token as output and the similarity
+                                                                                                 is computed by sim(q, c) = EC (c)T EQ (q). Since
+                                       E n c o d e r
+                                                                                                 both EC and EQ take source code as inputs with
+ Partial code
+                def normalize(a):
+                    ma = np.mean(a)
+                                           def standardization(arr):
+                                               mu …                     def sort(a1, a2):
+                                                                                                 the only difference being whether they are partial
+                    sa
+  API seq       np.mean
+                                           np.mean np.std                   tmp …
+                                                                        sorted                   or not, the dual encoders share weights in ReACC.
+                 Query    Truncate                   Positive example
+                                                                         In-batch negatives
+                                                                                                 At the training stage, following DPR (Karpukhin
+                def normalize(a):
+                    ma = np.mean(a)                                                              et al., 2020), we adopt in-batch negatives to calcu-
+                    sa = np.std(a)
+                    return (a-ma)/sa
+                                                                                                 late the contrastive loss by InfoNCE (Oord et al.,
+                    Original code
+                                            Transformation                                       2018):
+                                                                                                         L(q, c+ , c−    −         −
+                                                                                                                    1 , c2 , ..., cm )
+Figure 2: Illustration on the training process of the re-                                                                                +
+triever in our proposed framework ReACC.                                                                                   esim(q,c )               (1)
+                                                                                                       = − log
+                                                                                                                 esim(q,c ) + m
+                                                                                                                         +             sim(q,c−
+                                                                                                                                              i )
+                                                                                                                              P
+                                                                                                                                 i=1 e
+ent semantics. Thus we get M code fragments                                                      However, unlike DPR, we don’t employ "hard" neg-
+as the retrieval database C = {c1 , c2 , ..., cM }. Let                                          atives which are retrieved from BM25. Because
+X = {x1 , x2 , ..., xk } be the unfinished code writ-                                            programmers tend to copy tokens directly, a code
+ten previously, a retriever R : (X, C) → C re-                                                   with distinct semantics but substantial lexical simi-
+trieves the most similar code fragment cs in C.                                                  larity can help with code completion.
+The generator G predicts the following code to-
+ken(s) Y = {xk+1 , ..., xk+n }, where n = 1 in                                                   Data Augmentation The purpose of contrastive
+the token-level code completion task, based on                                                   learning of the dense retriever in ReACC is to learn
+context and retrieved code. Formally, P (Y ) =                                                   a representation of code fragments that keeps codes
+Q  n                                                                                             with similar or equivalent semantics close and dis-
+   i=1 P (xk+i |cs , x1:k+i−1 ).
+                                                                                                 similar codes far apart. It requires numerous posi-
+3.2 Retriever                                                                                    tive and negative code pairs. However, it is difficult
+                                                                                                 to identify similar programs based on an unlabeled
+The retrieval module in ReACC is expected to re-
+                                                                                                 code corpus, e.g., certain widely used datasets (Al-
+trieve semantically equivalent code given an in-
+                                                                                                 lamanis and Sutton, 2013; Raychev et al., 2016;
+complete code. We adopt the hybrid retriever
+                                                                                                 Husain et al., 2019) mined from GitHub reposito-
+(Karpukhin et al., 2020; Ma et al., 2021) frame-
+                                                                                                 ries.
+work by combining scores of sparse and dense
+                                                                                                    Searching semantically equivalent code requires
+retriever. The sparse retriever we use is BM25
+                                                                                                 extra code compilation and execution costs (Mas-
+(Robertson and Zaragoza, 2009) based on the im-
+                                                                                                 salin, 1987; Churchill et al., 2019), which is un-
+plementation of ElasticSearch2 . As a term-based
+                                                                                                 realistic in a large database. Instead of searching,
+retrieval method, BM25 considers each code frag-
+                                                                                                 an alternative way is to create code snippets with
+ment as a code token sequence and employs bag-
+                                                                                                 same functionalities for data augmentation. To do
+of-words representations. The matching score com-
+                                                                                                 so, we apply several semantic-preserving transfor-
+puted by BM25 indicts lexical similarity between
+                                                                                                 mations to the original source code to construct a
+the query and document. As for the dense retriever,
+                                                                                                 set of variants. There exists several attempts to ap-
+it maps each code fragment to a d-dimension dense
+                                                                                                 ply such transformation to code (Jain et al., 2020;
+vector. We construct it in this paper based on the
+                                                                                                 Rabin et al., 2021; Bui et al., 2021). In this paper,
+DPR model (Karpukhin et al., 2020). Figure 2 il-
+                                                                                                 we mainly adopt identifier renaming and dead code
+lustrates the training process of the dense retriever
+                                                                                                 (unreachable or unused code) insertion. Figure 3
+of ReACC. In the following, we will walk through
+                                                                                                 shows an example of performing such transforma-
+it in detail.
+                                                                                                 tions to a Python code.
+Dense Retriever Our dense retriever consists of
+                                                                                                 • Identifier renaming is a method of renaming an
+two bidirectional transformer-based encoders EC
+                                                                                                   identifier with another. We only rename variable
+and EQ . EC encodes each code fragment in the
+                                                                                                   and method names as other identifiers cannot
+retrieval database C and builds indexes for them.
+                                                                                                   be changed arbitrarily like built-in types or API
+     2
+         https://github.com/elastic/elasticsearch                                                  calls. Different from previous works, we preserve
+                                                                                              6230
+ import socket                                import socket                       import socket
+ def echo_server(client, timeout, bufsize):   def get_mean(c, doc, local):        def echo_server(client, timeout, bufsize):
+     try:                                         try:                                try:
+          if timeout > 0:                              if doc > 0:                         if timeout > 0:
+               client.settimeout(timeout)                   c.settimeout(doc)                   client.settimeout(timeout)
+          get_buf = client.recv(bufsize)               _user_id = c.recv(local)            get_buf = client.recv(bufsize)
+          client.send(get_buf)                         c.send(_user_id)                    if True:
+     except socket.timeout:                       except socket.timeout:                        tmp = [x**2 for x in range(10)]
+          pass                                         pass                                client.send(get_buf)
+     client.close()                               c.close()                           except socket.timeout:
+                                                                                           pass
+                                                                                      client.close()
+
+
+          original python code                  After renaming all variables              After inserting dead code
+
+              Figure 3: An example of applying semantic-preserving transformations to Python code.
+
+
+  part of the lexical information while modifying                  and the entire created program as the positive ex-
+  the names at the same time based on the con-                     ample during training to address the problem on
+  sideration that identifier names typically convey                how to retrieve based on incomplete semantics.
+  the meanings for humans and lexical similarity
+  contributes a lot for retrieving (It is verified in              3.3     Generator
+  section 4.4). To do so, we mask all the identi-                  The output of retriever is the retrieved code cs . Con-
+  fiers in a program and leverage GraphCodeBERT                    sidering cs is queried by code context x while our
+  (Guo et al., 2020) to predict each identifier like               target is the following code of x, so we propose
+  in the masked language model task. The top-10                    fragment alignment – using the next fragment c0s of
+  predictions (excluding the original identifier) are              cs in the same file (we have split each file into code
+  selected as the candidate set for renaming.                      fragments for retrieval as discussed in Section 3.1)
+                                                                   for completing the next fragment of x. Thus, the in-
+• Dead code insertion is to insert a dead code into                put sequence for the generator is the concatenation
+  a code fragment at a proper location. Dead code                  of c0s and x: x0 = c0s ⊕ x.
+  is a code snippet which can never be reached (Xi,                   The generator module in ReACC supports any
+  1999) or is reachable but whose result can never                 model architecture that can perform code comple-
+  be used in any other computation (Debray et al.,                 tion task. In our experiments, we adopt CodeGPT-
+  2000). In software engineering, dead code inser-                 adapted (Lu et al., 2021), which is a decoder-only
+  tion is one of the most common techniques for                    transformer model pre-trained on Python and Java
+  code obfuscation (You and Yim, 2010), whose                      datasets from CodeSearchNet (Husain et al., 2019)
+  goal is to modify a code to make it hard to un-                  via casual language model. CodeGPT-adapted has
+  derstand but remain its functionality, which is                  shown promising results in the code completion
+  similar to our goal. We first randomly select vari-              task in CodeXGLUE benchmark (Lu et al., 2021)
+  able names which don’t appear in this program                    on two widely used code completion datasets.
+  and then use them to form a statement from a
+  predefined set of dead code (See Appendix A for                  4     Experiments: Code Clone Detection
+  details), such as assignment, method invocations,
+                                                                   In order to evaluate the effectiveness of the code-
+  looping statement, conditional statement and so
+                                                                   to-code retrieval module in ReACC, we perform
+  on. We traverse the AST and identify all the state-
+                                                                   code clone detection task which aims to retrieve
+  ments. Then we choose a statement at random
+                                                                   semantic equivalent programs. In this section, we
+  and insert the dead code after it, leading a new
+                                                                   describe how we create the test dataset for this task
+  subtree in the AST.
+                                                                   and how we evaluate the performance of ReACC’s
+Input Format We integrate both the code token                      retriever.
+sequence and the API usage sequence as inputs.
+API usage sequence is highly related to the func-                  4.1     Dataset
+tionality of a code snippet (Gu et al., 2016; Hu                   CodeNet (Puri et al., 2021) dataset consists of
+et al., 2018). To improve the code representation,                 a large collection of programs which are derived
+we extract the API sequence and append it to the                   from online judge websites. We respectively cre-
+source code token sequence. Finally, we use a ran-                 ate a code clone detection evaluation dataset from
+dom truncation of the original code as the query                   CodeNet in Python and Java with zero-shot setting.
+                                                              6231
+ Dataset               Language     Task         Train      Valid            Test                   Desc.
+                        Python      Clone          -          -            15,594       Solutions for 2,072 problems
+ CodeNet
+                         Java       Clone          -          -            14,426       Solutions for 1,599 problems
+ (Puri et al., 2021)
+                        Python    Completion   2,636,118   32,984          10,000        For line-level completion
+                        Python    Completion    95,000     5,000      50,000 / 10,000           Use PY150
+ CodeXGLUE
+ (Lu et al., 2021)      Python†   Completion    95,000      5,000        - / 20,000          Applying eWASH
+                         Java     Completion    12,934     7,176       8,268 / 3,000          Use JavaCorpus
+
+Table 1: Dataset statistics. The two numbers in Test of CodeXGLUE denote the examples for token-level and
+line-level code completion, respectively. † is a newly created test set, see the text for details.
+
+
+We collect code solutions for thousands problems           From the comparison with other transformer-based
+and solutions for the same problem are considered          encoders, we can see CodeBERT and GraphCode-
+as semantically equivalence. The data statistics are       BERT can hardly retrieve equivalent code. While
+shown in Table 1.                                          our model significantly outperforms them, which
+                                                           indicts our model is capable of retrieving the se-
+Retrieval Training Set The dense retriever in              mantically equivalent code even when the query’s
+ReACC is pre-trained on CodeSearchNet dataset              semantics is incomplete.
+(Husain et al., 2019), a large-scale source code
+                                                              We also find that BM25 performs splendidly in
+corpus extracted from GitHub repositories. We
+                                                           this task, which is quite different from the per-
+employ 1.6M Java methods and 1.2M Python func-
+                                                           formance on other tasks like open-domian QA
+tions from it.
+                                                           (Karpukhin et al., 2020), code summarization
+4.2 Baseline Methods                                       (Parvez et al., 2021), etc. The findings suggest that
+                                                           semantically related codes are likely to be lexically
+CodeBERT (Feng et al., 2020) is a pre-trained              similar, which leads lexical similar to contribute
+model for programming language, which is trained           more for retrieval, making code-to-code search eas-
+on NL-PL pairs from CodeSearchNet dataset in six           ier than text-to-code or question-to-passage search
+programming languages.                                     using the term-based retrieval method.
+GraphCodeBERT (Guo et al., 2020) is also pre-
+trained on CodeSearchNet NL-PL pairs and con-
+                                                           5     Experiments: Code Completion
+siders the inherent structure of code i.e. data flow.      In this section, we evaluate ReACC on end-to-end
+                                                           code completion.
+4.3 Experiment Setup
+The retrieval encoder is initialized with GraphCode-       5.1      Dataset
+BERT. It is continual pre-trained with both masked         CodeXGLUE (Lu et al., 2021) is a benchmark
+language model objective and contrastive learning.         dataset containing 14 datasets for 10 diversified
+We use in-batch negatives with a batch size of 256.        code intelligence tasks. We use PY150 dataset
+With a learning rate of 5e-5, We train the retriever       (Raychev et al., 2016) in Python and GitHub Java
+for Python and Java for 30 epochs each.                    Corpus dataset (Allamanis and Sutton, 2013) in
+   We implement the code clone detection exper-            Java from it for code completion task. Table 1
+iment in the partial search way, which is ideally          shows the data statistics.
+adapted to code completion scenarios as it accepts
+a partial program as a query while maintaining the         5.2      Baseline Methods
+same goal.
+                                                           CodeGPT/CodeGPT-adapted (Lu et al., 2021)
+4.4 Results                                                are both pre-trained on Python and Java datasets
+                                                           from CodeSearchNet. CodeGPT is trained from
+Table 2 shows the results in the zero-shot code            scratch while CodeGPT-adapted is a domain adap-
+clone detection task on CodeNet dataset, with the          tation model which is initialized by GPT-2 (Rad-
+partial search setting. Models are measured by             ford et al., 2019).
+MAP@K (Mean Average Precision at K), which
+is the evaluation metric in the CodeXGLUE clone            PLBART (Ahmad et al., 2021) is based on
+detection task, and precision at 1, as we only care        BART (Lewis et al., 2020) architecture which em-
+about the most similar code for code completion.           ploys denoising sequence-to-sequence (Seq2Seq)
+                                                      6232
+                                                   Python                    Java
+                            Model
+                                            MAP@100 Precision         MAP@100 Precision
+                         CodeBERT             1.47        4.75          1.15       4.58
+                       GraphCodeBERT          5.31        15.68         4.54      16.05
+                            BM25             10.32        23.17         8.67      25.85
+                       ReACC-retriever        9.60        27.04         9.31      27.55
+
+               Table 2: Results on zero-shot code clone detection dataset created from CodeNet.
+
+                                              PY150                                JavaCorpus
+               Model
+                             Perplexity     Exact Match    Edit Sim   Perplexity   Exact Match   Edit Sim
+              GPT-2              -             41.73        70.60         -           27.50       60.36
+             CodeGPT           2.502           42.18        71.23       4.135         28.23       61.81
+          CodeGPT-adapted      2.404           42.37        71.59       3.369         30.60       63.45
+            CodeT5-base          -             36.97        67.12         -           24.80       58.31
+             PLBART              -             38.01        68.46         -           26.97       61.59
+           ReACC-bm25          2.312           46.07        73.84       3.352         30.63       64.28
+           ReACC-dense         2.329           45.32        73.95       3.355         30.30       64.43
+           ReACC-hybrid        2.311           46.26        74.41       3.327         30.70       64.73
+
+                         Table 3: Results on the code completion task in CodeXGLUE
+
+
+                        Exact Match       Edit Sim           other baseline models are fine-tuned with the same
+         GPT-2             37.08           68.71
+        CodeGPT            37.21           69.00             settings.
+     CodeGPT-adapted       38.77           70.07                As for X-CodeGPT, we pre-train it with a train-
+       X-CodeGPT           39.41           70.97
+      ReACC-bm25           40.24           71.65             ing set extracted from CodeSearchNet in eWASH
+      ReACC-dense          39.67           71.80             format, where each example is a function body with
+      ReACC-hybrid         40.15           72.01
+                                                             its corresponding extended context, as described
+Table 4: Results on the new testset created from PY150       by Clement et al. (2021). Since eWASH requires
+in CodeXGLUE                                                 codes parsed into ASTs but codes in CodeXGLUE
+                                                             have been tokenized and cannot be parsed, we build
+                                                             a new dataset from PY150 to fine-tune X-CodeGPT
+pre-training and is pre-trained on unlabeled data            on CodeXGLUE. As a result, we download the ori-
+across PL and NL.                                            gin files in PY150 and create a new dataset that
+CodeT5 (Wang et al., 2021) is also an encoder-               retains the train/valid/test split, as seen in Table 1.
+decoder pre-trained model which adapts T5 (Raf-
+fel et al., 2019) architecture and considers the             Evaluation Following Lu et al. (2021), we con-
+identifier-aware token type information in code.             duct two code completion scenarios, token-level
+                                                             and line-level completion, to measure models’ abil-
+X-CodeGPT is a variant of CodeGPT which
+                                                             ity of predicting one and more tokens. Perplexity
+adapts eWASH (Clement et al., 2021) to CodeGPT.
+                                                             is the evaluation metric for token-level comple-
+Clement et al. (2021) propose eWASH, a method
+                                                             tion, whereas exact match accuracy (EM) and edit
+for leveraging the syntax hierarchy of source code
+                                                             similarity are used for line-level completion. For
+to give the model wider field of vision in a file
+                                                             token-level completion, based on the consideration
+and achieving a new SOTA performance on the
+                                                             of efficiency, instead of applying retrieval at each
+CodeXGLUE code completion task. We reproduce
+                                                             step, we retrieve similar codes based on current
+their method and develop X-CodeGPT by adapting
+                                                             context after predicting the first 100 tokens, and
+eWASH to CodeGPT-adapted.
+                                                             leverage it for further prediction.
+5.3 Experiment Setup
+Fine-tune We fine-tune CodeGPT-adapted on                    Retrieval Database We use the training set of
+PY150 and GitHub Java Corpus datasets, respec-               PY150 and Java Corpus as retrieval database for
+tively, and use it as the generator in ReACC. The            test. We don’t use the contrastive pre-training cor-
+number of epochs for training PY150 is 30 and                pus (i.e., CodeSearchNet) in order to avoid the du-
+Java Corpus is 10, with a batch size of 96 and a             plication between CodeXGLUE and CodeSearch-
+learning rate of 2e-5. Except for X-CodeGPT, all             Net as they are both extracted from GitHub.
+                                                          6233
+                         Exact Match    Edit Sim                                                 EM     Edit Sim
+     CodeGPT-adapted        46.38        74.10                        ReACC-dense               45.32    73.95
+      ReACC-bm25            55.88        79.62                        Retriever
+      ReACC-dense           64.21        84.57                        - identifier renaming     44.91    73.14
+      ReACC-hybrid          64.74        84.93                        - dead code insertion     45.11    73.57
+                                                                      - API sequence            44.77    73.01
+Table 5: Results on the code completion task created                  - query truncation        43.93    72.65
+from CodeNet Python dataset                                           Generator
+                                                                      - fragment alignment      45.08    73.56
+
+                                                           Table 6: Ablation study for both retriever and generator
+Hybrid Retriever A linear combination of                   module. Experiments are run in CodeXGLUE PY150
+scores from BM25 and our dense retriever forms a           dataset.
+hybrid retriever. Specifically, we calculate the score
+by sim(q, c) + α · BM 25(q, c) and let α = 0.9
+based on the results on dev set for both PY150 and         tion domain for Kaggle3 users, algorithm domain
+Java Corpus datasets.                                      for ACM community, etc. To evaluate ReACC in
+                                                           a specific code domain, we construct a code com-
+5.4 Results                                                pletion Python dataset from CodeNet, which can
+                                                           be considered in algorithm domain. Table 5 reveals
+Table 3 and Table 4 compare different base-                that ReACC significantly outperforms CodeGPT-
+line models on code completion task in the                 adapted in CodeNet by 10% and 18% absolute
+CodeXGLUE Python and Java datasets. ReACC                  improvement in edit similarity and exact match,
+framework with the hybrid retriever outperforms            respectively. According to the findings, ReACC is
+consistently than other baselines on all datasets,         more effective in a specific domain. We also no-
+which proves our conjection that the “external” con-       tice that ReACC with dense retriever outperforms
+text is beneficial to the code completion task. The        BM25 significantly in CodeNet. It can be explained
+comparison with X-CodeGPT in Table 4 demon-                by the fact that in algorithm domain, semantically
+strates that utilizing “external” context could be         similar code may be more valuable than for code
+more useful than making the most of the current            completion lexically similar code.
+code file. Among three configurations of the re-
+triever in ReACC, hybrid retriever performs best           Ablation study To further understand how our
+on almost all metrics except the exact match score         training options affect model performance, we con-
+in the new test set of PY150.                              duct ablation experiments. As seen in Table 6,
+   From Table 3, we can observe that comparing the         when data argumentation and training strategies in
+two datasets, the improvement in the PY150 dataset         retriever or generator are eliminated, the metrics
+is greater than that in the Java Corpus dataset. The       degrade. The most essential factor among them is
+reason for this is that the retrieval database for         query truncation. Comparing the two semantic-
+Java (i.e., the training set) is much smaller. The         preserving transformations, identifier renaming
+CodeXGLUE Java Corpus dataset contains only                contributes more than dead code insertion.When
+12,934 files for training so that it’s more difficult to   fragment alignment is removed from generator, i.e.
+retrieve similar code from them.                           using the retrieved code snippet itself for generator,
+   Another finding is that BM25 shows compara-             performance suffers slightly.
+ble results with dense retriever and even performs         ReACC vs GitHub Copilot GitHub Copilot4 is
+better in perplexity and exact match metrics. The          a powerful technique for code completion which
+findings indict that the code completion task can          uses OpenAI Codex (Chen et al., 2021) as the
+benefit from both semantically and lexically similar       model backend. We run some qualitative examples
+codes.                                                     with its extension in VSCode, which are shown in
+                                                           the Appendix B. It worth noting that Codex is more
+5.5 Analysis                                               powerful than CodeGPT since it is a large-scale pre-
+ReACC in specific domain Both PY150 and                    trained model that is trained on all source codes
+Java Corpus datasets are extracted from GitHub             in GitHub based on GPT-3 (Brown et al., 2020).
+repositories which are distributed in a wide domain.       However, in some cases, ReACC with CodeGPT as
+As some people frequently write codes in a more               3
+                                                                  https://www.kaggle.com/
+                                                              4
+specific domain, e.g., data mining/pattern recogni-               https://copilot.github.com/
+
+                                                       6234
+the generator outperforms Copilot. And in 6 Copi-         Tom B Brown, Benjamin Mann, Nick Ryder, Melanie
+lot itself can benefit from ReACC when it takes             Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+                                                            Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+advantage of ReACC’s retriever, which indicates
+                                                            Askell, et al. 2020. Language models are few-shot
+the effectiveness of retrieval-augmented method for         learners. arXiv preprint arXiv:2005.14165.
+strong generative models.
+                                                          Nghi DQ Bui, Yijun Yu, and Lingxiao Jiang. 2021.
+6   Conclusion                                              Self-supervised contrastive learning for code re-
+                                                            trieval and summarization via semantic-preserving
+We propose ReACC, a retrieval-augmented code                transformations. In Proceedings of the 44th Interna-
+completion framework that utilizes “external” con-          tional ACM SIGIR Conference on Research and De-
+                                                            velopment in Information Retrieval, pages 511–521.
+text for the code completion task by retrieving se-
+mantically and lexically similar codes from existing      Jose Cambronero, Hongyu Li, Seohyun Kim, Koushik
+codebase. We pre-train a dual-encoder as a retriever         Sen, and Satish Chandra. 2019. When deep learning
+for partial code search, which retrieves code frag-          met code search. In Proceedings of the 2019 27th
+                                                            ACM Joint Meeting on European Software Engineer-
+ments given a partial code. Our method can adopt             ing Conference and Symposium on the Foundations
+any architecture that can perform code completion            of Software Engineering, pages 964–974.
+as the generator. On the CodeXGLUE benchmark,
+ReACC achieves a state-of-the-art performance in          Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan,
+                                                           Henrique Ponde de Oliveira Pinto, Jared Kaplan,
+the code completion task.                                  Harri Edwards, Yuri Burda, Nicholas Joseph, Greg
+                                                           Brockman, et al. 2021.      Evaluating large lan-
+Acknowledgements                                           guage models trained on code. arXiv preprint
+                                                           arXiv:2107.03374.
+This work is supported by Microsoft Research Asia
+and IITP grants (2021-0-01696, High Potential In-         Ting Chen, Simon Kornblith, Mohammad Norouzi,
+dividuals Global Training Program)                          and Geoffrey Hinton. 2020. A simple framework for
+                                                            contrastive learning of visual representations. In In-
+                                                            ternational conference on machine learning, pages
+References                                                  1597–1607. PMLR.
+
+Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray, and        Berkeley Churchill, Oded Padon, Rahul Sharma, and
+  Kai-Wei Chang. 2020. A transformer-based ap-              Alex Aiken. 2019. Semantic program alignment
+  proach for source code summarization. In Proceed-         for equivalence checking. In Proceedings of the
+  ings of the 58th Annual Meeting of the Association        40th ACM SIGPLAN Conference on Programming
+  for Computational Linguistics, pages 4998–5007.           Language Design and Implementation, pages 1027–
+                                                            1040.
+Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray, and
+  Kai-Wei Chang. 2021. Unified pre-training for pro-      Colin Clement, Dawn Drain, Jonathan Timcheck,
+  gram understanding and generation. In Proceedings         Alexey Svyatkovskiy, and Neel Sundaresan. 2020.
+  of the 2021 Conference of the North American Chap-        Pymt5: Multi-mode translation of natural language
+  ter of the Association for Computational Linguistics:     and python code with transformers. In Proceed-
+ Human Language Technologies, pages 2655–2668.              ings of the 2020 Conference on Empirical Methods
+                                                            in Natural Language Processing (EMNLP), pages
+Miltiadis Allamanis and Charles Sutton. 2013. Mining        9052–9065.
+  source code repositories at massive scale using lan-
+  guage modeling. In 2013 10th Working Conference         Colin B Clement, Shuai Lu, Xiaoyu Liu, Michele Tu-
+  on Mining Software Repositories (MSR), pages 207–         fano, Dawn Drain, Nan Duan, Neel Sundaresan,
+  216. IEEE.                                                and Alexey Svyatkovskiy. 2021. Long-range mod-
+Uri Alon, Roy Sadaka, Omer Levy, and Eran Yahav.            eling of source code files with ewash: Extended
+  2020. Structural language models of code. In In-          window access by syntax hierarchy. arXiv preprint
+  ternational Conference on Machine Learning, pages         arXiv:2109.08780.
+  245–256. PMLR.
+                                                          Saumya K Debray, William Evans, Robert Muth, and
+Achmad Arwan, Siti Rochimah, and Rizky Januar               Bjorn De Sutter. 2000. Compiler techniques for
+  Akbar. 2015. Source code retrieval on stackover-          code compaction. ACM Transactions on Program-
+  flow using lda. In 2015 3rd International Confer-         ming languages and Systems (TOPLAS), 22(2):378–
+  ence on Information and Communication Technol-            415.
+  ogy (ICoICT), pages 295–299. IEEE.
+                                                          Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Brenda S Baker. 2007. Finding clones with dup: Anal-         Kristina Toutanova. 2018. Bert: Pre-training of deep
+  ysis of an experiment. IEEE Transactions on Soft-          bidirectional transformers for language understand-
+  ware Engineering, 33(9):608–621.                           ing. arXiv preprint arXiv:1810.04805.
+
+                                                      6235
+Dawn Drain, Chen Wu, Alexey Svyatkovskiy, and Neel       Abram Hindle, Earl T Barr, Mark Gabel, Zhendong
+  Sundaresan. 2021. Generating bug-fixes using pre-        Su, and Premkumar Devanbu. 2016. On the natu-
+  trained transformers. In Proceedings of the 5th          ralness of software. Communications of the ACM,
+  ACM SIGPLAN International Symposium on Ma-               59(5):122–131.
+  chine Programming, pages 1–8.
+                                                         Xing Hu, Ge Li, Xin Xia, David Lo, Shuai Lu, and
+Hongchao Fang, Sicheng Wang, Meng Zhou, Jiayuan            Zhi Jin. 2018. Summarizing source code with trans-
+  Ding, and Pengtao Xie. 2020. Cert: Contrastive           ferred api knowledge. In Proceedings of the 27th
+  self-supervised learning for language understanding.     International Joint Conference on Artificial Intelli-
+  arXiv preprint arXiv:2005.12766.                         gence, pages 2269–2275.
+
+Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xi-        Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit, Miltiadis
+  aocheng Feng, Ming Gong, Linjun Shou, Bing Qin,          Allamanis, and Marc Brockschmidt. 2019. Code-
+  Ting Liu, Daxin Jiang, et al. 2020. Codebert: A          searchnet challenge: Evaluating the state of seman-
+  pre-trained model for programming and natural lan-       tic code search. arXiv preprint arXiv:1909.09436.
+  guages. arXiv preprint arXiv:2002.08155.
+                                                         Gautier Izacard and Édouard Grave. 2021. Leveraging
+Tianyu Gao, Xingcheng Yao, and Danqi Chen. 2021.           passage retrieval with generative models for open
+   Simcse: Simple contrastive learning of sentence em-     domain question answering. In Proceedings of the
+   beddings. arXiv preprint arXiv:2104.08821.              16th Conference of the European Chapter of the As-
+                                                           sociation for Computational Linguistics: Main Vol-
+Xiaodong Gu, Hongyu Zhang, and Sunghun Kim. 2018.          ume, pages 874–880.
+  Deep code search. In 2018 IEEE/ACM 40th Interna-
+  tional Conference on Software Engineering (ICSE),      Paras Jain, Ajay Jain, Tianjun Zhang, Pieter Abbeel,
+  pages 933–944. IEEE.                                     Joseph E Gonzalez, and Ion Stoica. 2020. Con-
+                                                           trastive code representation learning. arXiv preprint
+Xiaodong Gu, Hongyu Zhang, Dongmei Zhang, and              arXiv:2007.04973.
+  Sunghun Kim. 2016. Deep api learning. In Proceed-      Rafael-Michael Karampatsis, Hlib Babii, Romain
+  ings of the 2016 24th ACM SIGSOFT International          Robbes, Charles Sutton, and Andrea Janes. 2020.
+  Symposium on Foundations of Software Engineering,        Big code!= big vocabulary: Open-vocabulary mod-
+  pages 631–642.                                           els for source code. In 2020 IEEE/ACM 42nd
+Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming            International Conference on Software Engineering
+  Zhou, and Jian Yin. 2022. Unixcoder: Unified cross-      (ICSE), pages 1073–1085. IEEE.
+  modal pre-training for code representation. arXiv      Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick
+  preprint arXiv:2203.03850.                               Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and
+                                                           Wen-tau Yih. 2020. Dense passage retrieval for
+Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng, Duyu
+                                                           open-domain question answering. In Proceedings of
+  Tang, LIU Shujie, Long Zhou, Nan Duan, Alexey
+                                                           the 2020 Conference on Empirical Methods in Nat-
+  Svyatkovskiy, Shengyu Fu, et al. 2020. Graphcode-
+                                                           ural Language Processing (EMNLP), pages 6769–
+  bert: Pre-training code representations with data
+                                                           6781.
+  flow. In International Conference on Learning Rep-
+  resentations.                                          Seohyun Kim, Jinman Zhao, Yuchi Tian, and Satish
+                                                           Chandra. 2021. Code prediction by feeding trees
+Daya Guo, Alexey Svyatkovskiy, Jian Yin, Nan Duan,         to transformers. In 2021 IEEE/ACM 43rd Interna-
+  Marc Brockschmidt, and Miltiadis Allamanis. 2021.        tional Conference on Software Engineering (ICSE),
+  Learning to complete code with sketches. In Inter-       pages 150–162. IEEE.
+  national Conference on Learning Representations.
+                                                         Mike Lewis, Yinhan Liu, Naman Goyal, Mar-
+Tatsunori B Hashimoto, Kelvin Guu, Yonatan Oren,           jan Ghazvininejad, Abdelrahman Mohamed, Omer
+  and Percy Liang. 2018. A retrieve-and-edit frame-        Levy, Veselin Stoyanov, and Luke Zettlemoyer.
+  work for predicting structured outputs. In Proceed-      2020. Bart: Denoising sequence-to-sequence pre-
+  ings of the 32nd International Conference on Neu-        training for natural language generation, translation,
+  ral Information Processing Systems, pages 10073–         and comprehension. In Proceedings of the 58th An-
+  10083.                                                   nual Meeting of the Association for Computational
+                                                           Linguistics, pages 7871–7880.
+Shirley Anugrah Hayati, Raphael Olivier, Pravalika Av-
+  varu, Pengcheng Yin, Anthony Tomasic, and Gra-         Jia Li, Yongmin Li, Ge Li, Xing Hu, Xin Xia, and Zhi
+  ham Neubig. 2018. Retrieval-based neural code gen-        Jin. 2021. Editsum: A retrieve-and-edit framework
+  eration. arXiv preprint arXiv:1808.10025.                 for source code summarization.
+Kaiming He, Haoqi Fan, Yuxin Wu, Saining Xie, and        Jian Li, Yue Wang, Michael R Lyu, and Irwin King.
+  Ross Girshick. 2020. Momentum contrast for unsu-          2018. Code completion with neural attention and
+  pervised visual representation learning. In Proceed-      pointer networks. In Proceedings of the 27th Inter-
+  ings of the IEEE/CVF Conference on Computer Vi-           national Joint Conference on Artificial Intelligence,
+  sion and Pattern Recognition, pages 9729–9738.            pages 4159–25.
+
+                                                     6236
+Chang Liu, Xin Wang, Richard Shin, Joseph E Gonza-         Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+  lez, and Dawn Song. 2016. Neural code completion.          Dario Amodei, Ilya Sutskever, et al. 2019. Lan-
+                                                             guage models are unsupervised multitask learners.
+Fang Liu, Ge Li, Yunfei Zhao, and Zhi Jin. 2020. Multi-      OpenAI blog, 1(8):9.
+  task learning based pre-trained language model for
+  code completion.       In Proceedings of the 35th        Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+  IEEE/ACM International Conference on Automated             Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+  Software Engineering, pages 473–485.                       Wei Li, and Peter J Liu. 2019. Exploring the limits
+                                                             of transfer learning with a unified text-to-text trans-
+Shuai Lu, Daya Guo, Shuo Ren, Junjie Huang, Alexey
+                                                             former. arXiv preprint arXiv:1910.10683.
+  Svyatkovskiy, Ambrosio Blanco, Colin Clement,
+  Dawn Drain, Daxin Jiang, Duyu Tang, et al. 2021.
+                                                           Veselin Raychev, Pavol Bielik, and Martin Vechev.
+  Codexglue: A machine learning benchmark dataset
+                                                             2016. Probabilistic model for code with decision
+  for code understanding and generation.     arXiv
+                                                             trees. ACM SIGPLAN Notices, 51(10):731–747.
+  preprint arXiv:2102.04664.
+Sifei Luan, Di Yang, Celeste Barnaby, Koushik Sen,         Nils Reimers and Iryna Gurevych. 2019. Sentence-
+   and Satish Chandra. 2019. Aroma: Code recommen-           bert: Sentence embeddings using siamese bert-
+   dation via structural code search. Proceedings of the     networks. In Proceedings of the 2019 Conference on
+   ACM on Programming Languages, 3(OOPSLA):1–                Empirical Methods in Natural Language Processing
+   28.                                                       and the 9th International Joint Conference on Natu-
+                                                             ral Language Processing (EMNLP-IJCNLP), pages
+Xueguang Ma, Kai Sun, Ronak Pradeep, and Jimmy               3982–3992.
+  Lin. 2021. A replication study of dense passage re-
+  triever. arXiv preprint arXiv:2104.05740.                Stephen Robertson and Hugo Zaragoza. 2009. The
+                                                              probabilistic relevance framework: BM25 and be-
+Ehsan Mashhadi and Hadi Hemmati. 2021. Applying               yond. Now Publishers Inc.
+  codebert for automated program repair of java sim-
+  ple bugs. arXiv preprint arXiv:2103.11626.               Chanchal K Roy and James R Cordy. 2008. An empiri-
+                                                             cal study of function clones in open source software.
+Henry Massalin. 1987. Superoptimizer: a look at the
+                                                             In 2008 15th Working Conference on Reverse Engi-
+  smallest program. ACM SIGARCH Computer Archi-
+                                                             neering, pages 81–90. IEEE.
+  tecture News, 15(5):122–126.
+Aaron van den Oord, Yazhe Li, and Oriol Vinyals.           Jeffrey Svajlenko and Chanchal K Roy. 2015. Evalu-
+  2018. Representation learning with contrastive pre-         ating clone detection tools with bigclonebench. In
+  dictive coding. arXiv preprint arXiv:1807.03748.            2015 IEEE international conference on software
+                                                              maintenance and evolution (ICSME), pages 131–
+Md Rizwan Parvez, Wasi Uddin Ahmad, Saikat                    140. IEEE.
+ Chakraborty, Baishakhi Ray, and Kai-Wei Chang.
+ 2021. Retrieval augmented code generation and             Alexey Svyatkovskiy, Shao Kun Deng, Shengyu Fu,
+ summarization. arXiv preprint arXiv:2108.11601.             and Neel Sundaresan. 2020. Intellicode compose:
+                                                             Code generation using transformer. In Proceed-
+Ruchir Puri, David S Kung, Geert Janssen, Wei                ings of the 28th ACM Joint Meeting on European
+  Zhang, Giacomo Domeniconi, Vladmir Zolotov, Ju-            Software Engineering Conference and Symposium
+  lian Dolby, Jie Chen, Mihir Choudhury, Lindsey             on the Foundations of Software Engineering, pages
+  Decker, et al. 2021. Project codenet: A large-scale        1433–1443.
+  ai for code dataset for learning a diversity of coding
+  tasks. arXiv preprint arXiv:2105.12655.                  Alexey Svyatkovskiy, Sebastian Lee, Anna Hadjitofi,
+                                                             Maik Riechert, Juliana Vicente Franco, and Mil-
+Md Rafiqul Islam Rabin, Nghi DQ Bui, Ke Wang,
+                                                             tiadis Allamanis. 2021. Fast and memory-efficient
+ Yijun Yu, Lingxiao Jiang, and Mohammad Amin
+                                                             neural code completion. In 2021 IEEE/ACM 18th
+ Alipour. 2021. On the generalizability of neural
+                                                             International Conference on Mining Software Repos-
+ program models with respect to semantic-preserving
+                                                             itories (MSR), pages 329–340. IEEE.
+ program transformations. Information and Software
+ Technology, 135:106552.
+                                                           Zhaopeng Tu, Zhendong Su, and Premkumar Devanbu.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya           2014. On the localness of software. In Proceedings
+  Ramesh, Gabriel Goh, Sandhini Agarwal, Girish              of the 22nd ACM SIGSOFT International Sympo-
+  Sastry, Amanda Askell, Pamela Mishkin, Jack Clark,         sium on Foundations of Software Engineering, pages
+  et al. 2021. Learning transferable visual models           269–280.
+  from natural language supervision. arXiv preprint
+  arXiv:2103.00020.                                        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+                                                             Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Alec Radford, Karthik Narasimhan, Tim Salimans, and          Kaiser, and Illia Polosukhin. 2017. Attention is all
+  Ilya Sutskever. 2018. Improving language under-            you need. In Advances in neural information pro-
+  standing by generative pre-training.                       cessing systems, pages 5998–6008.
+
+                                                       6237
+Xin Wang, Fei Mi Yasheng Wang, Pingyi Zhou, Yao
+  Wan, Xiao Liu, Li Li, Hao Wu, Jin Liu, and Xin
+  Jiang. 2022. Syncobert: Syntax-guided multi-modal
+  contrastive pre-training for code representation.
+Yue Wang, Weishi Wang, Shafiq Joty, and Steven CH
+  Hoi. 2021.      Codet5: Identifier-aware unified
+  pre-trained encoder-decoder models for code un-
+  derstanding and generation.       arXiv preprint
+  arXiv:2109.00859.
+Bolin Wei, Yongmin Li, Ge Li, Xin Xia, and Zhi Jin.
+  2020. Retrieve and refine: exemplar-based neural
+  comment generation. In 2020 35th IEEE/ACM In-
+  ternational Conference on Automated Software En-
+  gineering (ASE), pages 349–360. IEEE.
+Zhirong Wu, Yuanjun Xiong, Stella Yu, and Dahua
+  Lin. 2018. Unsupervised feature learning via non-
+  parametric instance-level discrimination.   arXiv
+  preprint arXiv:1805.01978.
+Hongwei Xi. 1999. Dead code elimination through de-
+  pendent types. In International Symposium on Prac-
+  tical Aspects of Declarative Languages, pages 228–
+  242. Springer.
+Xin Xia, Lingfeng Bao, David Lo, Pavneet Singh
+  Kochhar, Ahmed E Hassan, and Zhenchang Xing.
+  2017. What do developers search for on the web?
+  Empirical Software Engineering, 22(6):3149–3185.
+Ilsun You and Kangbin Yim. 2010. Malware obfusca-
+   tion techniques: A brief survey. In 2010 Interna-
+   tional conference on broadband, wireless comput-
+   ing, communication and applications, pages 297–
+   300. IEEE.
+
+A   Predefined Dead Code
+We define a set of dead code to choose from for
+both Python and Java. We focus on four kinds
+of common statements, i.e., declaration statement,
+expression statement, conditional statement and
+looping statement. Examples are shown in figure
+4. To generate a dead code snippet, we can use
+one kind of them or combine different statements
+together.
+
+B   Qualitative Examples
+Figure 5 and figure 6 show qualitative examples
+of generated code by different models. ReACC +
+Copilot denotes ReACC framework with Copilot
+as the generator.
+
+
+
+
+                                                   6238
+ Category                        Python                                  Java
+                                 var1 = 1                                int var1 = 1;
+ Declaration                     var1, var2, var3 = 1, [2,3], "name"     String var2 = "abc";
+                                                                         int[] var3;
+                                 var1+var2                               var1 += 2;
+ Expression                      var2.extend(var3)                       var2.append("def");
+                                 sorted(var2)                            var3[0]--;
+                                 var1 = 1                                int var = 4;
+                                 if var1 < 10:                           if (var1 < 10){
+                                     # several random simple                 // compound statement
+ Conditional statement           statements here                         }
+                                 else:
+                                     # statements here
+                                 var1 = 1 if True else 2
+                                 for var1 in range(10):                  for (int var = 0; var < 10; var++) {
+                                     # statements here                       // compound statement
+                                                                         }
+
+ Looping statement               var1 = 10                               int var1 = 5;
+                                 while var1 > 0:                         while (var1 > 0){
+                                     # statements here                       // compound statement
+                                     var1 -= 1                               var1--;
+                                                                         }
+
+
+Figure 4: Examples of predefined set of dead code. Vars are randomly selected from other files. Literals like strings
+and integers are also generated at random. For conditional and looping statements, several simple statements (i.e.,
+declaration and expression) are generated to fill the body.
+
+
+
+
+ Input                   from __future__ import unicode_literals
+                         import calendar
+                         import datetime
+                         from django.utils import http as http_utils
+                         from daydreamer.tests.views.core import http
+                         class TestCase(http.TestCase):
+                             def format_etag(self, etag):
+                                 return
+
+
+ Retrieved code          from datetime import datetime
+                         from django.test import TestCase
+                         from django.utils import unittest
+                         from django.utils.http import parse_etags, quote_etag, parse_http_date
+                         FULL_RESPONSE = ''
+                         ETAG = ''
+                         EXPIRED_ETAG = ''
+                         class ConditionalGet(TestCase):
+                             ...
+
+
+ CodeGPT                 etag                                                                        Edit Sim: 26
+ ReACC                   http_utils.format_etag(etag)                                                Edit Sim: 87
+ Copilot                 '"%s"' % etag                                                               Edit Sim: 25
+ ReACC + Copilot         '"%s"' % etag                                                               Edit Sim: 25
+ Ground Truth            http_utils.quote_etag(etag)
+
+
+
+Figure 5: An qualitative example from PY150 test set. The input code comes from https:
+//github.com/skibblenybbles/django-daydreamer/blob/master/daydreamer/tests/
+views/behaviors/http/base.py
+
+
+                                                       6239
+ Input               import ...
+                     logger = borg.get_logger(__name__, default_level = "INFO")
+
+                     def evaluate_split(run_data, alpha, split, train_mask, test_mask):
+                         training = run_data.masked(train_mask).collect_systematic([4])
+                         testing = run_data.masked(test_mask).collect_systematic([4])
+                         model = borg.models.MulEstimator(alpha = alpha)(training, 10, training)
+                         score = numpy.mean(borg.models.run_data_log_probabilities(model, testing))
+
+                         ...
+
+                     def main(out_path, bundle, workers = 0, local = False):
+                         def yield_jobs():
+                             run_data = borg.storage.RunData.from_bundle(bundle)
+                             validation =
+
+
+ Retrieved code      import ...
+                     logger = borg.get_logger(__name__, default_level = "INFO")
+
+                     def evaluate_split(run_data, model_name, mixture, independent, instance_count,
+                     train_mask, test_mask):
+                         testing = run_data.masked(test_mask).collect_systematic([4])
+                         training_all = run_data.masked(train_mask)
+                         training_ids = sorted(training_all.ids, key = lambda _: numpy.random.rand())
+
+                         ...
+
+                     def main(out_path, experiments, workers = 0, local = False):
+                         logger.info("", len(experiments))
+                         get_run_data = borg.util.memoize(borg.storage.RunData.from_bundle)
+                         def yield_jobs():
+                             for experiment in experiments:
+                                 logger.info("preparing experiment: %s", experiment)
+                                 run_data = get_run_data(experiment["run_data"])
+                                 validation = sklearn.cross_validation.ShuffleSplit(len(run_data), 32,
+                     test_fraction = 0.1, indices = False)
+                                 max_instance_count = numpy.floor(0.9 * len(run_data)) - 10
+                                 instance_counts = map(int, map(round,
+                     numpy.r_[10:max_instance_count:24j]))
+                                 ...
+
+
+ CodeGPT             borg.storage.RunData.from_bundle(run_data)                           Edit Sim: 40
+ ReACC               sklearn.cross_validation.ShuffleSplit(len(run_data), 32,             Edit Sim: 77
+                     test_fraction=0.1, indices=False)
+ Copilot             run_data.masked(run_data.get_validation_mask())                      Edit Sim: 41
+ ReACC + Copilot     sklearn.cross_validation.ShuffleSplit(len(run_data), 32,             Edit Sim: 77
+                     test_fraction = 0.1, indices = False)
+ Ground Truth        sklearn.cross_validation.KFold(len(run_data), 10, indices=False)
+
+
+
+Figure 6: An qualitative example from PY150 test set. The input code comes from https://github.com/
+borg-project/borg/blob/master/borg/experiments/mul_over_alpha.py
+
+
+
+
+                                                6240
+

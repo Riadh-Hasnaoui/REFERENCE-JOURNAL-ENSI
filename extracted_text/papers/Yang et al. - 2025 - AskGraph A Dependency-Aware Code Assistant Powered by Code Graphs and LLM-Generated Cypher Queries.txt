@@ -1,0 +1,827 @@
+                                                                                                                                                                                           2025 IEEE International Conference on Software Maintenance and Evolution (ICSME)
+
+
+
+
+                                                                                                                                                                            AskGraph: A Dependency-Aware Code Assistant
+                                                                                                                                                                             Powered by Code Graphs and LLM-Generated
+                                                                                                                                                                                          Cypher Queries
+   2025 IEEE International Conference on Software Maintenance and Evolution (ICSME) | 979-8-3315-9587-6/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSME64153.2025.00065
+
+
+
+
+                                                                                                                                                                                    Nan Yang                      Joseph Reynolds                        Laurens Prast                  Rosilde Corvino
+                                                                                                                                                                                   TNO-ESI                            TNO-ESI                             TNO-ESI                           TNO-ESI
+                                                                                                                                                                           Eindhoven, The Netherland        Eindhoven, The Netherland           Eindhoven, The Netherland         Eindhoven, The Netherland
+                                                                                                                                                                                nan.yang@tno.nl                 joe.reynolds@tno.nl                 laurens.prast@tno.nl             rosilde.corvino@tno.nl
+
+
+
+
+                                                                                                                                                                           Abstract—Large Language Models (LLMs) have transformed                    user queries, these code assistants retrieve relevant code snip-
+                                                                                                                                                                        code assistants by enabling personalization, interactivity, and              pets and information from the embedded codebase, helping
+                                                                                                                                                                        higher abstraction. However, these assistants often struggle with            engineers by offering suggestions based on their own code.
+                                                                                                                                                                        a common limitation; they generate responses based on a limited
+                                                                                                                                                                        set of relevant code snippets retrieved from the codebase using              Researchers have empirically shown the effectiveness of these
+                                                                                                                                                                        semantic similarity search. This mechanism prevents them from                tools for various software engineering activities [6, 23].
+                                                                                                                                                                        viewing the code structure holistically, making it difficult to give            However, these code assistants face a common challenge.
+                                                                                                                                                                        accurate and complete answers to questions on code dependencies              Since they generate responses based on a limited number of
+                                                                                                                                                                        and structure. This paper introduces a dependency-aware code                 relevant code snippets retrieved from the codebase, they cannot
+                                                                                                                                                                        assistant that answers structural questions developers cannot
+                                                                                                                                                                        easily pose to general-purpose assistants like GitHub Copilot.               view the code structure holistically and fail to provide precise
+                                                                                                                                                                        We achieve this by enriching the LLM with dependency facts                   answers to questions related to code structure and dependency.
+                                                                                                                                                                        obtained from a code graph generated by a static-analysis                    This limitation arises because the retrieved snippets may
+                                                                                                                                                                        pipeline customized specifically for industry-scale codebases. The           not capture the full context of the required structure and
+                                                                                                                                                                        dependency information is queried from a Neo4j database, which               dependencies, leading to incorrect, inaccurate, or incomplete
+                                                                                                                                                                        stores the code graph, via Text-to-Cypher translation powered
+                                                                                                                                                                        by LLMs. Cypher is a query language, designed specifically for               suggestions. This type of structure and dependency informa-
+                                                                                                                                                                        querying graph-structured data.                                              tion is crucial when performing large-scale code analysis for
+                                                                                                                                                                           We evaluated our solution at Philips Healthcare. Specifically,            comprehension and refactoring [16, 18].
+                                                                                                                                                                        we performed a benchmark with 420 collected questions and a                     Before the advent of LLMs, traditional static analysis tools
+                                                                                                                                                                        user study with seven industrial software engineers. By analyzing            were developed and used to support dependency analysis. One
+                                                                                                                                                                        the results, we identified common mistakes made by GPT-
+                                                                                                                                                                        4o in the Text-to-Cypher translation to query code graphs,                   such tool is Renaissance, which has proven effective in iden-
+                                                                                                                                                                        including syntax, schema and semantic errors. This work lays the             tifying complex dependency relationships in large codebases
+                                                                                                                                                                        foundation for advancing Cypher query generation on industry-                and supporting large-scale refactoring with various industry
+                                                                                                                                                                        scale code graphs and for augmenting graph-based code analysis               case studies [5, 4]. By parsing the code and modeling it as a
+                                                                                                                                                                        with LLMs.                                                                   code graph stored in a Neo4j graph database [28], the precision
+                                                                                                                                                                           Index Terms—Large language models, Text-to-Cypher, code
+                                                                                                                                                                        graph, static analysis, code assistants
+                                                                                                                                                                                                                                                     and determinism of dependency analysis can be guaranteed.
+                                                                                                                                                                                                                                                     However, achieving wide adoption for code analysis remains
+                                                                                                                                                                                                                                                     challenging due to the complexity of interacting with the code
+                                                                                                                                                                                               I. I NTRODUCTION
+                                                                                                                                                                                                                                                     graph using Cypher queries. Cypher [30] is a query language
+                                                                                                                                                                           The emergence of Large Language Models (LLMs) has                         designed for Neo4j graph databases. Previous hands-on ses-
+                                                                                                                                                                        significantly advanced the integration of artificial intelligence            sions with developers suggested that writing Cypher queries
+                                                                                                                                                                        into various software development activities, including, but                 is often challenging due to the complexity of the Cypher
+                                                                                                                                                                        not limited to, code completion [15], code generation [11],                  language, the underlying graph schema, and the analyzed
+                                                                                                                                                                        summarization [20], test generation [7], refactoring [1], and                codebase. To make such a code graph more accessible for
+                                                                                                                                                                        language translation [40]. Tools such as GitHub Copilot [9]                  analysis and enhance LLM-based code assistants to answer
+                                                                                                                                                                        and Tabnine [37] have been developed to offer these capa-                    dependency questions, we envision that a hybrid solution that
+                                                                                                                                                                        bilities, providing valuable assistance to software engineers.               augments LLMs with dependency information automatically
+                                                                                                                                                                        Most code assistants are built on similar concepts, with                     retrieved from the code graph is promising.
+                                                                                                                                                                        the Retrieval Augmented Generation (RAG) framework [8]                          In this paper, we present a GraphRAG solution (as shown in
+                                                                                                                                                                        playing a key role. In these RAG-based code assistant, the                   Figure 1) that enables LLMs to access dependency information
+                                                                                                                                                                        codebase is converted into vector embeddings and stored in                   from a code graph that is extracted from a codebase using Re-
+                                                                                                                                                                        a vector database during the indexing phase. In response to                  naissance. When receiving a user question in natural language,
+
+
+                                                                                                                                                                    2576-3148/25/$31.00 ©2025 IEEE                                             644
+                                                                                                                                                                    DOI 10.1109/ICSME64153.2025.00065
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  the code assistant converts the question into a Cypher query                               a more complex language widely used in embedded systems
+                  (Text-to-Cypher) that is executed on a Neo4j database that                                 development. Since we utilize a static analysis tool designed
+                  stores the code graph. The retrieved dependency information                                for industry-scale codebases, our graph schema extends be-
+                  is then used to generate an answer. This solution differs                                  yond conventional function, class, and module relationships.
+                  from other code assistants by generating answers based on                                  Unlike previous approaches, which typically model depen-
+                  dependency information retrieved from a code graph via query                               dencies at a more localized level, our schema captures not
+                  generation, rather than based on code snippets retrieved from                              only local dependencies but also architectural dependencies
+                  a vector database via semantic similarity search.                                          across modules, projects, and Visual Studio solutions, making
+                                                                                                             it more effective in real-world software development scenarios.
+                                                    Context retriever                                        Furthermore, these assistants also differ in methods used to
+                                                    Text-to-Cypher
+                                    Question          generator
+                                                                            Query                            retrieve information from graphs. RepoUnderstander applies
+                                                     (LLM-based)                          Code graph         Monte Carlo Tree Search algorithm which expands the search
+                                                                        Dependency info
+                                             Question +                                                      by selecting child nodes based on exploration-exploitation
+                                           Dependency info
+                                                                                                             trade-offs. RepoGraph uses K-hop ego-graph search algo-
+                                 Answer            Answer generator                                          rithm [14] which expands the subgraph by retrieving all
+                                                     (LLM-based)
+                                                                                                             connected nodes within K hops from the ego node. Both search
+                                  Fig. 1: GraphRag-based code assistant                                      algorithms grow their search space iteratively, refining which
+                                                                                                             nodes to explore further. However, both methods inherently
+                     We validated our solution at Philips Healthcare which is                                approximate results rather than guaranteeing an exact match
+                  a global company specializing in advanced imaging, patient                                 on the graph. Furthermore, these methods are designed for
+                  monitoring, and healthcare informatics solutions. Firstly, we                              local search and thus cannot answer global questions that
+                  evaluated the ability of LLMs in translating questions in                                  require aggregation (e.g., which function has the highest fan-
+                  natural language into Cypher queries for the code graph, using                             in?). CodexGraph and our work both utilize LLMs for Text-
+                  a dataset of 420 questions from industrial engineers. Secondly,                            to-Cypher translation in information retrieval. However, the
+                  we performed a user study with seven industrial engineers.                                 CodexGraph study focuses on different use cases and does not
+                  Although the current accuracy is not perfect, the 44% correct                              evaluate the accuracy of LLMs in performing this translation.
+                  response rate in benchmark demonstrates the potential of                                      Secondly, we adopted a distinct evaluation approach, pro-
+                  LLM in automating complex query generation, especially                                     viding new insights into the applicability of graph-based code
+                  considering the complexity of the code graph schema. This                                  assistants. Rather than relying solely on open-source bench-
+                  performance represents a meaningful step toward scalable and                               marks like SWE-Bench [17], we employed a mixed-method
+                  intelligent code analysis in industrial settings. Our user study                           approach that combines a benchmark with an evaluation
+                  further suggests that even when queries are not completely                                 session with industry engineers. This mixed-method evaluation
+                  correct, they can serve as useful starting points for engineers.                           ensures both objective performance measurement and practical
+                     Our main contribution is threefold: (1) a Text-to-Cypher                                insights from developers, enhancing our understanding of how
+                  dataset tailored for code graph analysis, constructed in an                                graph-based code assistants perform in real-world software
+                  industrial setting; (2) an empirical analysis of the ability of                            development scenarios.
+                  LLMs to perform Text-to-Cypher translation for code graph
+                  analysis, including a characterization of the errors they com-                             B. Text-to-Query generation
+                  monly make; and (3) a set of suggestions to address common                                    Our research contributes to the body of knowledge on Text-
+                  syntax, schema, and semantic errors in the translation. Our                                to-Query generation and evaluates the LLM-based Text-to-
+                  work provides practical insights for researchers and practi-                               Query translator for software engineering applications in an
+                  tioners aiming to leverage LLMs in graph-based code analysis,                              industry setting. One of the query languages studied in Text-
+                  and lay the groundwork for more accurate and scalable query                                to-Query research is SQL (Structured Query Language) [36,
+                  generation for large-scale code graphs.                                                    42] which is the standard language for managing and querying
+                                                                                                             relational databases, since it is widely used across industries
+                                         II. R ELATED WORK
+                                                                                                             and many examples are publicly available. In contrast, Text-
+                  A. graph-based code assistants                                                             to-Cypher translation has received relatively limited attention
+                     Code assistants have been extensively studied since the rise                            despite growing demand. Nonetheless, several researchers and
+                  of LLMs [9, 37, 6, 23]. Most of them rely on semantic sim-                                 practitioners have open-sourced both datasets and LLM-based
+                  ilarity search to retrieve relevant contextual information [22].                           solutions to support this task [26, 12, 38]. The published
+                  Recently, researchers have explored searching code graphs to                               datasets are designed for applications different from ours,
+                  retrieve precise dependency information [24, 31, 25]. Table I                              including those in the film industry and specialized medical
+                  compares CodexGraph [24], RepoUnderstander [25] and Re-                                    domains. An open-source repository offers several synthetic
+                  poGraph [31] with our work in several key aspects.                                         datasets for benchmarking LLMs in Text-to-Cypher tasks [21].
+                     Firstly, previous work has mainly focused on designing                                  Zhong et al. [41] have constructed a synthetic dataset for
+                  code assistants for Python, whereas our work targets C++,                                  two medical databases. Ozsoy et al. combined 16 publicly
+
+
+
+
+                                                                                                       645
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                                                                        TABLE I: Comparison with existing studies
+                                          CodexGraph [24]                 RepoUnderstander [25]          RepoGraph [31]                 Our work
+                     Target Language      Python                          Python                         Python                         C++
+                     Schema               Function, class, and module     Function relationships         Function and class relation-   Relationships among code en-
+                                          relationships                                                  ships                          tities, file system components
+                                                                                                                                        and Visual Studio project el-
+                                                                                                                                        ements
+                     Retrieval Method     Text-to-Cypher translation      Monte Carlo Tree Search al-    K-hop ego-graph search algo-   Text-to-Cypher translation
+                                                                          gorithm                        rithm
+                     Use Case             Code completion, issue fix-     Issue fixing                   Code completion and issue      Q&A about software structure
+                                          ing, and code generation                                       fixing                         and dependency
+                     Evaluation Method    CrossCodeEval, SWE-Bench,       SWE-bench                      CrossCodeEval and SWE-         Industry-based  benchmark
+                                          and EvoCodeBench                                               bench                          and user study
+
+
+
+                  available datasets into a dataset comprising 44,387 instances.                and folders) represent how the code is physically organized
+                  The benchmark study shows that fine-tuned models could                        on disk, which is essential for understanding dependencies
+                  achieve better performance than pre-trained models.                           and file-level structure. Visual Studio elements (e.g., projects
+                     Our work made several distinct contributions. Firstly, unlike              and solutions) model the development environment and build
+                  other studies, we evaluated the generation of Text-to-Cypher                  configuration, providing context on how the code is grouped
+                  for code graphs in industrial contexts, providing valuable in-                and compiled. The edges capture relationships across these
+                  sights into its feasibility on software engineering applications.             layers, such as function calls, class inheritance, file inclusions,
+                  Secondly, we conducted an in-depth analysis to identify the                   folder-file hierarchies, and project containment.
+                  mistakes and limitations of the models in this translation task,                 Previous case studies in industry [5, 4] have shown that
+                  going beyond quantitative insights to offer a more comprehen-                 this code graph is effective and useful to analyze architec-
+                  sive understanding of potential areas for improvement.                        tural dependencies in large-scale codebases. For example, a
+                                                                                                case study at Philips Healthcare focused on decoupling two
+                         III. LLM S FOR CODE DEPENDENCY ANALYSIS                                components using the code graph not only to identify shared
+                     In this section, we describe the architecture of our graph-                code but also to propose separation strategies, gather insights
+                  based code assistant, which is augmented with dependency                      into architectural dependencies, and track progress throughout
+                  information represented in a code graph. Next, we introduce                   the refactoring process. As the users suggested, these insights
+                  the static analysis tool used in this study for code graph                    could not be obtained without such a code graph, given the
+                  extraction. Finally, we present examples of answers given to                  size of the codebase. However, during the same case study the
+                  users by our code assistant.                                                  users noted that interacting with the code graph is non-trivial.
+                                                                                                To formulate their questions as Cypher queries, they need a
+                  A. Code assistant architecture                                                good understanding of the Cypher language, the graph schema
+                     Figure 1 shows the components of our graph-based code                      and the codebase.
+                  assistant. A code graph stored in a Neo4j database is provided                   By using LLMs to translate user questions into Cypher
+                  as the source of dependency information for the analyzed                      queries, we would like not only to provide LLMs with depen-
+                  codebase. When receiving a dependency question in natural                     dency information, overcoming the limitations of existing code
+                  language, the component called Text-to-Cypher is triggered to                 assistants, but also to make such code graphs more accessible.
+                  translate this question into a Cypher query using an LLM.
+                  This LLM is provided with instructions, the user question,                    C. Answer presentation
+                  the schema of the code graph, and few-shot examples. The                         Figure 2 shows an example of how our code assistant
+                  generated Cypher query is then executed in the Neo4j database                 presents answers to users. It can be seen that the code assistant
+                  to retrieve the relevant dependency information. The relevant                 provides not only the final textual answer generated by the
+                  dependency information is then used by an LLM to generate                     LLM but also the generated queries, retrieved subgraphs, and
+                  an answer to the question.                                                    the table presenting the retrieved information. Engineers can
+                                                                                                inspect the generated queries and modify them if necessary
+                  B. Code graph                                                                 to regenerate the answers. By examining these intermedi-
+                     We employed a static analysis tool called Renaissance                      ate results, engineers can evaluate the quality of the gen-
+                  to extract code graphs from C++ codebases. Renaissance                        erated answers, increasing transparency and trustworthiness.
+                  is a specially developed tool for large-scale code analysis                   Furthermore, engineers have the flexibility to choose which
+                  and refactoring [5, 4]. The extracted code graph follows a                    representations of the answers to inspect, depending on the
+                  rich schema with 11 node types and 18 relationship types,                     type of questions asked. For example, for questions about
+                  organized into three main categories to reflect different layers              software metrics, the generated queries and the final textual
+                  of software development. Code elements (e.g., function defini-                responses might be sufficient. In contrast, for questions about
+                  tions, declarations, and classes) capture the core logical struc-             dependencies between classes and functions, the retrieved
+                  ture of the source code. File system components (e.g., files                  subgraph could be more insightful. Additionally, the table is
+
+
+
+
+                                                                                          646
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                                                                                          evaluation addresses two sub-questions. RQ1.1 studies the
+                                                                                          ability of LLMs in generating executable queries. RQ1.2 takes
+                                                                                          this one step further to study whether LLMs can generate
+                                                                                          queries that retrieve correct information. We used the execu-
+                                                                                          tion result of queries as a proxy for measuring query accuracy,
+                                                                                          as LLMs can generate different queries that still retrieve the
+                                                                                          necessary dependency information. Next, we conducted an in-
+                                                                                          depth analysis of cases where LLMs underperform, with four
+                                                                                          authors analyzing and discussing these instances to gain deeper
+                                                                                          insights (RQ2).
+                                                                                          B. Data collection
+                                                                                             We constructed a dataset for a code graph comprising 420
+                                                                                          data points 1 . Each data point includes a user question in
+                                                                                          English, an expected Cypher query, the execution result of
+                                                                                          the expected Cypher query, and a difficulty level label.
+                                                                                                a) Code graph: To build a dataset for Text-to-Cypher
+                                                                                          evaluation, we extracted a code graph using Renaissance from
+                                                                                          an open-source C++ codebase called jsoncpp 2 . We chose this
+                                                                                          repository for the following reasons. Firstly, it is written in
+                                                                                          C++ 14 which can be parsed by Renaissance. Secondly, this
+                                                                                          repository has been actively maintained by more than 100
+                                                                                          contributors. This repository is by no means representative of
+                                                                                          the size of the repositories that Renaissance can analyze. Our
+                                                                                          primary objective is to assess whether LLMs can understand
+                                                                                          the semantic intent of user questions and accurately map
+                                      Fig. 2: Answer presentation                         them to the corresponding entities, relationships, and attributes
+                                                                                          defined in the code graph.
+                                                                                             The extracted code graph from this repository contains
+                  particularly useful when the retrieved subgraph is large and
+                                                                                          2751 nodes and 7722 relationships. In order to mimic an
+                  requires further processing, like filtering.
+                                                                                          evaluation with a closed-source codebase, we obfuscated the
+                                         IV. B ENCHMARK                                   code graph by renaming all entities in the graph. For example,
+                                                                                          the node representing writer.h was renamed headerfile 1.h.
+                    In this section, we describe our evaluation of the ability of         This obfuscation ensures that LLMs cannot generate queries
+                  LLMs to translate users’ inquiries about the structure of their         based on their pre-trained knowledge of the codebase. This
+                  codebase in natural language into Cypher queries.                       obfuscated code graph is stored in a Neo4j database.
+                  A. Research questions                                                         b) Cypher query and difficulty level: We collected a set
+                                                                                          of real-life queries adapted to the obfuscated code graph. This
+                     The following research questions are formulated to guide             involves gathering queries from Renaissance users at Philips
+                  our evaluation.                                                         Healthcare, modifying these queries to be compatible with the
+                     RQ1: To what extent can pre-trained LLMs accurately                  obfuscated code graph, and compiling the adapted queries into
+                  translate dependency questions into Cypher queries for re-              a dataset with 420 data points.
+                  trieving dependency information from the code graph?                       Specifically, we performed the following steps. Queries
+                     Since LLMs can generate different Cypher queries that                were collected from the users of Renaissance who have a
+                  retrieve the same information, we use the execution result of           shared database of questions and queries based on their analy-
+                  queries as a proxy to assess the accuracy of the generated              sis activities performed in practice. For example, one activity
+                  queries, which leads us to the following sub-questions:                 involved analyzing the code graph to identify complex depen-
+                      RQ1.1: Are the Cypher queries generated by pre-trained              dency networks, which required restructuring and migrating
+                        LLMs executable?                                                  tests to a new library. By collecting them, we would like to
+                      RQ1.2: How accurate is the dependency information re-               investigate whether LLMs can make the code graph more ac-
+                        trieved by the Cypher queries generated by pre-trained            cessible by generating these queries for users. 84 queries were
+                        LLMs?                                                             collected and categorized into simple, intermediate, advanced,
+                     RQ2: What are the main challenges pre-trained LLMs face              and complex based on their difficulty. Simple queries only
+                  in Text-to-Cypher translation?                                            1 https://figshare.com/s/2d137b3b5b27b25658f4
+                     We constructed a dataset to quantitatively evaluate the               2 https://github.com/open-source-parsers/jsoncpp/tree/master Accessed on
+                  ability of LLMs in Text-to-Cypher translation (RQ1). This               May 10, 2024.
+
+
+
+
+                                                                                    647
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  search for one type of nodes or one type of relationship with                       Queries exceeding 10 seconds often indicate excessive com-
+                  a MATCH clause. Intermediate queries search for multiple                            plexity or suboptimal execution plans. Such queries are logged
+                  types of node and relationship with some simple filtering logic                     and skipped, allowing the script to continue.
+                  (e.g., using String Comparison Operators such as STARTS                                  c) Neo4j transaction memory limit: The transaction
+                  WITH). Advanced queries feature multi-step paths, conditional                       memory limit in Neo4j defines the maximum memory that a
+                  logic including WHERE clauses with multiple conditions,                             single transaction can utilize during execution. This safeguard
+                  and/or utilize aggregation functions. Complex queries involve                       prevents excessively large transactions from dominating sys-
+                  complicated pattern matching with complicated conditional                           tem memory. Additionally, transactions exceeding this limit
+                  logic. Next, these queries were adapted to the obfuscated                           typically involve graphs too large to be meaningfully inter-
+                  code graph. For example, if an original query was intended                          preted by humans. In this experiment, we used Neo4j 5.183
+                  to search for dependency information of a specific class in                         and its default transaction memory limit of 512 MB.
+                  their proprietary codebase, we adapted it to search for the
+                  dependency information of a randomly selected class in the                          D. Metric and statistical test
+                  obfuscated code graph.                                                                   a) Metric: As mentioned in Section IV-A, we assess
+                        c) Question and expected result: We collected the origi-                      the accuracy of the retrieved dependency information rather
+                  nal natural language questions corresponding to these queries                       than the accuracy of the generated queries to address RQ1.2.
+                  and prompted Google Gemini 1.5 Pro [10] to generate four                            The existing metrics in the literature are mostly designed to
+                  additional variants of each question. Each generated question                       measure the ability of LLMs in code generation and text
+                  is reviewed and collaboratively refined by authors to ensure                        generation [13, 32], which are not directly applicable to
+                  clarity and readability. We selected Google Gemini 1.5 Pro as                       our case. Since the retrieved dependency information can
+                  it provides a distinct LLM from the models we evaluate, and it                      be represented with subgraphs, we apply a graph metric to
+                  has demonstrated strong performance on various benchmarks,                          compare the expected subgraph (i.e., the execution result of the
+                  making it a suitable choice for generating initial questions                        expected Cypher query) and the retrieved subgraph (i.e., the
+                  and reducing manual effort. In the final step, we obtained                          execution result of the generated Cypher query). Specifically,
+                  the expected execution result by executing the 420 queries on                       we use the metric Jaccard graph similarity [19] to quantify the
+                  the Neo4j database that contains the obfuscated code graph.                         overlap between these two subgraphs G1 and G2 . The metric
+                  Table II shows the distribution of different difficulty levels in                   formula is shown below:
+                  our dataset and an example question for each difficulty level.
+                                                                                                                                              |G1 ∩ G2 |
+                                                                                                                            J(G1 , G2 ) =
+                    Difficulty level   Count   Example question                                                                               |G1 ∪ G2 |
+                    Simple             72      Identify the header files that are dependent
+                                               on “headerfile 12”.                                       Value 1 indicates that two subgraphs are identical, while
+                    Intermediate       88      Identify the source files and their associated         Value 0 indicates that there is no overlap between the sub-
+                                               macro definitions where the macro file path
+                                               includes “folder 255”.
+                                                                                                      graphs. Values between 0 and 1 represent partial overlap, with
+                    Advanced           84      Identify C++ declarations that are declared            higher values indicating greater similarity. We choose Jaccard
+                                               in one source file but used in another, within         similarity over precision and recall because it gives a single
+                                               a maximum of five indirect usages.                     value that is easy to interpret and compare between models.
+                    Complex            92      List all projects and their associated
+                                               classes from the solution file located in                   b) Statistical test: To compare model performance, we
+                                               “folder 188/folder 616”. Include details on            used the pairwise Mann-Whitney U test [27] to analyze the dis-
+                                               the classes, their functions, the header files         tribution of Jaccard similarity values across 420 questions, as
+                                               where these classes are defined, and the
+                                               inheritance structure of these classes up to           it does not assume normality. The pairwise tests provides a p-
+                                               five levels deep.                                      value that helps us determine whether the observed differences
+                             TABLE II: Example question for each difficulty level                     in Jaccard similarity values between models are statistically
+                                                                                                      significant. We used the standard 0.05 threshold, where p-
+                                                                                                      values below this indicate statistically significant differences
+                  C. Setups                                                                           in model performance. Conducting multiple pairwise compar-
+                                                                                                      isons raises the risk of Type I errors. To address it, we adjusted
+                       a) Model: We experimented with three state-of-the-art                          the p-values using the Bonferroni correction [39].
+                  pre-trained LLMs—GPT-3.5-turbo-0125, LLAMA3-70B, and
+                  GPT-4o-2024-08-06. They are selected for their strong perfor-                       E. Results
+                  mance in benchmarks like HumanEval [3].                                               1) Quantitative analysis: We start with our results for
+                       b) Query execution timeout: Our experimental script pro-                       RQ1 that studies the ability of LLMs in accurately retrieving
+                  cesses a total of 420 questions. To prevent resource blocking,                      dependency information via Cypher queries.
+                  we enforced a 10-second timeout for each query executed                               Figure 3 shows the result of the execution of the Cypher
+                  on the Neo4j database. This threshold was chosen based on                           queries generated with these three pre-trained models (RQ1.1).
+                  empirical testing, balancing performance and responsiveness;
+                  most well-formed queries complete well within this time.                              3 https://neo4j.com/developer/kb/neo4j-supported-versions/
+
+
+
+
+                                                                                                648
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  It can be seen that four categories are identified from the                                          3.5-turbo and LLAMA3-70B, resulting in perfect accuracy for
+                  execution results. Executable queries are runnable in the Neo4j                                      44% of questions. Additionally, LLAMA3-70B significantly
+                  database without returning errors. Queries with Syntax Error                                         outperforms GPT-3.5-turbo. It should be noted that queries
+                  return error messages indicating syntactic problems. Queries                                         resulting in imperfect accuracy (similarity value between 0
+                  with Timeout Error cannot be completed within 10 seconds.                                            and 1) could still be very useful as a starting point, given they
+                  The last category includes queries with Transaction Memory                                           capture relevant information. Modifying them with knowledge
+                  Limit Error, which occurs when the retrieved subgraph ex-                                            of the graph schema can often lead to a better result.
+                  ceeds the memory limit of the database.
+                                                                                                                                       TABLE III: Pairwise Mann-Whitney U test results (with Bonferroni
+                     It can be observed that, overall, GPT-4o produces more                                                                                     correction)
+                  executable queries, with GPT-3.5-turbo coming in second.
+                  Promisingly, GPT-4o produces only nine queries with syntactic                                                              model 1                  model 2                     p-value      adjusted p-value
+                                                                                                                                             GPT-3.5-turbo            LLAMA3-70B                 1.09e-02              3.28e-02
+                  errors, suggesting that the model has a good knowledge of the                                                              GPT-3.5-turbo            GPT-4o                     4.42e-15              1.32e-14
+                  current Cypher language grammar (version 9). LLAMA3-70B                                                                    LLAMA3-70B               GPT-4o                     9.11e-08              2.73e-07
+                  and GPT-3.5-turbo, however, generate a considerable number
+                  of queries with syntax errors. We observe that some of these
+                  errors occur when LLMs use legacy grammar constructs that                                                      250               247                                                            Legend
+                  are not present in the current Cypher language grammar.                                                                                                                                         GPT-3.5-turbo
+                                                                                                                                                         211                                                      LLAMA3-70B
+                  Another observation is that LLMs often introduce syntax                                                        200                                                                              GPT-4o                 186
+                  errors when attempting to use advanced Cypher libraries (e.g.,
+                                                                                                                                 150                           134
+
+
+
+
+                                                                                                                       Count
+                  APOC library). These observations can be explained by the                                                                                                                                                        128
+                  fact that Cypher is an evolving language, and LLMs might                                                       100                                                                                         102
+                  not be trained with sufficient examples for up-to-date Cypher
+                  grammar constructs and libraries.                                                                                   50                                                    35
+                                                                                                                                                                     25 25 21      19 22                               27
+                     Figure 3 shows that GPT-4o produces more timeout errors,                                                                                                                     15 21 17     12 13
+                                                                                                                                             0
+                  particularly with complex questions. While GPT-3.5-turbo                                                                                0          0.01-0.25     0.26-0.50       0.51-0.75   0.76-0.99           1
+                                                                                                                                                                                        Similarity value
+                  and LLAMA3-70B often produce queries with syntax errors
+                  in these cases, GPT-4o generates computationally complex                                                                                       Fig. 4: Accuracy of retrieved subgraphs
+                  queries that lead to timeouts. In this experiment, timeout and
+                  memory limit errors account for only 3% of cases but could                                              Figure 5 focuses on the best-performing model, GPT-4o, and
+                  become more prominent with larger code graphs, indicating a                                          analyzes its performance across different question difficulty
+                  potential scalability concern.                                                                       levels. It can be observed from this box-plot that most simple
+                                                                                                                       questions are translated into queries accurately (with median
+                                 371         380                                        Legend                         similarity value 1). However, accuracy decreases as difficulty
+                           350         347                                              GPT-3.5-turbo
+                                                                                        LLAMA3-70B                     level increases. This observation suggests that further work is
+                           300                                                          GPT-4o
+                                                                                                                       required to answer complex questions effectively.
+                           250
+                   Count
+
+
+
+
+                           200                                                                                                                            1.00
+                                                                                                                                             1.0
+                           150                                                                                                                                                   0.88
+                                                                                                                                             0.8
+                                                                                                                          Similarity Value
+
+
+
+
+                           100
+                                                        68                                                                                   0.6
+                           50                      41                              28
+                                                                9       7    5                1             3                                                                                          0.43
+                            0                                                                                                                0.4
+                                   Executable       Syntax Error        Timeout Error         Size Limit Error
+                                                             Execution Result                                                                0.2
+                                       Fig. 3: Execution result of generated queries                                                         0.0                                                                            0.00
+                                                                                                                                                         Simple            Intermediate             Advanced            Complex
+                     Next, let us discuss the accuracy of the retrieved subgraph                                                     Fig. 5: Box-plot for distribution of similarity values with GPT-4o by
+                  (RQ1.2). When an execution error occurs, the retrieved sub-                                                                                    difficulty level
+                  graph is considered to contain an empty set of nodes and
+                  edges, resulting in no overlap with the expected subgraph.                                             2) Source of errors: As mentioned in Section IV-E1, we
+                  Consequently, the similarity value is 0. Table III presents                                          observe that LLMs could generate queries that are not ex-
+                  the result of the pairwise test while Figure 4 shows the                                             ecutable due to syntax errors. We further examine, analyze,
+                  distribution of similarity values across six bins: 0, 0.01–0.25,                                     and discuss cases where GPT-4o generates executable queries,
+                  0.26–0.50, 0.51–0.75, 0.76–0.99, and 1. Since all the adjusted                                       but the execution results have a similarity score below 1. We
+                  p-values shown in Table III are below 0.05, we can con-                                              identify two main challenges that GPT-4o is still facing (RQ2).
+                  clude that the distributions of the similarity values for all                                             a) Violation of graph schema: We observed that 17
+                  the compared pairs are statistically different. It can be seen                                       queries generated by GPT-4o, while syntactically valid and
+                  from Figure 4 that GPT-4o significantly outperforms GPT-                                             executable, violate the graph schema. Due to mismatches in
+
+
+
+
+                                                                                                                 649
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  node and relationship types, these queries fail to retrieve the                     MATCH (classA:CppDeclaration {name: "A"})-[:CppInherits]->(
+                                                                                                            superclass:CppDeclaration)
+                  intended information.                                                               RETURN "Inheritance" AS interaction, superclass.name AS
+                                                                                                            relatedClass
+                     An observation is that LLMs can invert the direction of                          UNION MATCH (classA:CppDeclaration {name: "A"})-[:CppContains
+                                                                                                            ]->(member:CppDeclaration)
+                  the relationship in the generated Cypher statement. This prob-                      RETURN "Composition" AS interaction, member.name AS relatedClass
+                                                                                                      UNION MATCH (classA:CppDeclaration {name: "A"})-[:CppContains
+                  lem has been identified by practitioners. An algorithm that                               ]->(func:CppFunctionDefinition)-[:CppCalls]->(calledFunc:
+                                                                                                            CppFunctionDefinition)
+                  corrects the direction has been proposed and integrated into                        RETURN "Function Call" AS interaction, calledFunc.class AS
+                                                                                                            relatedClass
+                  LangChain4 . However, our experiments with this algorithm
+                                                                                                        Cypher Query 2: Generated query for question “How does class A
+                  shows that it often fails to fulfill its intended purpose. One key                     interact with other classes through inheritance, composition, and
+                  limitation is its reliance on regular expressions to extract node                                                function calls?”
+                  and relationship types from Cypher statements, rather than us-
+                  ing pattern matching on the Cypher syntax tree. Consequently,                     In particular, the third part of the query identifies all instances
+                  this heuristic approach can misinterpret complex relationships                    of indirect relationships between classes through function
+                  and nested structures, especially in queries with uncommon                        calls, which was not captured by the query shown in Query 1.
+                  patterns. An observed limitation is that spaces before or after                   This example shows that by posing questions in a more
+                  an arrow symbol (→ or ←) prevent proper correction. We                            detailed manner, it becomes possible to generate a query
+                  identified this issue because LLMs often add spaces in gen-                       that more accurately captures user intents. This observation
+                  erated Cypher statements, which remain syntactically correct.                     suggests the need for a mechanism to guide users to refine
+                  The sensitivity of this heuristic approach to formatting issues                   and clarify their intents, helping LLMs map the intentions to
+                  reduces its reliability, as minor and valid variations in syntax                  specific concepts within the graph schema.
+                  can affect its effectiveness.
+                     Another observation is that LLMs can hallucinate a rela-                                                 V. U SER STUDY
+                  tionship type that is not present between two node types. For                       Next, we conducted a complementary evaluation with
+                  example, one incorrect query searches for all class declarations                  Philips Healthcare engineers to gather user feedback and
+                  (CppDeclaration nodes in our schema) that are declared within                     identify areas for improvement.
+                  a function definition (CppFunctionDefinition nodes in our
+                                                                                                    A. Methodology
+                  schema). However, it uses relationship type CppCalls instead
+                  of CppUses. This violates our schema, as relationship type                           We had evaluation sessions with seven participants from
+                  CppCalls is only present between functions, not between                           IGT (Image-guided therapy) department of Philips Healthcare.
+                  classes and functions. These observations suggest that LLMs                       Table IV shows the demographics of these participants. They
+                  can generate queries that violate the schema of the code graph.                   work on a codebase with over one million lines of code,
+                  We discuss possible improvements in Section VI-0d.                                developed over more than a decade. Since they often need
+                        b) Intent-concept mapping challenge: The main source                        to perform dependency and structure analysis in their daily
+                  of error arises when GPT-4o encounters questions involving                        work, they are considered to be the target users of our code
+                  high-level user intents. In such cases, the model often lacks                     assistant. The extracted code graph for this codebase contains
+                  clarity on how to map these abstract intents to specific                          500K+ nodes and 2M+ edges.
+                  graph concepts, such as node types or relationship types. For                        Each evaluation session consisted of three sections. In the
+                  example, this issue is evident in questions related to class                      first section, we collected the background information of the
+                  interactions. When asked, “How does class A interact with                         participant, including their current role, years of experience,
+                  other classes?” without a clear definition of “interaction”, the                  and familiarity with C++ and the analyzed codebase. Each ses-
+                  assistant generates a query that searches for direct relation-                    sion also featured a section wherein the participant was given
+                  ships between classes, namely inheritance and composition                         hands-on experience with our code assistant. Firstly, partici-
+                  (as shown in Query 1). This suggests that GPT-4o maps “class                      pants were instructed to experiment with example questions,
+                  interaction” to inheritance and composition relationships in the                  in preparation for open-ended interaction where they could ask
+                  graph schema, which might not be the complete and precise                         their own questions. This allowed us to observe the behaviour
+                  definition of class interaction intended by users.                                of an engineer and collect a new set of questions for the future
+                     Query 2 is generated by the assistant when asked: “How                         validation of our system. In the final section, we gathered
+                  does class A interact with other classes through inheritance,                     their feedback on potential improvements to the tool. Each
+                  composition, and function calls?”. It can be seen that the                        session was conducted in person and lasted approximately
+                  generated query consists of three matching steps where each                       1.5 ∼ 2 hours. In these sessions, execution logs captured
+                  intended relationship is searched.                                                all user queries and the answers of the tool. We encouraged
+                     MATCH (classA:CppDeclaration {class: "A"})-[:CppInherits|                      participants to share feedback as they interacted with it. We
+                           CppContains]->(relatedClass:CppDeclaration)
+                     RETURN relatedClass                                                            recorded whether users considered the answers correct and
+                      Cypher Query 1: Generated query for question “How does class A                captured their responses. After the sessions, GPT-4o was used
+                                       interact with other classes?”                                to extract common themes and generate labels, which were
+                    4 https://python.langchain.com/api reference/community/chains/langchain
+                                                                                                    then validated through manual analysis to determine frequency
+                  community.chains.graph qa.cypher utils.CypherQueryCorrector.html                  and identify additional patterns.
+
+
+
+
+                                                                                              650
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                                    TABLE IV: Demographics of Participants                                     or project conventions, could guide the generation of more
+                            Participant ID              1        2       3       4        5    6     7         appropriate query conditions and improve result relevance.
+                   Professional Experience (#year)     12        3       2       3        3    11    1           3. Incorrect but useful: These responses provided partial
+                            Current Role 1             PO        D       A       D        D    A    PO         solutions or valuable starting points for users. For example,
+                            C++ Ability 2               4        4       4       4        4    5     4
+                                                                                                               when Participant 7 asked “If I change ‘sourceFile1’, what are
+                  1. D: Developer, A: Architect, PO: Product Owner                                             the impacted functionality?” the tool produced the query:
+                  2. Participants were asked to rate their C++ proficiency on a 1–5 scale
+                                                                                                                 MATCH (file:SourceFile {name: "soureFile1.cpp"})
+                                                                                                                 OPTIONAL MATCH (file)-[:CppUses]-(func:CppFunctionDeclaration|
+                                                                                                                       CppFunctionDefinition|CppDeclaration)
+                                                                                                                 RETURN DISTINCT func
+                  B. Analysis of evaluation sessions
+                     Across the evaluation sessions, participants asked our tool a                                The user had expected a list of executables but received a
+                  total of 91 unique questions. Figure 6 illustrates the distribu-                             list of the impacted functions instead. This acted as a helpful
+                  tion of query outcomes based on user interactions. The results                               starting point and the Cypher query was successfully edited to
+                  are categorized into four distinct response types. We illustrate                             return the desired information about the parent files of these
+                  these categories with examples and anonymize entities in these                               functions and hence the expected answer.
+                  examples to preserve confidentiality.                                                           4. Cannot be answered with the code graph: These questions
+                                                                                                               required information not captured within the current graph. For
+                                                          Incorrect                                            example participant 3 asked “What project has on average the
+                                                          37.5%
+                                                                                                               largest number of lines of code per source file?” Information
+                                                                                                               about the number of lines of code in a source file is missing
+                                                                                                               from the graph, therefore our tool, in its current state, is not
+                                                                                                               be able to answer these questions.
+                                                                        Incorrect but useful
+                                                                                                                  The observed alignment between user session outcomes
+                                 Correct                                10.2%
+                                  36.4%                                                                        and the quantitative benchmark provides empirical evidence
+                                                                                                               for the potential effectiveness of the assistant in real-world
+                                                            Cannot be answered
+                                                            with the current code graph
+                                                            15.9%
+                                                                                                               settings. Both studies used GPT-4o and had success rates in a
+                                                                                                               comparable range: the benchmark showed a correct response
+                           Fig. 6: Pie chart depicting the the success rate of our tool
+                                                                                                               rate of 44. 2%, compared to 36. 4% in user evaluation sessions.
+                     1. Correct: These occurred when the tool generated queries                                C. User feedback
+                  that provided satisfactory outputs in text, tabular, or graph
+                  format. For instance, Participant 6 inquired “What functions                                   The key areas for improvement and the frequency with
+                  are called ‘function1’ and what are their namespaces?”. It                                   which they were identified are as follows:
+                  is common to have functions with the same name defined
+                  in different namespaces, modules, or projects in large-scale                                 User Support & Responsiveness                      5 mentions
+                  codebases. The question is asked to identify these functions                                 Users requested more informative responses beyond simple
+                  invoked in different contexts. The tool generated a query that                               “I do not know” statements when the tool cannot provide a
+                  returned the desired results:                                                                helpful answer. Suggestions include providing explanations
+                     MATCH (f:CppFunctionDeclaration|CppFunctionDefinition)
+                                                                                                               for query failures, requesting clarification when needed, and
+                     WHERE f.name = "function1"
+                     RETURN f.name, f.namespace
+                                                                                                               offering interactive query building with advice.
+
+                     2. Incorrect: These cases involved responses that were either                             Text-to-Cypher Improvements                   4 mentions
+                  irrelevant or failed to assist in problem-solving. For example,                              Users suggested to focus on Text-to-Cypher capabilities,
+                  Participant 2 asked “What projects are included by both                                      specifically improvements in complexity handling, consis-
+                  solution s1.sln and s2.sln that are not test projects?” This                                 tency, accuracy, and response speed.
+                  question aimed to identify shared production projects and
+                  exclude test projects in a multi-solution Visual Studio setup,                               Visualizations & Diagrams                            4 mentions
+                  which cannot be answered with Visual Studio built-in features.                               Users expressed interest in automatic diagram generation for
+                  The assistant generated an overly restrictive query that filters                             class, sequence, and state diagrams based on specified nodes.
+                  project names using an exact match for the string test, resulting                            More general requests include enhanced aesthetics, filtering
+                  in an empty subgraph:                                                                        options, and export functionality for the current graph display.
+                     MATCH (solution1:Solution {name: "solution1.sln"})-[:SlnContains
+                           ]->(project:ProjectCOrCpp),(solution2:Solution {name: "
+                           solution2.sln"})-[:SlnContains]->(project)
+                     WHERE NOT project.name = "test"
+                                                                                                               Graph schema & Structure                        3 mentions
+                     RETURN DISTINCT project                                                                   Users emphasized the need for greater transparency in the
+                                                                                                               underlying graph schema. Suggestions include displaying the
+                     Replacing the exact match with a ”contains” condition
+                                                                                                               graph schema alongside the main interface, providing more
+                  yields more meaningful results. This indicates that incorpo-
+                                                                                                               comprehensive information about queries and data structure,
+                  rating domain knowledge, such as common naming patterns
+
+
+
+
+                                                                                                         651
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  and implementing type hints for available operations.                     query languages. We suggest that researchers study these data-
+                                                                                            driven and non-data-driven solutions and conduct comparative
+                Error Handling & UI                              2 mentions                 experiments to evaluate their effectiveness.
+                Users desired improved error handling with clear error mes-                       b) Guiding query regeneration with graph schema check-
+                sages, alongside general improvements to the user interface.                ers: Another potential solution to address syntax errors and
+                                                                                            graph schema violations is to formally validate whether gener-
+                                                                                            ated queries conform to the Cypher syntax and graph schema.
+                    In this user study, we confirm the need to improve the                  This can be achieved by parsing Cypher queries into syntax
+                  Text-to-Cypher translation, as previously identified in our               trees using a parser, such as one generated with ANTLR based
+                  benchmark study. Furthermore, we identified the issues that               on the OpenCypher grammar [29]. The syntax tree represen-
+                  can only be observed through user interactions with our tool,             tation of queries facilitates detailed analysis of each query
+                  such as user support and responsiveness.                                  component, enabling precise detection and correction of syntax
+                                                                                            and schema inconsistencies before execution. Detected syntax
+                    VI. P OSSIBLE IMPROVEMENTS FOR T EXT- TO -C YPHER                       and schema violations can be addressed in two ways. First,
+                                                                                            some errors can be deterministically resolved by rewriting
+                     As demonstrated in our benchmark study and user study,                 the query using its syntax tree. For example, arrow direction
+                  LLM-based Text-to-Cypher translation shows promising re-                  errors, as discussed in Section IV-E2a, can be corrected this
+                  sults. However, further research is needed to enhance its fea-            way. Alternatively, these violations can be used as feedback
+                  sibility for industrial applications. In this section, we discuss         for LLMs, supporting self-reflection and enabling iterative
+                  potential improvements to achieve more accurate information               refinement of the generated queries. Combining LLMs with
+                  retrieval from large-scale code graphs.                                   deterministic checker of Cypher syntax and graph schema can
+                        a) Providing LLMs with up-to-date grammar and library               greatly increase the quality of the generated queries.
+                  knowledge: As observed, LLMs can generate queries with                          c) Mapping high-level intents into concrete concepts in
+                  syntax errors. Given that Cypher is an evolving query language            graph schema: As observed in our experiment, LLMs often
+                  with updates to its grammar and libraries, it is essential to             struggle in associating words and terms from the user’s ques-
+                  provide LLMs with the latest knowledge of Cypher syntax                   tion with the corresponding types of nodes and relationships
+                  and features. Existing research from the field of code genera-            in the graph schema. The challenge is that such a mapping is
+                  tion for general-purpose languages (GPL) and domain-specific              often not one-to-one. For example, the term interaction may
+                  languages (DSL) can be borrowed to address this problem.                  correspond to multiple relationship types, depending on the
+                     One way to address this challenge is by using a RAG                    question context and user interpretation. One way to address
+                  approach that incorporates relevant grammar and library in-               this could be creating a mapping between common words and
+                  formation with question-query examples. This can be done                  terms into concrete types of relationships and nodes. This
+                  by retrieving similar and correct question-query pairs from a             mapping can be formulated into rules and injected in the
+                  database to dynamically construct few-shot prompts tailored               prompt. However, this approach does not scale well and lacks
+                  to the input question. Another approach is to embed grammar               flexibility. Alternatively, one could develop an ontology or
+                  knowledge by fine-tuning LLMs specifically for the current                hierarchical representation of the schema, such as a multi-level
+                  version of Cypher. The comparison between RAG and fine-                   graph that captures relationships and compound entities. By
+                  tuning solutions has been experimented by a research study                leveraging such structures, LLMs can more effectively align
+                  that aims to generate code in DSLs [2]. Interestingly, the RAG            user intents with relevant schema elements.
+                  solution delivers quality comparable to the fine-tuned model                 We believe it is essential to keep the user in the loop to
+                  for the DSL. This suggests that RAG can be an alternative                 accurately capture their intent. When a question is ambigu-
+                  to fine-tuning. It could also simplify the maintenance of                 ous, the assistant should be allowed to initiate a lightweight
+                  LLM-based assistants by removing the need for retraining                  clarification loop with the user. For example, if a user asks
+                  as DSLs evolve. However, both methods require a dataset                   about class interaction without clearly defining it, the model
+                  with examples that demonstrate the correct use of up-to-date              could generate a response like, “There are multiple relation-
+                  grammar, and neither guarantees syntax-error-free generation.             ships between classes, such as composition, inheritance and
+                     Non-data-driven solutions to improve code generation have              function calls. Which relationships are you interested in?” This
+                  also been studied in the literature. For example, a technique             interactive loop allows users to refine their intent and provides
+                  called Syncode [2] incorporates formal language grammar                   the model with more context.
+                  directly into the code generation process. Using grammar                        d) Decomposing complex questions into smaller manage-
+                  rules, Syncode ensures that the generated code adheres strictly           able questions: Converting a complex question into a precise
+                  to the syntax requirements of the target languages. As shown              query is a common challenge in Text-to-Query research. As
+                  in their experiment, Syncode offers a more reliable solution for          discussed in the area of Text-to-SQL, this challenge can be ad-
+                  generating syntax-error-free code in the target GPL compared              dressed by decomposing a complex question into smaller and
+                  to out-of-box LLMs. However, it remains unclear whether this              manageable sub-questions. For example, Pourreza et al. [33]
+                  grammar-based method is feasible and effective for database               proposed a methodology to decompose user questions by
+
+
+
+
+                                                                                      652
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  designing several LLM-based modules to 1) link the question                goal of our study is to demonstrate both the potential and the
+                  into concrete tables and columns in schemata, 2) classify                  challenges of leveraging LLMs to augment an existing code
+                  and decompose the question, 3) generate SQL queries using                  analysis solution used in industry.
+                  different strategies based on the type of question, and 4) per-               Threats to construct validity arise when a study fails to
+                  form self-correction based on errors returned from execution.              accurately measure the intended concepts, leading to potential
+                  Experiments with three LLMs demonstrate that this approach                 misinterpretations of the results. In this study, we used the
+                  consistently enhances their basic few-shot performance by ap-              graph Jaccard similarity metric to evaluate the execution
+                  proximately 10%. A follow-up study has explored fine-tuning                results of Cypher queries, serving as a proxy for the accuracy
+                  LLMs specifically for these decomposition steps [34]. Results              of generated queries; however, this approach assumes that
+                  indicate that models trained on individual decomposition steps             the overlap reliably reflects correctness, which may not fully
+                  outperform those trained to handle the entire query generation             capture semantic or logical accuracy. To mitigate this risk, we
+                  task in a single step. It is interesting to explore if this multi-         conducted a user study where engineers provided feedback
+                  LLM solution for question decomposition could be useful for                on the correctness and relevance of the generated queries
+                  Text-to-Cypher generation.                                                 and their results. This qualitative evaluation triangulates our
+                                                                                             findings in the benchmark study, providing an additional layer
+                                   VII. T HREATS TO VALIDITY                                 of validation beyond purely quantitative metrics.
+                     Threats to internal validity relate to factors that may have
+                                                                                                      VIII. C ONCLUSIONS AND F UTURE WORK
+                  affected the outcomes of the study. In our benchmark study,
+                  we constructed a semi-synthetic dataset by collecting queries                 This paper presents a code assistant that answers questions
+                  and corresponding questions from engineers and inferring                   about code dependencies and structure, complementing exist-
+                  variants of questions using an LLM. There is a risk that the               ing tools. We augment LLMs with dependency information
+                  generated questions might not accurately reflect the language              from a code graph extracted using an industry-proven static
+                  of the real world user. To mitigate this risk, we reviewed the             analysis tool. Dependency information is retrieved from a
+                  generated questions to ensure that they accurately captured                Neo4j database via Cypher queries generated by the LLM. We
+                  the queries. We rephrased questions that seemed unnatural or               conducted a quantitative analysis to assess LLM performance
+                  overly simplified to better align with realistic query phrasing.           in Text-to-Cypher translation and a user study with seven
+                  We conducted our benchmark using a code graph derived                      engineers to better understand the associated challenges.
+                  from an open-source codebase. This setup carries a risk that                  Our benchmark results indicate that GPT-4o achieves 44%
+                  LLMs might generate responses based on prior knowledge                     accuracy in correctly translating questions into Cypher queries.
+                  of the codebase, since many open-source repositories have                  Both the benchmark and user evaluation results reveal that
+                  probably been included in the LLMs’ pre-training datasets. To              the generated queries can contain syntax errors and violations
+                  mitigate this risk, we obfuscated the code graph by altering               of the graph schema. Furthermore, LLMs often struggle to
+                  the names of entities, thereby removing semantic information               link high-level user intents in questions to concrete entities
+                  embedded in these names. This process preserved the graph                  in the graph schema. While the complexity of the code graph
+                  structure while anonymizing identifiers, reducing the likeli-              schema used in industry presents challenges and results are not
+                  hood that LLMs could leverage prior knowledge specific to                  yet perfect, this study demonstrates the potential of LLMs for
+                  this codebase. Furthermore, we conducted a user study using                Text-to-Cypher translation in extracting dependency informa-
+                  a code graph extracted from a large-scale industry codebase,               tion. It also identifies opportunities for improvement, paving
+                  which confirms our findings and provides new insights into                 the way for more scalable and automated code analysis in
+                  user experience with our assistant.                                        industry settings. As ongoing work, we are addressing several
+                     Threats to external validity questions whether our conclu-              challenges. First, we aim to improve translation accuracy
+                  sions are valid in a more general context. We used a specific              through fine-tuning techniques. Second, we are exploring inter-
+                  static analysis technique to extract the code graph. This raises           active methods that allow LLMs to ask clarification questions
+                  the question of whether the schema of our code graph is                    and iteratively refine queries. Finally, we are developing an
+                  generalizable to code graphs extracted using other techniques.             agent-based assistant with an orchestrator to combine search
+                  The graph schema has been successfully applied and validated               strategies such as graph traversal and semantic similarity
+                  within several companies for representing relationships in                 search for handling diverse information needs [35].
+                  large-scale codebases, demonstrating its usefulness in real-                                 IX. ACKNOWLEDGMENT
+                  world environments. We acknowledge that variations in static
+                  analysis techniques can lead to differences in the resulting                 This work was conducted as part of the LLM4Legacy
+                  code graph schema, which may affect the applicability of our               project, in collaboration with Philips, and funded by Holland
+                  findings to graphs generated by alternative approaches. Addi-              High Tech — TKI HSTM through the Public-Private Partner-
+                  tionally, while the user study involved only seven participants            ship Innovation Scheme (PPP-I). We gratefully acknowledge
+                  and may not be representative of the entire department or                  the support of Daan van der Munnik and Lena Filatova from
+                  broader population, it was designed as an exploratory effort               Philips, and Anca Lichiardopol from TNO-ESI.
+                  to identify key issues and inform future work. The primary
+
+
+
+
+                                                                                       653
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                                           R EFERENCES                                           systematic literature review”. In: Computer Standards
+                   [1]   Eman Abdullah AlOmar et al. “How to refactor this                       & Interfaces (2024), p. 103917.
+                         code? An exploratory study on developer-ChatGPT                  [16]   James Ivers et al. “Industry experiences with large-scale
+                         refactoring conversations”. In: Proceedings of the 21st                 refactoring”. In: Proceedings of the 30th ACM Joint
+                         International Conference on Mining Software Reposito-                   European Software Engineering Conference and Sym-
+                         ries. 2024, pp. 202–206.                                                posium on the Foundations of Software Engineering.
+                   [2]   Nastaran Bassamzadeh and Chhaya Methani. “A Com-                        2022, pp. 1544–1554.
+                         parative Study of DSL Code Generation: Fine-Tuning               [17]   Carlos E Jimenez et al. “Swe-bench: Can language
+                         vs. Optimized Retrieval Augmentation”. In: arXiv                        models resolve real-world github issues?” In: arXiv
+                         preprint arXiv:2407.02742 (2024).                                       preprint arXiv:2310.06770 (2023).
+                   [3]   Mark Chen et al. “Evaluating large language models               [18]   Miryung Kim, Thomas Zimmermann, and Nachiappan
+                         trained on code”. In: arXiv preprint arXiv:2107.03374                   Nagappan. “An empirical study of refactoringchallenges
+                         (2021).                                                                 and benefits at microsoft”. In: IEEE Transactions on
+                   [4]   Dennis Dams et al. “Developing and Applying Custom                      Software Engineering 40.7 (2014), pp. 633–649.
+                         Static Analysis Tools for Industrial Multi-Language              [19]   Peter M Kogge. “Jaccard coefficients as a potential
+                         Code Bases.” In: BENEVOL. 2021.                                         graph benchmark”. In: 2016 IEEE international par-
+                   [5]   Dennis Dams et al. “Model-based software restruc-                       allel and distributed processing symposium workshops
+                         turing: Lessons from cleaning up COM interfaces in                      (IPDPSW). IEEE. 2016, pp. 921–928.
+                         industrial legacy code”. In: 2018 IEEE 25th Interna-             [20]   Jahnavi Kumar and Sridhar Chimalakonda. “Code sum-
+                         tional Conference on Software Analysis, Evolution and                   marization without direct access to code-towards ex-
+                         Reengineering (SANER). IEEE. 2018, pp. 552–556.                         ploring federated llms for software engineering”. In:
+                   [6]   Nicole Davila et al. “An Industry Case Study on Adop-                   Proceedings of the 28th International Conference on
+                         tion of AI-based Programming Assistants”. In: Proceed-                  Evaluation and Assessment in Software Engineering.
+                         ings of the 46th International Conference on Software                   2024, pp. 100–109.
+                         Engineering: Software Engineering in Practice. 2024,             [21]   Neo4j Labs. Text2Cypher Datasets. https://github.com/
+                         pp. 92–102.                                                             neo4j-labs/text2cypher/tree/main/datasets. 2023.
+                   [7]   Amirhossein Deljouyi. “Understandable Test Genera-               [22]   Yichen Li et al. “Enhancing llm-based coding tools
+                         tion Through Capture/Replay and LLMs”. In: Pro-                         through native integration of ide-derived static context”.
+                         ceedings of the 2024 IEEE/ACM 46th International                        In: Proceedings of the 1st International Workshop on
+                         Conference on Software Engineering: Companion Pro-                      Large Language Models for Code. 2024, pp. 70–74.
+                         ceedings. 2024, pp. 261–263.                                     [23]   Jenny T Liang, Chenyang Yang, and Brad A Myers. “A
+                   [8]   Yunfan Gao et al. “Retrieval-augmented generation for                   large-scale survey on the usability of ai programming
+                         large language models: A survey”. In: arXiv preprint                    assistants: Successes and challenges”. In: Proceedings
+                         arXiv:2312.10997 (2023).                                                of the 46th IEEE/ACM International Conference on
+                   [9]   GitHub. GitHub Copilot. Accessed: 2024-11-03. 2023.                     Software Engineering. 2024, pp. 1–13.
+                         URL : https://github.com/features/copilot.                       [24]   Xiangyan Liu et al. “Codexgraph: Bridging large lan-
+                  [10]   Google. Google Gemini. Accessed: 2024-11-03. 2023.                      guage models and code repositories via code graph
+                         URL : https://gemini.google.com/.                                       databases”. In: arXiv preprint arXiv:2408.03910 (2024).
+                  [11]   Lianghong Guo et al. “When to stop? towards efficient            [25]   Yingwei Ma et al. “How to Understand Whole Soft-
+                         code generation in llms with excess token prevention”.                  ware Repository?” In: arXiv preprint arXiv:2406.01422
+                         In: Proceedings of the 33rd ACM SIGSOFT Interna-                        (2024).
+                         tional Symposium on Software Testing and Analysis.               [26]   Ioanna Mandilara et al. “Decoding the Mystery: How
+                         2024, pp. 1073–1085.                                                    Can LLMs Turn Text Into Cypher in Complex Knowl-
+                  [12]   Markus Hornsteiner et al. “Real-time text-to-cypher                     edge Graphs?” In: IEEE Access (2025).
+                         query generation with large language models for graph            [27]   Patrick E McKnight and Julius Najab. “Mann-Whitney
+                         databases”. In: Future Internet 16.12 (2024), p. 438.                   U Test”. In: The Corsini encyclopedia of psychology
+                  [13]   Xinyi Hou et al. “Large language models for software                    (2010), pp. 1–1.
+                         engineering: A systematic literature review”. In: ACM            [28]   Neo4j, Inc. Neo4j. Accessed: 2024-11-03. 2023. URL:
+                         Transactions on Software Engineering and Methodology                    https://neo4j.com/.
+                         (2023).                                                          [29]   opencypher. openCypher Grammar. https : / / github .
+                  [14]   Yuntong Hu et al. “GRAG: Graph Retrieval-Augmented                      com / opencypher / openCypher / tree / master / grammar.
+                         Generation”. In: arXiv preprint arXiv:2405.16506                        Accessed: 2024-11-10. 2023.
+                         (2024).                                                          [30]   OpenCypher Community. OpenCypher Resources. Ac-
+                  [15]   Rasha Ahmad Husein, Hala Aburajouh, and Cagatay                         cessed: 2024-11-21. 2024. URL: https://opencypher.org/
+                         Catal. “Large language models for code completion: A                    resources/.
+
+
+
+
+                                                                                    654
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+                  [31]   Siru Ouyang et al. “RepoGraph: Enhancing AI Software
+                         Engineering with Repository-level Code Graph”. In:
+                         arXiv preprint arXiv:2410.14684 (2024).
+                  [32]   Debalina Ghosh Paul, Hong Zhu, and Ian Bayley.
+                         “Benchmarks and Metrics for Evaluations of Code
+                         Generation: A Critical Review”. In: arXiv preprint
+                         arXiv:2406.12655 (2024).
+                  [33]   Mohammadreza Pourreza and Davood Rafiei. “Din-
+                         sql: Decomposed in-context learning of text-to-sql with
+                         self-correction”. In: Advances in Neural Information
+                         Processing Systems 36 (2024).
+                  [34]   Mohammadreza Pourreza and Davood Rafiei. “Dts-
+                         sql: Decomposed text-to-sql with small large language
+                         models”. In: arXiv preprint arXiv:2402.01117 (2024).
+                  [35]   Laurens Prast et al. Orchestrating Graph and Semantic
+                         Searches for Code Analysis. https : / / publications . tno .
+                         nl / publication / 34644253 / xS9zUaY0 / TNO - 2025 -
+                         R10992 . pdf. Accessed: 2025-07-24. Eindhoven, The
+                         Netherlands, 2025.
+                  [36]   Liang Shi, Zhengju Tang, and Zhi Yang. “A Survey
+                         on Employing Large Language Models for Text-to-SQL
+                         Tasks”. In: arXiv preprint arXiv:2407.15186 (2024).
+                  [37]   Tabnine. Tabnine. Accessed: 2024-11-03. 2023. URL:
+                         https://www.tabnine.com/.
+                  [38]   Aman Tiwari et al. “Auto-Cypher: Improving
+                         LLMs on Cypher generation via LLM-supervised
+                         generation-verification framework”. In: arXiv preprint
+                         arXiv:2412.12612 (2024).
+                  [39]   Eric W Weisstein. “Bonferroni correction”. In:
+                         https://mathworld. wolfram. com/ (2004).
+                  [40]   Zhen Yang et al. “Exploring and unleashing the power
+                         of large language models in automated code transla-
+                         tion”. In: Proceedings of the ACM on Software Engi-
+                         neering 1.FSE (2024), pp. 1585–1608.
+                  [41]   Ziije Zhong et al. “SyntheT2C: Generating Syn-
+                         thetic Data for Fine-Tuning Large Language Mod-
+                         els on the Text2Cypher Task”. In: arXiv preprint
+                         arXiv:2406.10710 (2024).
+                  [42]   Xiaohu Zhu et al. “Large Language Model Enhanced
+                         Text-to-SQL Generation: A Survey”. In: arXiv preprint
+                         arXiv:2410.06011 (2024).
+
+
+
+
+                                                                                        655
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 10:02:01 UTC from IEEE Xplore. Restriction
+

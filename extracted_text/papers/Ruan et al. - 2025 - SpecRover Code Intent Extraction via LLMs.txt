@@ -1,0 +1,945 @@
+                                                                                                                                                                                           2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE)
+
+
+
+                                                                                                                                                                     SpecRover: Code Intent Extraction via LLMs
+                                                                                                                                                                                Haifeng Ruan*                          Yuntong Zhang*                         Abhik Roychoudhury
+                                                                                                                                                                    National University of Singapore            National University of Singapore        National University of Singapore
+                                                                                                                                                                               Singapore                                  Singapore                                Singapore
+                                                                                                                                                                         hruan@comp.nus.edu.sg                     yuntong@comp.nus.edu.sg                   abhik@comp.nus.edu.sg
+
+
+
+
+                                                                                                                                                                Abstract—Autonomous program improvement typically in-             ﬁxes or feature additions). By combining these technologies
+                                                                                                                                                             volves automatically producing bug ﬁxes and feature additions.       with code generation via GitHub Copilot, one can envision
+                                                                                                                                                             Such program improvement can be accomplished by a combi-
+   2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) | 979-8-3315-0569-1/25/$31.00 ©2025 IEEE | DOI: 10.1109/ICSE55347.2025.00080
+
+
+
+
+                                                                                                                                                                                                                                  trustworthy code construction from LLMs.
+                                                                                                                                                             nation of large language model (LLM) and program analysis
+                                                                                                                                                             capabilities, in the form of an LLM agent. Since program repair         Program improvement or program repair, typically requires
+                                                                                                                                                             or program improvement typically requires a speciﬁcation of          capturing developer intent to guide the process. However, there
+                                                                                                                                                             intended behavior - speciﬁcation inference can be useful for         is no formal speciﬁcation of developer intent. The natural-
+                                                                                                                                                             producing high quality program patches. In this work, we ex-         language description of the developer intent is usually only
+                                                                                                                                                             amine efﬁcient and low-cost workﬂows for iterative speciﬁcation      available at a “higher level” - it captures the intended behavior
+                                                                                                                                                             inference within an LLM agent. Given a GitHub issue to be
+                                                                                                                                                             resolved in a software project, our goal is to conduct iterative     of the entire software system. However to improve or repair
+                                                                                                                                                             code search accompanied by speciﬁcation inference - thereby          speciﬁc components of a software system (where the error
+                                                                                                                                                             inferring intent from both the project structure and behavior.       might have been localized) - one needs to infer speciﬁcations
+                                                                                                                                                             The intent thus captured is examined by a reviewer agent with        of the different components. A successful approach to program
+                                                                                                                                                             the goal of vetting the patches as well as providing a measure of    repair may thus involve speciﬁcation inference - where by
+                                                                                                                                                             conﬁdence in the vetted patches. Our approach SpecRover is built
+                                                                                                                                                             on the open-source LLM agent AutoCodeRover. In an evaluation         carefully analyzing the artifacts of the buggy program (such
+                                                                                                                                                             on the full SWE-Bench consisting of 2294 GitHub issues, it shows     as program executions), we can infer snippets of the intended
+                                                                                                                                                             more than 50% improvement in efﬁcacy over AutoCodeRover.             program behavior. The works on semantic program repair [6],
+                                                                                                                                                             Compared to the open-source agents available, our work shows         [7] extract speciﬁcations via symbolic analysis of the given
+                                                                                                                                                             modest cost ($0.65 per issue) in resolving an average GitHub issue   tests. Indeed, the existing literature on program repair [8] uses
+                                                                                                                                                             in SWE-Bench lite. The production of explanation by SpecRover
+                                                                                                                                                             allows for a better “signal” to be given to the developer, on        a given test-suite as developer intent, and hence is focused
+                                                                                                                                                             when the suggested patches can be accepted with conﬁdence.           on avoiding test-data over-ﬁtting. The works on semantic
+                                                                                                                                                             SpecRover also seeks to demonstrate the continued importance         repair alleviate the over-ﬁtting concern by inferring symbolic
+                                                                                                                                                             of speciﬁcation inference in automated program repair, even as       speciﬁcations from tests. Nevertheless, for the general problem
+                                                                                                                                                             program repair technologies enter the LLM era.                       of program improvement, the buggy program may or may
+                                                                                                                                                                                        I. I NTRODUCTION                          not be accompanied by tests. Moreover, symbolic analysis
+                                                                                                                                                                Automatic programming has long been an aspiration of soft-        based program repair has a high entry barrier for developers.
+                                                                                                                                                             ware engineering research. It has inspired research in topics        For these reasons, recently autonomous program improvement
+                                                                                                                                                             like program synthesis and repair. In recent times, automatic        using Large Language Models (LLMs) [5], [9], [10] has been
+                                                                                                                                                             programming from natural language speciﬁcations has become           studied.
+                                                                                                                                                             somewhat more realistic due to the emergence of tools like              In this work, we explore the role of program speciﬁcations
+                                                                                                                                                             GitHub Copilot. At the same time, the automatically generated        thoroughly in LLM-guided autonomous software engineering
+                                                                                                                                                             code from Large Language Models (LLMs) suffers from errors           workﬂows. To understand the intent of the developer and per-
+                                                                                                                                                             and vulnerabilities [1], [2] and needs to be improved. For this      form program improvement based on inferred speciﬁcations,
+                                                                                                                                                             reason, there has been a recent research focus on autonomous         we build our work on the publicly available AutoCodeRover
+                                                                                                                                                             program improvement. The problem setting for autonomous              [5] tool. The reason for this choice is strategic. In essence,
+                                                                                                                                                             program improvement involves solving of GitHub issues                AutoCodeRover takes the position that the structure of the
+                                                                                                                                                             which would typically involve bug ﬁxes or feature additions.         program also captures a coarse encoding of the developer
+                                                                                                                                                             Though these tools are employed on manually written software         intent, and it tries to glean intent by analyzing (and searching
+                                                                                                                                                             projects such as the recently proposed SWE-bench [3], they           over) the program structure; it performs code search on the
+                                                                                                                                                             hold the promise of high quality trustworthy code construction       project structure for ﬁx localization. Thus, to build a workﬂow
+                                                                                                                                                             from LLMs. Starting with the AI software engineer Devin [4]          where we conduct high quality program improvement via
+                                                                                                                                                             from a stealth startup, recently several autonomous program          iterative speciﬁcation inference, we choose to build our work
+                                                                                                                                                             improvement tools such as AutoCodeRover [5] have been                on AutoCodeRover. Our work looks into various sources
+                                                                                                                                                             proposed for automatically solving GitHub issues (such as bug        of speciﬁcations such as function-level code summaries and
+                                                                                                                                                                                                                                  testcases, apart from program structure. The core contribution
+                                                                                                                                                               * Joint ﬁrst authors, ordered alphabetically.                      thus lies in distilling the various speciﬁcations coming from
+
+
+                                                                                                                                                             1558-1225/25/$31.00 ©2025 IEEE                                   963
+                                                                                                                                                             DOI 10.1109/ICSE55347.2025.00080
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+             different sources into a single patch.                                            regression in input validation of clustering metrics
+                We thus present SpecRover, a progeny of AutoCodeRover,                         from sklearn.metrics.cluster import mutual_info_score
+                                                                                               import numpy as np
+             which conducts and exploits more powerful speciﬁcation
+                                                                                               x = np.random.choice(['a', 'b'], size=20).astype(object)
+             inference. Starting from a GitHub issue, it conducts code                         mutual_info_score(x, x)
+             search guided by the program structure, as in AutoCodeRover.                      ValueError: could not convert string to float: 'b'
+                                                                                               while
+             However, in the process of the code search, as it visits class-
+                                                                                               x = np.random.choice(['a', 'b'], size=20)
+             es/methods, it also calculates and deposits the speciﬁcations of                  mutual_info_score(x, x)
+             the classes/methods which would have allowed for remediation                      works with a warning?
+                                                                                               this worked in 0.21.1 without a warning (as I think it should)
+             of the observable error, thereby capturing intended program
+                                                                                                                     (a) Issue statement.
+             behavior. The speciﬁcations gathered from the code search
+             are deposited along with generated tests to a reviewer agent.                     def check_array(array, ...):
+                                                                                                   dtype_orig = getattr(array, "dtype", None)
+             The reviewer agent studies the speciﬁcations, generated tests,                        ...
+                                                                                                   if dtype_orig is not None and dtype_orig.kind == "O":
+             and natural language requirements to guide the patching.                                  # if input is object, convert to float.
+                                                                                                       dtype = np.float64
+             More importantly, the reviewer agent produces evidence of                             ...
+                                                                                                   if dtype_numeric and array.dtype.kind == "O":
+             conﬁdence in the reported patch.                                                          array = array.astype(np.float64)
+                                                                                                   ...
+                  Contributions: The core contributions of our work on
+             SpecRover can be summarized as follows.                                                                 (b) Buggy function.
+                                                                                               Intended behavior: The check_array method should validate the
+                • Speciﬁcation Inference: We examine the role of speci-                        input array without attempting to convert arrays with dtype
+                  ﬁcation inference in LLM guided autonomous software                          object containing non-numeric strings to float. ... If the array
+                                                                                               contains non-numeric strings, it should skip the conversion to
+                  engineering. Our work suggests iterative speciﬁcation                        float and proceed with the validation. ...
+                  inference to guide patching in LLM oriented program                          (c) Inferred intended behavior of the buggy function.
+                  repair workﬂows. Once the understanding of developer                         The patch attempts to handle non-numeric strings by
+                  intent is accomplished via iterative speciﬁcation infer-                     catching a ValueError during the conversion to float.
+                                                                                               However, it does not correctly handle the case where
+                  ence, patch construction is a natural by-product of the                      the input contains non-numeric strings. The patch still
+                  inferred speciﬁcation.                                                       tries to convert the array to float later in the code,
+                                                                                               which results in the same ValueError. The patch does not
+                • Suggesting patches with conﬁdence: We design a re-                           resolve the issue.
+                  viewer agent for code review which reconciles speci-                                  (d) Reviewer feedback on initial patch.
+                  ﬁcations, tests and natural language requirements. The                       --- a/sklearn/utils/validation.py
+                  reviewer agent can be seen as conducting a comprehen-                        +++ b/sklearn/utils/validation.py
+                                                                                               @@ -459,8 +459,13 @@ def check_array(array, ...
+                                                                                                    ...
+                  sive patch validation. The reviewer agent can produce                             if dtype_orig is not None and dtype_orig.kind == "O":
+                                                                                               -        # if input is object, convert to float.
+                  evidence of correctness of automatically generated ﬁxes                      -
+                                                                                               +
+                                                                                                        dtype = np.float64
+                                                                                                        # if input is object, check if it contains non-numeric strings
+                  - such as explanation of patch, reproducer test, and the                     +
+                                                                                               +
+                                                                                                        try:
+                                                                                                            array.astype(np.float64)
+                                                                                               +            dtype = np.float64
+                  accumulated speciﬁcations from different code elements.                      +
+                                                                                               +
+                                                                                                        except ValueError:
+                                                                                                            # contains non-numeric strings, skip conversion
+                  These evidence can be maintained along with the auto-                        +
+                                                                                                    ...
+                                                                                                            dtype = None
+
+                  matically generated patches, to track future regressions.                    @@ -551,7 +556,11 @@ def check_array(array, ...
+                                                                                                    ...
+                • Experimental evidence: Our tool shows high efﬁcacy,                          -
+                                                                                               +
+                                                                                                            array = array.astype(np.float64)
+                                                                                                            try:
+                  solving 19.3% issues in full SWE-bench and 31% on                            +
+                                                                                               +
+                                                                                                                array = array.astype(np.float64)
+                                                                                                            except ValueError:
+                                                                                               +                # contains non-numeric strings, skip conversion
+                  SWE-bench lite. We also balance other needs from LLM                         +
+                                                                                                    ...
+                                                                                                                pass
+
+                  agents such as low cost ($0.65 per issue) and supporting
+                                                                                                       (e) Final patch generated by SpecRover.
+                  higher precision/recall. Our tool is available open-source
+                  in Zenodo and will be publicly released upon acceptance.             Fig. 1: scikit-learn-15535 description and SpecRover artifacts.
+
+                                   II. M OTIVATING E XAMPLE
+                We now present the SpecRover approach via an example.                     To resolve the issue, SpecRover ﬁrst identiﬁes buggy pro-
+             The GitHub issue involved in this example is scikit-learn-                gram locations by exploring the program and retrieving rel-
+             155351 , shown in Figure 1a. In the issue, two relevant code              evant code. In this example, the identiﬁed buggy method is
+             snippets are provided. According to the issue report, both                check_array, shown in Figure 1b. The method performs
+             snippets had worked without problem on an older version                   two conversions of string to ﬂoat. The two conversions are
+             of scikit-learn, and it is expected that they continue to work            the root cause of the failure reported in the issue, resulting
+             on the current version. However, on the current version, the              in an exception when the involved string is non-numeric.
+             ﬁrst snippet now crashes. The associated error information                SpecRover inferred a summary of intended behavior of the
+             indicates that the crash occurred when scikit-learn mistakenly            method check_array (shown in Figure 1c), which serves
+             tries to convert a non-numeric array element into a ﬂoat.                 as a speciﬁcation of how the method should be modiﬁed.
+                                                                                          Next, the identiﬁed buggy method and its intended behavior
+                1 https://github.com/scikit-learn/scikit-learn/issues/15534            are passed to our patching agent, which will write patches for
+
+
+                                                                                    964
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+             the method. At the ﬁrst attempt, the patching agent wrote a                 1) The input issue statement is passed to a reproducer
+             partial patch, which only contains the ﬁrst of the two hunks in                agent, which writes a reproducer test that reproduces the
+             Figure 1e, i.e., the patch only catches exceptions for the ﬁrst                program fault reported in the issue.
+             conversion. Without further rectiﬁcation of the patch, the issue            2) The reproducer test, its execution results, along with the
+             could not be resolved. To vet the patch for potential mistakes,                issue statement and the codebase, are passed to a context
+             the initial patch is then passed to the reviewer agent. Apart                  retrieval agent. The context retrieval agent explores the
+             from the patch, the reviewer agent also takes a reproducer                     program codebase and identiﬁes the relevant code to the
+             test that reproduces the issue. The reviewer agent then runs                   issue. It eventually decides on a set of buggy locations
+             the reproducer test on both the original program and the                       that need patching.
+             program repaired by the initial patch. By referring to the error            3) The context retrieval agent also produces a function
+             information, the patch, and the issue statement, the reviewer                  summary for every function encountered while exploring
+             agent is able to give the feedback as shown in Figure 1d.                      the program code. A function summary describes the
+             The feedback correctly indicates that the initial patch does not               intended behavior of a function in natural language, with
+             resolve the issue and can be rectiﬁed by catching exceptions                   respect to the current issue being solved.
+             for the other string conversion. Finally, the feedback is passed            4) The buggy locations, together with their corresponding
+             to the patching agent, which writes the correct patch shown                    function summaries, are passed to a patching agent, which
+             in Figure 1e.                                                                  tries to write a patch to resolve the issue.
+                In this example, we illustrated how our reviewer agent                   5) The patch and the reproducer test are passed to a reviewer
+             provides feedback on an incorrect patch for our patch-writing                  agent for scrutiny. The reviewer agent will produce a
+             agent. The feedback leads to a later rectiﬁcation of the patch,                reviewer feedback if the patch is deemed incorrect; the
+             and explains clearly why the initial patch is incorrect.                       patching agent will take in the reviewer feedback and try
+                                                                                            writing another patch. The reviewer feedback is a natural-
+                                    III. M ETHODOLOGY                                       language explanation of why the patch is incorrect and
+                                                                                            how it can be rectiﬁed. Likewise, a reviewer feedback for
+             A. Overview
+                                                                                            the reproducer test will be produced at the same time if
+                   Problem setup: Given a software codebase C and a                         the test is deemed incorrect.
+             natural language problem description D, the goal is to auto-                6) If a patch is deemed correct by the reviewer agent, and
+             matically derive a patch p (i.e. a set of code modiﬁcations) to                there is an existing regression test suite available for the
+             C, such that the patched codebase C  satisﬁes the requirements                program, the patch will be checked via the regression test
+             in D. One example setup for D is GitHub issues, in which                       suite. If there is no regression, the patch will be accepted
+             the issue description contains requirements for ﬁxing a bug or                 as the ﬁnal patch. Otherwise, if some of the regression
+             adding a new feature.                                                          tests fail, we will retry the workﬂow up to a predeﬁned
+                In this paper, we drive autonomous program improvement                      number of times.
+             with the help of program speciﬁcations. We try to acquire an                7) Finally, after multiple retries, there can be multiple patch
+             understanding of the intended program behavior (the speciﬁ-                    candidates. A selection agent is invoked to select one ﬁnal
+             cation), which then allows us to produce high-quality patches                  patch among the patch candidates, and give the reason
+             that successfully resolve GitHub issues. Beyond producing                      why this patch is selected. The ﬁnal patch, the reason for
+             high-quality patches, an additional beneﬁt of understanding                    selection, and optionally the rest of the candidate patches
+             the speciﬁcation is that it also serves as evidence as to why the              will be sent to the user.
+             patch is correct. The evidence holds promise in terms of easing              Among the speciﬁcations, the 3) function summary and 5)
+             software maintenance and engendering trust in the code. The               reviewer feedback are unique to SpecRover and unexplored
+             key novelty of our approach lies in how we infer and utilize              by other LLM agents. These speciﬁcations have boosted
+             various forms of speciﬁcations. For an overview of all the                the effectiveness of SpecRover in resolving software issues,
+             speciﬁcations involved, we depict the general workﬂow of our              because they fully exploit different kinds of software artifacts:
+             approach SpecRover in Figure 2. In this ﬁgure, the inferred               the function summary exploits the program code behavior, and
+             speciﬁcations are highlighted in yellow. We also highlight in             the reviewer feedback exploits both the code and the test.
+             blue all the LLM agents present in the workﬂow. As shown in
+             Figure 2, the speciﬁcations are inferred in an iterative fashion:         B. Function Summary: Speciﬁcation from Program
+             the agents take in speciﬁcations, possibly produced by other                 In this section, we ﬁrst describe how the context retrieval
+             agents, and in turn infer new forms of speciﬁcations. This                agent gathers code context for the software issue to be re-
+             iterative process generates a variety of speciﬁcations, until a           solved. We then discuss how SpecRover transforms the user
+             patch is generated and deemed correct by one of our agents                intent in the issue description into program speciﬁcations for
+             that vets generated patches.                                              shorter code elements such as functions.
+                Speciﬁcally, as shown in Figure 2, the following speciﬁca-                Existing LLM programming agents typically employ a
+             tions are inferred in sequence in SpecRover, which is given               context retrieval step to collect necessary code context related
+             as input an issue statement and a software codebase.                      to the given issue from a large codebase. SpecRover follows
+
+
+                                                                                    965
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                                                                                                                                                           Optional Input
+                           Inputs
+                                                                                                                                                           Inferred Spec
+                              Codebase                                                                                                                     Agent
+
+
+                                Issue                Reproducer              Reproducer             Context                   Buggy             Function
+                              Statement                Agent                    Test              Retrival Agent             Locations         Summaries
+
+                             Regression
+                             Test Suite
+                                                                                                                                         Patches            Selection
+                                                     Reviewer                                                      Retries                Patches
+                                                     Feedback                                                                              Patches           Agent
+                                                                     patch not OK
+                                                                                          patch         Yes
+                              Patching                                       Reviewer      OK                      No
+                                                        Patch                                     Regression?                                              Final Patch
+                               Agent                                          Agent
+
+
+
+
+                                                                          Fig. 2: Overall Workﬂow of SpecRover.
+
+
+                                                                                                    The intended behavior (or speciﬁcation) is a concise natural-
+                                           Issue         Reproducer                                 language summary of how a function should behave to meet
+                                         Statement          Test
+                                                                                                    the requirements speciﬁed in the high-level problem descrip-
+                                                                                                    tion. This function-level summary of intended behavior serves
+                     Context Retrieval
+                                                                                                    as a local speciﬁcation to guide the patch construction. The
+                     search_class("Foo");
+                                                                Code          Function              system-level intended behavior speciﬁcation given by the user
+                  search_method("Bar", "baz")
+                                                               Snippets      Summaries
+                          search_....                                                               (i.e. the issue description) is often on how the program should
+                                                                                                    behave rather than how a unit function should behave. So
+                                                 Sufficient?
+                                           No                                                       we usually do not have the intended behavior of a function.
+                                                       Yes                                          Although the issue description may provide some “direction”
+                                                                                                    on the intended behavior of a function - it is usually not
+                                          Buggy           Function
+                                         Locations       Summaries                                  sufﬁcient to guide the patching agent. On the other hand, the
+                                                                                                    extracted function-level speciﬁcation (capturing the intended
+                                                                                                    behavior of the function) serves as a more direct guide to
+                           Fig. 3: Context retrieval in SpecRover.                                  the patching agent. Instead of giving a set of bug locations
+                                                                                                    {L1 , L2 , ..., Ln } to the patching agent to modify, SpecRover
+                                                                                                    gives the pairs of bug locations and their corresponding lo-
+             the general architectural design of programming agents in                              cal speciﬁcation {(L1 , Spec1 ), (L2 , Spec2 ), ..., (Ln , Specn )}.
+             its context retrieval stage, as shown in Figure 3. SpecRover                           The patching agent can then refer to the speciﬁcations of
+             conducts context retrieval by providing a set of APIs to the                           intended behavior and modify code at the function level (so
+             LLM for exploring the codebase. The LLM agent invokes                                  as to achieve this intended behavior). Intuitively, our approach
+             the retrieval APIs to investigate the relevant code snippets in                        decomposes the repository-level issue solving task to several
+             the program. The retrieved code forms the code context for                             function-level code modiﬁcation tasks, in which each function-
+             the current to-be-resolved issue, which can contain deﬁnitions                         level task has a natural language speciﬁcation. LLMs have
+             of the relevant classes and methods. After each round of                               been extensively studied for function-level coding tasks and
+             retrieval API invocations, the LLM agent takes the code                                have shown promising results in function-level benchmarks
+             context collected so far and decides whether the context is                            such as HumanEval [11], [12] and MBPP [13]. Therefore,
+             sufﬁcient for understanding and resolving the problem. If the                          this task decomposition helps the patching agent of SpecRover
+             context is deemed sufﬁcient, the retrieval process will end,                           which then has to solve smaller and more manageable tasks.
+             and the agent will decide on a set of buggy locations, which
+             are sent to the patching agent for repairing. Otherwise, the                           C. Reviewer Feedback: Reconciling Speciﬁcations
+             retrieval process continues until a predeﬁned threshold count                             Another kind of speciﬁcation inferred by SpecRover is the
+             is reached.                                                                            reviewer feedback. To be more precise, the reviewer feedback
+                One key novelty in SpecRover is the explicit extraction                             can be called a meta-speciﬁcation: it is a reﬂection on the
+             of function summaries while collecting code snippets during                            speciﬁcations inferred in previous steps. Concretely, given a
+             context retrieval. In SpecRover, whenever a new code snippet                           patch and a reproducer test, the reviewer agent in SpecRover
+             is retrieved with an API and sent to the context retrieval                             will provide feedback, which includes 1) a binary decision
+             agent, we explicitly prompt the agent to analyze the “intended                         of whether the patch and the reproducer test are correct
+             behavior” of this code snippet in the current problem context.                         respectively; and 2) an explanation for the decisions.
+
+
+                                                                                              966
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                The reviewer feedback contributes to our speciﬁcation in-                                      the test are correct respectively, and to provide explanations
+             ference practice in two ways. First, it makes the speciﬁcation                                    for both decisions. Figure 4 shows the template of the prompt.
+             inference iterative. The reviewer feedback will be passed back
+                                                                                                               D. Patch Selection
+             to the patching agent and the reproducer agent, leading to im-
+             proved patches and reproducer tests. Second, it reconciles the                                       As shown in Figure 2, a patch approved by the reviewer
+             patch and the test. In this way, errors that are not obvious when                                 agent is checked through a regression test suite, which serves
+             examining the two separately can be revealed and rectiﬁed.                                        as an oracle for whether the patch breaks existing functionality
+             What makes the reviewer feedback important is the absence                                         of the program. However, in the setting of resolving GitHub
+             of a suitable test suite. If a test suite was available for checking                              issues, the regression test suite can be an inaccurate oracle,
+             whether the issue has been resolved, patch correctness could                                      meaning that they can reject correct patches which resolve
+             be easily decided. In reality, however, issues occur when the                                     the issue. This is because the correct patch may inevitably
+             program already passes the accompanying regression tests,                                         modify existing functionalities of the program while resolving
+             which means that a high quality test-suite to check a generated                                   the issue, thus causing some of the existing regression tests to
+             patch (for the given issue) is usually not available.                                             fail. For example, if the patch needs to modify the signature of
+                To mitigate the lack of an issue-revealing test case,                                          an existing function f in order to resolve an issue, regression
+             SpecRover writes a reproducer test via the reproducer agent.                                      tests that invoke f will now fail. Since the correct patch can be
+             However, this test alone is not sufﬁcient for deciding patch cor-                                 rejected by the regression tests, we employ a patch selection
+             rectness. This is because the reproducer test can be incorrect,                                   process at the end of the workﬂow to select the most promising
+             due to the non-determinism of the LLM, i.e., the test may fail                                    patches among the rejected candidate patches.
+             a patch that actually conforms to the user intent. Besides, the                                      During the ﬁnal patch selection phase, SpecRover goes
+             reproducer test can also be incomplete description of intent,                                     beyond the test cases and employs a selection agent to choose
+             i.e., a patch may pass the test without completely resolving                                      a patch based on the natural language issue description. All
+             the issue. The limitation of the reproducer test derives from                                     candidate patches that failed some tests are presented to
+             the fact that tests are a precise yet incomplete speciﬁcation.                                    the selection agent, together with the issue description. The
+             To overcome the limitation, we make the observation that the                                      selection agent is instructed to analyze the root cause of the
+             natural-language issue statement is ambiguous in nature yet                                       issue, think about how the issue can be possibly resolved,
+             often contains richer information. Therefore, supplementing                                       and select a patch that best addresses the issue. This natural
+             the test with an understanding of the issue statement is likely                                   language-guided patch selection can recover correct patches
+             to help decide patch correctness. This is accomplished in                                         that are mistakenly ﬁltered out by an inaccurate test suite. It
+             the reviewer agent of SpecRover, which considers the issue                                        exploits the natural language issue report as that captures the
+             statement as well as test to vet patch candidates.                                                most up-to-date intents from users/developers. While making a
+                Beyond deciding on patch correctness, the more important                                       choice among the candidate patches, the selection agent also
+             aspect of the reviewer feedback is an explanation of the                                          explicitly states a reason why it chooses a particular patch
+             decision made, which will help the patch agent rectify an                                         among the candidate patches. This “reason for selection” can
+             incorrect patch. Further, for a correct patch, the explanation                                    be given as evidence together with the ﬁnal patch.
+             will help the user understand and accept the patch. The user                                      E. Evidence
+             can merge the reviewer feedback into the software together
+                                                                                                                  SpecRover is designed to not only generate a patch to
+             with the patch for future reference, which will help software
+                                                                                                               resolve the issues in software repositories, but also to provide
+             maintenance in the long run.
+                                                                                                               the inferred speciﬁcations as evidence for why a patch was
+                  An issue has been submitted. Engineer A has written a reproduction test for the issue.
+                                                                                                               selected. Speciﬁcally, along with the ﬁnal patch, the following
+                  Engineer B has written a patch for the issue. Your task is to decide whether the created     artifacts can be the outputs of SpecRover as well:
+                  patch resolves the issue.
+                  NOTE: both the test and the patch may be wrong.
+                  Here is the issue: ...                                                                          • Buggy locations and their intended behaviors.
+                  Here is the test written by Engineer A: ...
+                  Here is the result of executing the test on the original buggy program: ...                     • The reproducer test written by the reproducer agent.
+                  Here is the patch written by Engineer B: ...
+                  Here is the result of executing the test on the patched program: ...                            • The reason why the ﬁnal patch was approved by the
+                  Think about
+                  (1) whether the test correctly reproduces the issue, and                                           reviewer agent (if the patch is approved by the reviewer
+                  (2) whether the patch resolves the issue.
+                                                                                                                     and the regression test suite).
+                      Fig. 4: Template prompt for the reviewer agent.                                             • The reason why the ﬁnal patch is selected by the selection
+                                                                                                                     agent (if there are multiple candidate patches which
+                Our reviewer agent generates the feedback in two steps.                                              cannot be differentiated by the tests).
+             First, the original program and the patched program are run                                          The beneﬁts of generating evidence are threefold. First,
+             on the reproducer test. In both runs, execution information                                       these artifacts can guide the LLM agents in constructing
+             including the output and the exit code are collected. The                                         higher quality patches, as discussed in Section III-B and III-C.
+             reviewer agent then provides the LLM with these execution                                         Second, the natural language artifacts can assist the developers
+             information, along with the issue statement and the reproducer                                    in understanding the auto-generated patches more quickly.
+             test. The LLM is prompted to decide whether the patch and                                         Before examining the actual patch, developers can gain a
+
+
+                                                                                                             967
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+             preliminary understanding of the changes by reviewing the                 •  Agentless [10]. Agentless is a concurrently pursued (cur-
+             reasons for approval or selection and the intended behaviors                 rently unpublished) arXiv report which employs a ﬁxed two-
+             for the buggy locations. Last but not least, the evidence can be             phase approach of localization and repair, without allowing
+             integrated into the software repository and can evolve with it.              the LLM to decide on actions or utilize tools.
+             The developers can integrate the reproducer test for this issue              We report pass@1 efﬁcacy on SWE-bench for all tools. For
+             as part of the test-suite of the program. Reasons for patch               each issue, SWE-bench has a set of acceptance tests written
+             approval/selection can become parts of the commit message                 by the developers to evaluate the patch correctness. These
+             when the auto-generated patch is committed to the repository.             acceptance tests are not used by the tools when generating
+             Overall, we propose SpecRover as a programming agent that                 patches. We follow the ofﬁcial SWE-bench evaluation criteria
+             not only automatically generates code improvements but also               - if the single patch generated by a tool passes the SWE-
+             produces evidence that enriches the software system lifecycle.            bench acceptance tests for the issue, the issue is considered as
+                                                                                       resolved.
+                                IV. E XPERIMENTAL S ETUP                                     c) Implementation and Parameters: We implemented
+                                                                                       SpecRover on top of the AutoCodeRover codebase and reuse
+                 We address the following research questions:                          its context retrieval APIs. We implemented new features
+             RQ1: What is the efﬁcacy of SpecRover in resolving issues?                unique to SpecRover such as function summary extraction as
+             RQ2: What level of conﬁdence can developers get from the                  part of the context retrieval process. Other unique features
+             patch and speciﬁcations produced by SpecRover?                            such as patch reviewing and selection are implemented as new
+             RQ3: What is the quality of the speciﬁcation produced by                  LLM agents. SpecRover supports multiple LLMs as backend.
+             SpecRover as evidence?                                                    In our experiments, we used the Claude 3.5 Sonnet as the main
+                                                                                       foundation model, and only switch to OpenAI GPT-4o for a
+                  a) Benchmark: We evaluate the efﬁcacy of SpecRover
+                                                                                       task if that task encounters an API error when invoking the
+             on SWE-bench [3], a widely-used benchmark for autonomous
+                                                                                       Claude remote APIs. We set maximum retries on regression
+             program improvement consisting of 2294 real-world GitHub
+                                                                                       test suite failures to be 3.
+             issues. For each issue, the only input for SpecRover is the issue
+                                                                                             d) Randomness of LLMs: LLMs are inherently random
+             statement and the buggy codebase. Note that the regression test
+                                                                                       in its output generation, which may threaten the validity of
+             suite used by SpecRover is part of the buggy program; we do
+                                                                                       LLM-based coding agents including SpecRover. We address
+             not access any code or test that is added by the developer in
+                                                                                       this by setting the model temperature to 0, so that the model
+             the ﬁxed version of program.
+                                                                                       output is more deterministic.
+                  b) Baselines and Evaluation Metrics: For RQ1, we com-                      e) Manual Inspection of Results: For a better understand-
+             pare with the state-of-the-art systems that target the repository-        ing of the experimental results, we perform manual inspection
+             level issue solving task. In our comparison, we include all the           to obtain certain data, e.g., patch overﬁtting rate. All manual
+             open-source software engineering agents which have reported               inspections were independently conducted by two authors
+             results on SWE-bench. The baseline tools include:                         and subsequently cross-checked. Discrepancies were resolved
+             • AutoCodeRover [5]. AutoCodeRover employs a set of pro-                  through consultation with a third colleague from our group.
+               gram structure-aware APIs to gather relevant code con-
+                                                                                                                 V. EVALUATION
+               text. It optionally integrates debugging techniques such as
+               Spectrum-based Fault Localization to sharpen the context.               A. RQ1: Overall Efﬁcacy of Task Resolving
+             • SWE-agent [9]. SWE-agent designs an agent-computer in-                     We ﬁrst evaluate the overall efﬁcacy of SpecRover in
+               terface, which deﬁnes the possible actions taken by an agent            resolving repository-level tasks. We report the efﬁcacy of
+               to edit code, navigate the codebase, and execute tests.                 SpecRover on both SWE-bench (consisting of 2294 real-world
+             • AppMap Navie [14]. Navie uses a retrieval-augmented gen-                GitHub issues), and SWE-bench Lite (which is a subset of
+               eration (RAG) based approach to construct the code context,             SWE-bench consisting of 300 issues). For the baseline tools,
+               and performs an explicit planning step before generating                we compare with their corresponding reported efﬁcacy. If a
+               code changes [15].                                                      tool supports different conﬁgurations (e.g. different LLMs as
+             • OpenDevin [16]. OpenDevin’s CodeActAgent tackles the                    the backend), we compare with the conﬁguration with the
+               tasks by having a general action space, where the agent                 highest efﬁcacy.
+               is allowed to execute arbitrary Python and bash commands                     Result: Table I shows the efﬁcacy of issue resolving in
+               inside a sandbox environment.                                           both SWE-bench and SWE-bench Lite. Overall, SpecRover
+             • Aider [17]. Aider constructs a repository map which helps               achieves the highest efﬁcacy among all the open-source tools
+               the LLM to understand the repository context. It also uses              in both SWE-bench and SWE-bench Lite. In SWE-bench
+               the regression test suite as a harness to retry the task.               Lite, compared to the previously top-performing group of
+             • Moatless Tools [18]. Moatless Tools builds an agentic loop              tools which resolved approximately 26% to 27% of the is-
+               that functions as a ﬁnite state machine and transitions                 sues, SpecRover improved the efﬁcacy to 31%. This efﬁcacy
+               between states. It focuses on building a set of good tools              improvement is also evident in the full SWE-bench, where
+               for the agent instead of relying on the agent for reasoning.            SpecRover improved the efﬁcacy from 14.60% to 19.31%.
+
+
+                                                                                    968
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                                    TABLE I: Comparison of efﬁcacy/efﬁciency/cost on SWE-bench and SWE-bench Lite.
+                                     Tool                               LLM           Resolved%    Avg. Time (s)        Avg. Cost ($)
+
+                                                                         Efﬁcacy on SWE-bench (size=2294)
+                                     AutoCodeRover                  GPT-4        12.42% (285)      248                  0.45
+                                     SWE-Agent                      GPT-4        12.47% (286)      -                    1.59
+                                     AppMap Navie                  GPT4o         14.60% (335)      -                    -
+                                     SpecRover          Sonnet-3.5+GPT-4o        19.31% (443)      362                  0.72
+
+                                                                       Efﬁcacy on SWE-bench Lite (size=300)
+                                     SWE-Agent                      GPT-4            18.00% (54)   -                    1.67
+                                     AutoCodeRover                  GPT-4            19.00% (57)   195                  0.43
+                                     AppMap Navie                  GPT-4o            21.67% (65)   -                    -
+                                     OpenDevin                  Sonnet-3.5           26.00% (78)   -                    1.10
+                                     Aider                 GPT-4o+Opus-3             26.33% (79)   -                    -
+                                     Moatless Tools             Sonnet-3.5           26.67% (80)   71                   0.17
+                                     Agentless                     GPT-4o            27.33% (82)   -                    0.34
+                                     SpecRover          Sonnet-3.5+GPT-4o            31.00% (93)   309                  0.65
+
+                                     ‘-’ indicates data is not publicly available.
+
+
+
+                                                                                              memorization occurs very infrequently for SpecRover.
+                                                                                                   Time and Cost: We also report the average time taken and
+                                                                                              average costs for each issue in Table I. For each tool, we in-
+                                                                                              clude the time and cost statistics in Table I if these information
+                                                                                              was publicly reported or can be calculated from their publicly
+                                                                                              available execution traces. On average, SpecRover costs $0.65
+                                                                                              USD to generate patches for each issue in SWE-bench Lite,
+                                                                                              achieving the highest efﬁcacy with a relatively low cost. We
+                                                                                              further investigate the 93/300 issues resolved by SpecRover
+                                                                                              in SWE-bench lite. For the resolved issues, SpecRover only
+             Fig. 5: Number of uniquely resolved issues by the top per-                       costs $0.36 USD per issue to generate the correct patch,
+             forming open-source tools on SWE-bench Lite.                                     suggesting that the resolved issues requires less retries and
+                                                                                              less API calls to the LLM in general. Time-wise, SpecRover
+                                                                                              spends an average of 309 seconds (i.e. 5.15 minutes) on each
+             Figure 5 illustrates the number of uniquely resolved issues by                   issue, which includes the time for executing the reproducer
+             SpecRover and other tools in SWE-bench Lite. For clarity, this                   and the regressions tests in the project. According to a recent
+             ﬁgure includes only the top ﬁve performing tools from Table I.                   study, most developers accept automated program repair tools
+             SpecRover uniquely resolved 12 issues, the highest number                        which takes less than 30 minutes [20]. SpecRover requires
+             of uniquely resolved issues among all the tools. Among the                       approximately 5 minutes, which we deem acceptable.
+             12 uniquely resolved issues, SpecRover resolved six of them                           Patch Correctness: A patch that passes a given test
+             by generating only one patch, demonstrating that the inferred                    suite is not necessarily correct, because the test suite is an
+             function summary can effectively guide the LLM to generate                       incomplete speciﬁcation. This problem is known as patch
+             correct patches. For the other six issues, SpecRover deemed                      overﬁtting [21] in program repair. For a more accurate eval-
+             the ﬁrst generated patch as incorrect from the reviewer agent                    uation of the generated patches, we manually compared the
+             and the regression test suite. In this case, the patches are                     SpecRover-generated patch with the developer patch for each
+             iteratively reﬁned based on the reviewer feedback and the test                   resolved issue. Our manual investigation conﬁrmed that 54.8%
+             results, and eventually the correct patch is selected at the end                 (51/93) of the patches that pass the test suites are semantically
+             of the workﬂow.                                                                  equivalent to the ground-truth patches. We also observed that
+                  Data Memorization: An issue that can bias the evaluation                    34 out of the 42 (=93-51) overﬁtting patches (i.e., the patches
+             of LLM agent-generated patches is data memorization [19].                        that pass the test suite but are not semantically equivalent to
+             Data memorization occurs when an LLM deals with a program                        ground truth) modify the same methods as the ground-truth
+             that exists in its training set. To evaluate the risk of data leak-              patch, and only the speciﬁc modiﬁcation is semantically dif-
+             age, we speciﬁcally count the patches generated by SpecRover                     ferent from the ground truth. This implies that even overﬁtting
+             that are syntactically identical to the ground-truth patches.                    patches produced by SpecRover are useful in indicating a ﬁx
+             Our counting shows that in SWE-Bench Lite, SpecRover                             location. Adding up the semantically equivalent patches and
+             generated the ground-truth patch only for 9 issues, accounting                   the overﬁtting patches that have the correct ﬁx location, a total
+             for 10% of the 93 resolved issues. The result shows that data                    of over 90% of the test-passing patches prove useful for issue
+
+
+                                                                                           969
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+             resolution.                                                                     TABLE II: Reviewer decisions on SWE-Bench lite.
+                   Reasons for Failure: We examined the 207 tasks that are                               Category                     # Tasks
+             not resolved by SpecRover in SWE-Bench Lite.These failure
+                                                                                                         TP                           26
+             cases break down into three cases:                                                          TN                           51
+               1) Ambiguous issue description (as labeled by SWE-bench                                   FP                           26
+                                                                                                         FN                           16
+                   Veriﬁed [22]): 107 (51.7%)
+               2) Incorrect ﬁx location: 61 (29.5%)                                                      Total                        119
+               3) Incorrect code modiﬁcation: 39 (18.8%)                                                 Accuracy = (TP+TN) / Total   64.7%
+                                                                                                         Precision = TP / (TP+FP)     50.0%
+                Case 1 is “hard or impossible to solve” [22] without further                             Recall = TP / (TP+FN)        61.9%
+             information. Case 2 is more frequent than Case 3, implying
+             that SpecRover can potentially have signiﬁcant improvement
+             by leveraging more ﬁx localization techniques. For Case 3,
+             in most such cases (26/39), we observed that the gist of the
+             patch generated by SpecRover is actually correct, but some
+             code detail is wrong. To reduce this kind of failures, more
+             test generation techniques can be leveraged within our agent.
+
+             B. RQ2: Utility of autonomous SE, conﬁdence in results
+                Although the efﬁcacy in resolving issues is an important
+             aspect of autonomous program improvement, it is not the sole
+             purpose of such a technique. Rather, the efﬁcacy is a means
+                                                                                       Fig. 6: Comparison of patch precision on SWE-bench Lite. If
+             to an end – to reduce human effort in software maintenance.
+                                                                                       SpecRover does not use regression tests for patch validation,
+             To this end, a program improvement technique must not only
+                                                                                       precision reduces only slightly to 48.3%.
+             have high efﬁcacy, but also minimize the effort required of
+             an end user to use the technique. The effort is related to two
+             metrics: 1) signal-to-noise ratio, i.e., the ratio of correct to
+                                                                                       reviewer decisions were consistent with the actual correctness
+             incorrect patches presented to a user; and 2) the difﬁculty of
+                                                                                       of the patch. The recall was also over 60%, meaning that the
+             examining each auto-generated patch that is suggested.
+                                                                                       majority of the generated correct patches were recognized by
+                We have designed SpecRover to reduce both of these efforts.            the reviewer agent.
+             First, to reduce the number of incorrect patches that a user may             A metric of particular interest to program improvement
+             examine, we use the reviewer agent to decide the correctness              techniques is the precision. The precision is deﬁned as
+             of the generated patch and the reproducer test. The user                  TP/(TP+FP), i.e., the proportion of correct patches in all the
+             can choose to examine the generated patch only when both                  patches offered by a technique. It is directly related to user
+             the patch and the reproducer test are deemed correct by the               effort required to examine generated patches. For SpecRover,
+             reviewer agent. The accuracy of the reviewer decisions are                the precision is 50.0%, as calculated in Table II. To put
+             measured in RQ2. Second, to make it easy for a user to                    the precision in perspective, we compare the precision of
+             examine each patch, SpecRover provides a variety of evidence              SpecRover with that of other baseline tools in Figure 6. The
+             to help understand the patch, as discussed in Section III-E. The          precision of the baseline tools is the same as their pass@1
+             quality of the evidence will be discussed in RQ3.                         efﬁcacy reported in Table I, since these tools indiscriminately
+                There can be four different scenarios when the reviewer                present every generated patch to a user. As can be seen in
+             decision is viewed in relation to the actual correctness of the           Figure 6, the precision of SpecRover is higher than 1.8x that
+             patch. For convenience, we say a patch is accepted when the               of Agentless, which has the second highest precision. The high
+             reviewer agent decides that both the generated patch and the              precision of SpecRover indicates a much lower cognitive load
+             reproducer test are correct. With this, we discuss the following          imposed on the user, compared to other techniques. Moving
+             four scenarios:                                                           forward, we suggest paying attention to agent precision.
+                • TP (true positive): Patch is accepted and correct;
+                • TN (true negative): Patch is not accepted and incorrect;             C. RQ3: Quality of Speciﬁcations produced
+                • FP (false positive): Patch is accepted but incorrect;                  In this section, we investigate the quality of evidence
+                • FN (false negative): Patch is not accepted but correct.              generated by SpecRover. The high-quality evidence allows
+                Table II lists the frequency that each scenario occurred               a developer to easily integrate auto-generated patch into an
+             in our experiment. The table counts in 119 tasks in SWE-                  existing codebase.
+             bench Lite for which a reproducer test was generated. In the                1) Function Summaries: We manually investigated the
+             table, we also calculate the accuracy, precision, and recall of           natural-language speciﬁcations generated by SpecRover for
+             the reviewer decisions. Out of the 119 tasks, there are 26                SWE-bench Lite issues. To obtain some approximation of
+             TP’s and 51 TN’s, i.e., as many as 64.7% (accuracy) of the                “ground truth” for the generated speciﬁcations, we extracted
+
+
+                                                                                    970
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                     skipping: --runxfail breaks pytest.mark.skip location reporting                Issue: Wrong Derivative kind
+                                                                                                                               d attribute
+                                                                                                                                 attr              Buggy Locations
+                     pytest versions: 5.4.x, curre
+                                             current master
+                                                  nt maste                                          I'm playing around with the kind attribute.    Class Derivative in
+                     When @pytest.mark.skip / skipif marks are used to skip a test,                 The following is correct:                      file sympy/core/function.py
+                     for example                                                                        A = MatrixSymbol ('A', 2, 2)
+                                                                                                        i = Integral (A, x)                        Intended
+                                                                                                                                                          ed behavior:
+                                                                                                                                                              be
+                     import pytest                                                                      i.kind     # MatrixKind(NumberKind)        Add a kind property to the Derivative
+                     @pytest.mark.skip
+                                                                                                    This one is wrong:                             class that returns the appropriate kind for
+                     def test_skip_location() -> None:                                                                                             derivatives. This may involve checking the
+                         assert 0                                                                       d = Derivative (A, x)                      kind of the expression being differentiated
+                     the expected skip location reported should point to the item itself,
+                                                                                                        d.kind     # UndefinedKind                 and the differentiation variables.
+                     and this is indeed what happens when running with pytest -rs :
+                                                                                                           (a) Issue statement.                     (b) Location and summary.
+                     SKIPPED [1] test_it.py:3: unconditional skip
+
+
+                     However, adding pytest -rs --runxfail breaks this:                                       try:
+                                                                                                                  A = MatrixSymbol('A', 2, 3)
+                     SKIPPED [1] src/_pytest/skipping.py:238: unconditional skip                                  i = Integral(A, x)
+                                                                                                                  assert i.kind == 'MatrixKind(NumberKind)',
+                     The --runxfail is only about xfail and should not affect this at all.                        f"Expected 'MatrixKind(NumberKind)', got {i.kind}"
+                                                                                                                  d = Derivative(A, x)
+                                                                                                                  assert d.kind == 'MatrixKind(NumberKind)',
+                                                                                                                  f"Expected 'MatrixKind(NumberKind)', got {d.kind}"
+                                 g is in src/_pytest/skipping.py
+                     Hint: the bug          /_py    /            ,                                            except AssertionError as e:
+                     the pytest_runtest_makereport hook.                                                          # issue reproduced
+                                                                                                                  print_stacktrace(e)
+                                           (a) Issue statement.                                                   raise
+
+                     def pytest_runtest_makereport(item: Item, ...):
+                                                                                                                              (c) Generated reproducer test.
+                         ...
+                         elif item.config.option.runxfail:
+                             pass # don't interfere                                                           --- a/sympy/core/function.py
+                         elif call.excinfo and isinstance(call.excinfo.value, ...):                           +++ b/sympy/core/function.py
+                             ... # (3 lines)                                                                    ...
+                         elif not rep.skipped and xfailed:
+                             ... # (14 lines)                                                                 +     @property
+                         elif ...:                                                                            +     def kind(self):
+                             # calculate the line number                                                      +         return self.expr.kind
+                                                                                                              +
+                                        (b) Buggy code snippet.                                                     def __new__(cls, expr, *variables, **kwargs):
+                                                                                                                ...
+                     --- a/src/_pytest/skipping.py
+                     +++ b/src/_pytest/skipping.py                                                                   (d) Correct patch generated by SpecRover.
+                     @@ -270,33 +270,34 @@ def pytest_runtest_makereport(item: Item, ...):
+                     def pytest_runtest_makereport(item: Item, ...):
+                         ...                                                                                 Patch is correct.
+                     -    elif item.config.option.runxfail:                                                  Reason: The patch correctlyy adds a kind property to the Derivative
+                     -
+                     +
+                              ... # (22 lines)
+                          elif not item.config.option.runxfail:                                              class that returns the kind of the expression being differentiated.
+                     +        if call.excinfo and isinstance(call.excinfo.value, ...):
+                     +        ... # (20 lines)                                                               Test is wrong.
+                     +    if ...: # was elif                                                                 Reason: The test incorrectlyy compares the kind attribute to a
+                              # calculate the line number
+                     +        # ... # (4 lines)                                                              string MatrixKind(NumberKind) . The kind attribute is an object,
+                                                                                                                                                                         j    not a
+                                                                                                             string, and should be compared directly to the expected kind object.
+                            (c) Correct patch generated by SpecRover.                                                              (e) Reviewer feedback.
+                     The patch correctly addresses the issue by modifying the logic in the           Fig. 8: SymPy-21614 description and SpecRover artifacts.
+                     pytest_runtest_makereport function. It ensures that the skip location
+                     is reported correctly regardless of whether the --runxfail option is
+                     used. The patch moves the handling of skip location correction outside
+                     the conditional block for --runxfail, which fixes the reported issue.
+                                         (d) Reviewer feedback.                                      a) Reviewer Feedback as Summary: In the ﬁrst example,
+                 Fig. 7: pytest-7432 description and SpecRover artifacts.                       we show that the reviewer feedback can serve as a concise
+                                                                                                summary of a generated patch. The summary describes the
+                                                                                                behavior of the patch at a high level. Therefore, a developer
+             the titles of Pull Requests that developers wrote when they                        can understand the generated patch faster by reading the
+             ﬁxed each issue. The PR title usually summarizes the ﬁxes                          summary before examining the details of the patch. Besides,
+             made in the PR in one sentence. In this investigation, we                          after the developer accepts the patch and decides to merge it
+             include only the issues for which SpecRover generated a patch                      into existing code, the summary constitutes a good commit
+             at the same methods as the developer’s patch. Moreover, we                         message, so that the developer does not need to write one.
+             exclude the issues whose developer-written PR title is too brief                   From a developer’s perspective, the whole process is very
+             (e.g. “Fixes issue #...”). For the included issues, we manually                    much like reviewing a pull request, which is already part of a
+             compare the speciﬁcation generated by SpecRover for the                            developer’s day-to-day workﬂow. The speciﬁc issue involved
+             patched methods, with the PR title written by the developer.                       in this example is pytest-74322 . The issue statement is shown
+             For 72/101 (71%) inspected issues, the speciﬁcation generated                      in Figure 7a, which reports that pytest (a python testing
+             by SpecRover covers similar intent to the human-written PR                         framework) would miscalculate a line number in its output
+             title, which shows that the generated speciﬁcation serves as                       when an irrelevant option (runxfail) is enabled. The bug
+             a good summary of the intended behavior. The generated                             is caused by the code shown in Figure 7b. As can be seen,
+             speciﬁcations are generally an extended version of the PR title                    the calculation of the line number is wrongly placed in a
+             and additionally describe how the code should be modiﬁed.                          branch that is mutaully exclusive with the runxfail branch.
+                 2) Reviewer Feedback: We cannot conduct a quantitative                         Therefore, the calculation is wrongly skipped when the option
+             examination on the quality of the reviewer feedbacks on the                        is enabled.
+             generated patches, since there is no “ground truth”. Therefore,
+             we illustrate the quality of the feedbacks with two examples.                           2 https://github.com/pytest-dev/pytest/issues/7392
+
+
+
+
+                                                                                              971
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                To resolve the issue, SpecRover was able to locate the                          // file: net/tipc/crypto.c
+                                                                                                static bool tipc_crypto_key_rcv(struct tipc_crypto *rx, ...) {
+             relevant code and produce the correct patch. An abridged                           ...
+                                                                                                    /* Copy key from msg data */
+             version of the patch is shown in Figure 7c. It correctly                               skey->keylen = keylen;
+                                                                                                    memcpy(skey->alg_name, data, TIPC_AEAD_ALG_NAME);
+             addresses the issue by moving the line number calculation to                           memcpy(skey->key, data + TIPC_AEAD_ALG_NAME + sizeof(__be32),
+                                                                                                               skey->keylen);
+             a branch unaffected by the runxfail option. However, the                           ...
+
+             patch might not be immediately understandable to a developer,                                       (a) Buggy code snippet.
+             because it changes as many as 51 lines in the original program
+                                                                                               BUG: KASAN: slab-out-of-bounds in tipc_crypto_msg_rcv+0x398/0x6e0
+             (though most of the changes just involve the indentation level).                  Write of size 1220 at addr ff11000004579024
+                                                                                               Call Trace:
+             Fortunately, the understanding of the patch can be eased by                       [
+                                                                                                   ...
+                                                                                                    8.941611] kasan_report+0xad/0x130
+                                                                                               [    8.941796] ? tipc_crypto_msg_rcv+0x398/0x6e0
+             the reviewer feedback. The reviewer agent was able to identify                    [    8.942020] kasan_check_range+0x35/0x1c0
+                                                                                               [    8.942223] memcpy+0x39/0x60
+             the patch as correct and produced the feedback in Figure 7d. It                   [    8.942379] tipc_crypto_msg_rcv+0x398/0x6e0
+                                                                                                   ...
+             properly summarized that the patch just moved the calculation
+             to another branch. Using this summary, the developer would                     (b) Vulnerability report generated after executing the PoC.
+             easily understand the patch and accept it.                                         File: net/tipc/crypto.c , Method: tipc_crypto_key_rcv
+                  b) Tolerance of Incorrect Tests: Another advantage of                         Intended behavior: The tipc_crypto_key_rcv function should:
+             the reviewer is enhanced tolerance of incorrect automatically                      1. Validate the Message Data Size and Key Length:
+                                                                                                Before performing any memory operations, the function should
+             generated tests. We illustrate this advantage with the example                     ensure that the message data size and key length are within
+                                                                                                valid bounds to prevent out-of-bounds memory access.
+             of SymPy-216143 , where SpecRover rejects an incorrectly                               afe Memory
+                                                                                                2. Safe Mem      Operations:
+                                                                                                The memcpy operations should be performed only if the source
+             written test while approving a correct patch. The issue state-                     and destination buffers are within valid memory bounds.
+             ment and the buggy location identiﬁed by SpecRover are                             ...
+
+             shown in Figure 8a and 8b. The issue mentioned an unexpected                    (c) Buggy location and function summary by SpecRover.
+             behavior of the kind attribute. After its context retrieval                       --- a/net/tipc/crypto.c
+                                                                                               +++ b/net/tipc/crypto.c
+             stage, SpecRover correctly identiﬁes that the buggy location                      @@ -2285,12 +2285,24 @@ static bool tipc_crypto_key_rcv ...
+                                                                                                   u32 size = msg_data_sz(hdr);
+             is in the Derivative class, and that its intended behavior                            u8 *data = msg_data(hdr);
+                                                                                                   unsigned int keylen;
+             is to have an additional kind property. Figure 8c and 8d                          +
+                                                                                               +   /* Validate message data size */
+                                                                                               +   if (size < TIPC_AEAD_ALG_NAME + sizeof(__be32)) {
+             show the automatically generated reproducer test and patch                        +       pr_err("%s: invalid message data size\n", rx->name);
+                                                                                               +       return false;
+             for this issue. In this case, the reproducer test is incorrect -                  +   }
+                                                                                                   ...
+             the assertions compare an object with a string, which always                      +   /* Validate key length */
+                                                                                               +   if (keylen > size - (TIPC_AEAD_ALG_NAME + sizeof(__be32))) {
+             evaluate to False. If this reproducer test is used solely                         +
+                                                                                               +
+                                                                                                       pr_err("%s: invalid key length\n", rx->name);
+                                                                                                       return false;
+             to determine the correctness of the generated patches, any                        +
+                                                                                               +
+                                                                                                   }
+                                                                                                   spin_lock(&rx->lock);
+             patch, even a correct one, will be rejected. However, since                           if (unlikely(rx->skey || (key_gen == rx->key_gen && ...))) {
+                                                                                                       pr_err("%s: key existed <%p>, gen %d vs %d\n", rx->name,
+             the reviewer agent in SpecRover simultaneously examines
+             both the reproducer test and the patch without assuming                                 (d) Correct patch generated by SpecRover.
+             either is correct, it is capable of rejecting the reproducer                   Patch is correct.
+                                                                                            Reason: The patch addresses the root cause of the slab-out-of-bounds
+             test while approving the patch. Figure 8e shows the reviewer                   issue by adding validation checks for the message data size and the key
+             agent’s decision and comments towards the test and patch. The                  length before accessing the data. This ensures that the memory access
+                                                                                            is within the allocated bounds, preventing the out-of-bounds
+             reviewer identiﬁes that the assertions in the reproducer are                   write that was causing the crash. The validation checks are appropriately
+                                                                                            placed and cover the necessary conditions to prevent the vulnerability
+             written incorrectly, thereby rejecting the reproducer. On the                  without introducing new issues or making significant functional changes.
+             other hand, the reviewer correctly approves the patch despite                                        (e) Reviewer feedback.
+             the presence of an unreliable test. The correct patch, along              Fig. 9: Linux Kernel Exemplar Challenge in DARPA AIxCC.
+             with the reasons for rejecting the reproducer, can be sent to the
+             developer. The developer can then integrate the patch into the
+             codebase. Additionally, the developer can revise the “almost              (AIxCC) in 2024 [23]. The AIxCC is a two-year competi-
+             correct” reproducer test based on the feedback provided by                tion organized by DARPA and ARPA-H to encourage the
+             the reviewer agent.                                                       development of novel cyber-reasoning systems to safeguard
+                                                                                       critical software. The AIxCC has publicly released exemplar
+                VI. C ASE S TUDY: S ECURITY V ULNERABILITY R EPAIR                     challenges, where each challenge consists of a software project
+                                                                                       with a vulnerability. The task is to have an autonomous system
+                Although SpecRover is initially designed to resolve GitHub             to ﬁnd and ﬁx the vulnerability. Each exemplar challenge also
+             issues in Python repositories, it can be easily adapted for pro-          contains a Proof-of-Concept (PoC) input ﬁle that triggers the
+             gram improvements in other application domains and in other               vulnerability, so we use this PoC to show how SpecRover
+             programming languages. We demonstrate how SpecRover ﬁxes                  can be used to ﬁx the vulnerability. Figure 9 shows one
+             security vulnerabilities in C programs, through an example                exemplar challenge, which is a buffer overﬂow4 . It occurs in
+             challenge problem from the DARPA AI Cyber Challenge                       the Linux networking module for the Transparent Inter-Process
+                3 https://github.com/sympy/sympy/issues/21604                             4 CVE-2021-43267 re-introduced to Linux kernel 6.1.54
+
+
+
+
+                                                                                    972
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+             Communication (TIPC) protocol, and allows remote attackers                   Since both tests and patches generated in an autonomous
+             to cause denial-of-service or disclosure of sensitive informa-            workﬂow can be unreliable, we additionally consider the
+             tion. Speciﬁcally, when the user-supplied sizes in the message            natural-language issue description when judging their correct-
+             body are invalid for the received messages, a buffer overﬂow              ness. The judgement process is concretized as the reviewer
+             happens with the memcpy call, as shown in Figure 9a. This                 agent. Compared to the previous works that discover additional
+             vulnerability has been triggered by a PoC, which results in a             speciﬁcation based on user intent [30], we do not rely on
+             vulnerability report as shown in Figure 9b.                               interactive user feedback. Instead, we utilize the high-level
+                SpecRover ﬁxes this vulnerability by ﬁrst analyzing the                natural-language description as additional feedback. Further-
+             vulnerability report, similar to how it resolves GitHub issues. It        more, compared to previous works that evaluate the generated
+             conducts context retrieval, and decides on the buggy locations            code with an LLM-based reviewer [31], our reviewer agent
+             and intended behaviors as shown in Figure 9c. Even though the             is designed for the setup where both natural-language instruc-
+             vulnerability report only contains the call trace and minimal             tions and unreliable tests are present.
+             description of the bug (e.g., “slab-out-of-bounds”), SpecRover
+             can infer the intended local behavior at the function level.                                       VIII. P ERSPECTIVES
+             Based on the intended behavior, SpecRover generated the                      Owing to the growth of LLM-based automatic programming
+             patch in Figure 9d, which correctly ﬁxes the vulnerability                (see [32] for a recent summary), there exists interest in
+             inserting additional checks before the dangerous memory                   autonomous program improvement technologies. We propose
+             operation. The reviewer agent approved the patch with the                 SpecRover with the perspective of autonomously producing
+             comments shown in Figure 9e, with which the developers                    patches which are suggested with conﬁdence (thus developers
+             can gain an initial understanding of the patch before closely             can conﬁdently accept them) and come with explanations. The
+             examining the changed code.                                               technical innovations supporting SpecRover are the speciﬁca-
+                                                                                       tion inference to guide patching, and the rigorous vetting of
+                                   VII. R ELATED W ORK
+                                                                                       patches via our reviewer agent. Our work on SpecRover seeks
+                Automated program repair (APR) [8], [24] is a well studied             to put the matter of quality of patches produced by LLM agents
+             research area in software engineering. Given a buggy program              into the research community’s attention, whereas other works
+             P , and a test-suite T , automated program repair attempts to             are mostly focusing on the agent efﬁcacy.
+             (minimally) modify P to a program P  which passes the given                 Moving forward, we envision that LLM agents will need
+             test-suite T . APR techniques involve metaheuristic search [25],          to improve the precision and recall. Speciﬁcally, LLM agents
+             semantic analysis [6], machine learning [26], or a combination            will need to vet the produced patches. The vetting needs to
+             of different techniques. APR can also be used to rectify                  be accompanied by sophisticated test generation, so that there
+             automatically generated code from LLMs, see e.g. [1].                     is a rich test-suite to check the produced patches. Thus, we
+                The recent interest in prompt engineering as well as agent             need to take the viewpoint of a developer using an LLM agent,
+             based solutions has somewhat evolved the research in program              who would be concerned about (a) efﬁcacy, (b) cost, and, most
+             repair. LLM agents try to combine the power of LLM with pro-              importantly (c) signal-to-noise ratio in the agent output.
+             gram analysis and test execution reasoning. Thus LLM agents
+             can combine LLMs with test generation, static and dynamic                                          DATA AVAILABILITY
+             analysis as well as speciﬁcation inference. In the recent past,              We share full public access of the source code and ex-
+             lot of LLM based approaches have been proposed for solving                perimental artifacts of SpecRover at https://zenodo.org/doi/10.
+             software “issues” described in natural language, including [4],           5281/zenodo.13161650.
+             [5], [9], [10]. Among these our work is thematically closest                 We are continuously improving the efﬁcacy and usability
+             to the work of AutoCodeRover [5]. Like AutoCodeRover.                     of SpecRover (i.e., AutoCodeRover-v2). At the time of paper
+             we take the position that program modiﬁcations like bug                   acceptance (Nov 2024), AutoCodeRover-v2 has achieved an
+             ﬁxing are best aided by inference of the developer intent.                efﬁcacy of 37.3% on SWE-bench Lite and 46.2% on SWE-
+             AutoCodeRover infers the developer intent only from the                   bench Veriﬁed. We have also packaged AutoCodeRover-v2
+             software project structure. In contrast, SpecRover is more                as a GitHub bot offering one-click issue resolution [33]. The
+             general and is capable of inferring speciﬁcations from different          latest source code, experimental results, and news updates of
+             sources including program structure, program behavior, tests              AutoCodeRover-v2 can be found at our GitHub repository5
+             and so on. Furthermore, SpecRover focuses on giving an                    and website6 .
+             explanation of the produced patches.
+                Previous works have studied function-level speciﬁcation                                         ACKNOWLEDGMENTS
+             inference by means of LLMs [27]–[29]. However, these works                  This work was partially supported by a Singapore Ministry
+             either focus on generating speciﬁcations for simple one-                  of Education (MoE) Tier 3 grant ”Automated Program Re-
+             function or one-class programs [27], [28], or assume that a               pair”, MOE-MOET32021-0001.
+             target function is provided [29]. In contrast, SpecRover targets
+             large programs and does not assume the target functions to                   5 https://github.com/nus-apr/auto-code-rover
+
+             generate speciﬁcations for are given.                                        6 https://www.autocoderover.net/
+
+
+
+
+                                                                                    973
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+                                           R EFERENCES                                        [22] N. Chowdhury, J. Aung, C. J. Shern, O. Jaffe, D. Sherburn,
+                                                                                                   G. Starace, E. Mays, R. Dias, M. Aljubeh, M. Glaese, C. E.
+                                                                                                   Jimenez, J. Yang, K. Liu, and A. Madry, “Introducing swe-bench
+              [1] Z. Fan, X. Gao, M. Mirchev, A. Roychoudhury, and S. H. Tan, “Auto-               veriﬁed,” Aug 2024, accessed: 2024-11-27. [Online]. Available:
+                  mated repair of programs from large language models,” in International           https://openai.com/index/introducing-swe-bench-veriﬁed/
+                  Conference on Software Engineering (ICSE), 2023.                            [23] DARPA, “Ai cyber challenge (aixcc),” July 2024. [Online]. Available:
+              [2] H. Pearce, B. Ahmad, B. Tan, B. Dolan-Gavitt, and R. Karri, “Asleep              https://aicyberchallenge.com/
+                  at the keyboard? assessing the security of github copilot’s code contri-    [24] M. Monperrus, “Automatic software repair: A bibliography,” ACM
+                  butions,” in IEEE Symposium on Security and Privacy (SP), 2022.                  Computing Surveys, vol. 51, no. 1, 2018.
+              [3] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and            [25] C. L. Goues, T. Nguyen, S. Forrest, and W. Weimer, “Genprog: A generic
+                  K. R. Narasimhan, “SWE-bench: Can language models resolve real-                  method for automatic software repair,” IEEE Transactions on Software
+                  world github issues?” in The Twelfth International Conference                    Engineering, vol. 38, no. 1, 2011.
+                  on Learning Representations, 2024. [Online]. Available: https:              [26] F. Long and M. Rinard, “Automatic patch generation by learning correct
+                  //openreview.net/forum?id=VTF8yNQM66                                             code,” in Proceedings of the 43rd Annual ACM SIGPLAN-SIGACT
+              [4] C. Labs, “Devin, ai software engineer,” April 2024. [Online]. Available:         symposium on principles of programming languages (POPL), 2024.
+                  https://www.cognition-labs.com/introducing-devin                            [27] F. Mu, L. Shi, S. Wang, Z. Yu, B. Zhang, C. Wang, S. Liu,
+              [5] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover:                  and Q. Wang, “Clarifygpt: A framework for enhancing llm-based
+                  Autonomous program improvement,” in ACM International Symposium                  code generation via requirements clariﬁcation,” Proc. ACM Softw.
+                  on Software Testing and Analysis (ISSTA), 2024.                                  Eng., vol. 1, no. FSE, pp. 2332–2354, 2024. [Online]. Available:
+              [6] H. D. Nguyen, D. Qi, A. Roychoudhury, and S. Chandra, “Semﬁx:                    https://doi.org/10.1145/3660810
+                  Program repair via semantic analysis,” in International Conference on       [28] L. Ma, S. Liu, Y. Li, X. Xie, and L. Bu, “Specgen: Automated
+                  Software Engineering (ICSE), 2013.                                               generation of formal program speciﬁcations via large language models,”
+              [7] S. Mechtaev, J. Yi, and A. Roychoudhury, “Angelix: Scalable multiline            2024. [Online]. Available: https://arxiv.org/abs/2401.08807
+                  program patch synthesis via symbolic analysis,” in International Con-       [29] M. Endres, S. Fakhoury, S. Chakraborty, and S. K. Lahiri, “Can
+                  ference on Software Engineering (ICSE), 2016.                                    large language models transform natural language intent into formal
+              [8] C. Le Goues, M. Pradel, and A. Roychoudhury, “Automated program                  method postconditions?” Proc. ACM Softw. Eng., vol. 1, no. FSE, Jul.
+                  repair,” Communications of the ACM, vol. 62, 2019.                               2024. [Online]. Available: https://doi-org.libproxy1.nus.edu.sg/10.1145/
+              [9] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan,             3660791
+                  and O. Press, “Swe-agent: Agent-computer interfaces enable automated        [30] S. Fakhoury, A. Naik, G. Sakkas, S. Chakraborty, and S. K. Lahiri, “Llm-
+                  software engineering,” 2024.                                                     based test-driven interactive code generation: User study and empirical
+             [10] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Agentless: De-                       evaluation,” IEEE Trans. Software Eng., vol. 50, no. 9, pp. 2254–2268,
+                  mystifying llm-based software engineering agents,” arXiv preprint                2024. [Online]. Available: https://doi.org/10.1109/TSE.2024.3428972
+                  arXiv:2407.01489, 2024.                                                     [31] T. Zhang, T. Yu, T. Hashimoto, M. Lewis, W. Yih, D. Fried,
+                                                                                                   and S. Wang, “Coder reviewer reranking for code generation,” in
+             [11] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan,
+                                                                                                   International Conference on Machine Learning, ICML 2023, 23-29 July
+                  H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large
+                                                                                                   2023, Honolulu, Hawaii, USA, ser. Proceedings of Machine Learning
+                  language models trained on code,” arXiv preprint arXiv:2107.03374,
+                                                                                                   Research, A. Krause, E. Brunskill, K. Cho, B. Engelhardt, S. Sabato,
+                  2021.
+                                                                                                   and J. Scarlett, Eds., vol. 202. PMLR, 2023, pp. 41 832–41 846.
+             [12] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by
+                                                                                                   [Online]. Available: https://proceedings.mlr.press/v202/zhang23av.html
+                  chatgpt really correct? rigorous evaluation of large language models for
+                                                                                              [32] M. Lyu, B. Ray, A. Roychoudhury, S. Tan, and P. Thongta-
+                  code generation,” Advances in Neural Information Processing Systems,
+                                                                                                   nunam, “Automatic programming: Large language models and beyond,”
+                  vol. 36, 2024.
+                                                                                                   arXiv:2405.02213, 2024.
+             [13] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan,            [33] AutoCodeRover, “Revamping issue resolution,” Sep 2024, accessed:
+                  E. Jiang, C. Cai, M. Terry, Q. Le et al., “Program synthesis with large          2024-11-27. [Online]. Available: https://medium.com/@autocoderover/
+                  language models,” arXiv preprint arXiv:2108.07732, 2021.                         revamping-issue-resolution-f0d91ac6162c
+             [14] AppMap, “Appmap navie,” July 2024. [Online]. Available: https:
+                  //appmap.io/product/appmap-navie
+             [15] K. Gilpin, “How appmap navie solved the swe bench ai coding
+                  challenge,” June 2024. [Online]. Available: https://dev.to/appmap/
+                  how-appmap-navie-solved-the-swe-bench-ai-coding-challenge-20an
+             [16] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge, J. Pan, Y. Song,
+                  B. Li, J. Singh et al., “Opendevin: An open platform for ai software
+                  developers as generalist agents,” arXiv preprint arXiv:2407.16741, 2024.
+             [17] P. Gauthier, “Aider,” July 2024. [Online]. Available: https://github.com/
+                  paul-gauthier/aider
+             [18] A. Örwall, “Moatless tool,” July 2024. [Online]. Available: https:
+                  //github.com/aorwall/moatless-tools
+             [19] I. Magar and R. Schwartz, “Data contamination: From memorization
+                  to exploitation,” in Proceedings of the 60th Annual Meeting of the
+                  Association for Computational Linguistics (Volume 2: Short Papers),
+                  ACL 2022, Dublin, Ireland, May 22-27, 2022, S. Muresan, P. Nakov,
+                  and A. Villavicencio, Eds. Association for Computational Linguistics,
+                  2022, pp. 157–165. [Online]. Available: https://doi.org/10.18653/v1/
+                  2022.acl-short.18
+             [20] Y. Noller, R. Shariffdeen, X. Gao, and A. Roychoudhury, “Trust
+                  enhancement issues in program repair,” in Proceedings of the 44th
+                  International Conference on Software Engineering, 2022, pp. 2228–
+                  2240.
+             [21] E. K. Smith, E. T. Barr, C. Le Goues, and Y. Brun, “Is the cure
+                  worse than the disease? overﬁtting in automated program repair,” in
+                  Proceedings of the 2015 10th Joint Meeting on Foundations of Software
+                  Engineering, ESEC/FSE 2015, Bergamo, Italy, August 30 - September 4,
+                  2015, E. D. Nitto, M. Harman, and P. Heymans, Eds. ACM, 2015, pp.
+                  532–543. [Online]. Available: https://doi.org/10.1145/2786805.2786825
+
+
+
+                                                                                          974
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 18:15:33 UTC from IEEE Xplore. Restriction
+

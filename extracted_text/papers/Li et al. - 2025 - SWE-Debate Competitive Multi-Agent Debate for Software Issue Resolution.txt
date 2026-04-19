@@ -1,0 +1,1352 @@
+                                         SWE-Debate: Competitive Multi-Agent Debate for Software Issue
+                                                                 Resolution
+                                                                Han Li†                                                 Yuling Shi†                                 Shaoxin Lin
+                                                  Shanghai Jiao Tong University                          Shanghai Jiao Tong University                             Huawei
+                                                              China                                                  China                                          China
+                                                     lihan0421@sjtu.edu.cn                                  yuling.shi@sjtu.edu.cn                       2120200411@mail.nankai.edu.cn
+
+                                                          Xiaodong Gu‡                                                  Heng Lian                                    Xin Wang
+                                                 Shanghai Jiao Tong University                                   Xidian University                                   Huawei
+                                                             China                                                    China                                          China
+                                                   xiaodong.gu@sjtu.edu.cn                                     lianheng23@163.com                           betterwangx@foxmail.com
+arXiv:2507.23348v1 [cs.SE] 31 Jul 2025
+
+
+
+
+                                                              Yantao Jia                                                Tao Huang                               Qianxiang Wang
+                                                             Huawei                                                  Huawei                                        Huawei
+                                                              China                                                   China                                         China
+                                                        jamaths.h@163.com                                       276255565@qq.com                          wangqianxiang@huawei.com
+
+                                         ABSTRACT                                                                              to incomplete fixes, introduces new bugs, and significantly extends
+                                         Issue resolution has made remarkable progress thanks to the ad-                       development cycles [5, 7].
+                                         vanced reasoning capabilities of large language models (LLMs).                            The key challenge in effective issue resolution is fault localiza-
+                                         Recently, agent-based frameworks such as SWE-agent have further                       tion, namely, identifying the code snippets triggering the specific
+                                         advanced this progress by enabling autonomous, tool-using agents                      issue [43]. Unlike conventional code retrieval, fault localization re-
+                                         to tackle complex software engineering tasks. While existing agent-                   quires a deeper connection between natural language issue descrip-
+                                         based issue resolution approaches are primarily based on agents’                      tions and programming language structures. This process requires
+                                         independent explorations, they often get stuck in local solutions                     reasoning over the structural and semantic properties of code, of-
+                                         and fail to identify issue patterns that span across different parts of               ten across complex dependency graphs [6, 14, 18], and entails a
+                                         the codebase. To address this limitation, we propose SWE-Debate, a                    comprehensive understanding of software architecture as well as
+                                         competitive multi-agent debate framework that encourages diverse                      strategic decision-making.
+                                         reasoning paths and achieves more consolidated issue localization.                        The emergence of LLMs has significantly advanced this area
+                                         SWE-Debate first creates multiple fault propagation traces as local-                  by leveraging code understanding and reasoning capabilities [35,
+                                         ization proposals by traversing a code dependency graph. Then, it                     42, 44]. More recently, agent-based methods [1, 3, 38, 46, 52] have
+                                         organizes a three-round debate among specialized agents, each em-                     emerged, simulating autonomous agents capable of tool use and
+                                         bodying distinct reasoning perspectives along the fault propagation                   high-level decision-making. These approaches use iterative explo-
+                                         trace. This structured competition enables agents to collaboratively                  ration and planning to enable systematic codebase traversal, repre-
+                                         converge on a consolidated fix plan. Finally, this consolidated fix                   senting a shift toward structured and interactive issue resolution
+                                         plan is integrated into an MCTS-based code modification agent                         processes [22, 43].
+                                         for patch generation. Experiments on the SWE-bench benchmark                              While agent-based approaches have shown notable progress on
+                                         show that SWE-Debate achieves new state-of-the-art results in                         standard benchmarks such as SWE-bench [15], they mainly rely
+                                         open-source agent frameworks and outperforms baselines by a                           on agents’ independent exploration, that is, the agents individually
+                                         large margin1 .                                                                       understand code repository and propose their modification plans.
+                                                                                                                               As a result, they often get stuck in local solutions and fail to identify
+                                                                                                                               issue patterns that span across large, complex codebases [5, 7]. This
+                                         1    INTRODUCTION                                                                     fundamental limitation stems from a core challenge we term limited
+                                         Automated repository-level issue resolution has emerged as a criti-                   observation scope [32, 48]: when multiple code locations appear rel-
+                                         cal challenge in software engineering. The task aims to automat-                      evant to the issue description, correct resolution often depends on a
+                                         ically localize and fix the defective code snippets, based on re-                     deep understanding of code structure and component relationships.
+                                         ported issues. In software development, developers spend a major-                     However, independent exploring agents lack the diverse analyti-
+                                         ity of their debugging efforts in understanding code and making                       cal perspectives needed to systematically compare and rank these
+                                         changes [15, 52]. Meanwhile, automated tools often struggle with                      competing alternatives. This limitation becomes more pronounced
+                                         the same challenge [4, 33, 39]. Inadequate code understanding leads                   when agents are faced with multiple plausible fix strategies or mod-
+                                                                                                                               ification points, each with different implications for maintainability,
+                                                                                                                               compatibility, and architectural soundness [6, 14, 18, 52]. Without
+                                         †Equal contribution.
+                                         ‡ Xiaodong Gu is the corresponding author.                                            sufficient reasoning capacity to evaluate these trade-offs holisti-
+                                         1 Our code and data are available at https://github.com/YerbaPage/SWE-Debate          cally, independent exploring agents often fail to directly identify
+Conference’17, July 2017, Washington, DC, USA                                                                                           Li et al.
+
+
+the correct fix location and strategy, relying instead on repeated        engineering scenarios [5, 7]. While individual agents can success-
+trial-and-error that is both inefficient and error-prone [1, 10].         fully handle straightforward localization tasks, they systematically
+    To address these challenges, we propose SWE-Debate, a com-            fail when multiple code locations appear relevant to issue descrip-
+petitive multi-agent debate framework that promotes diverse rea-          tions, requiring comprehensive architectural understanding and
+soning paths and achieves more consolidated fault localization.           careful evaluation of competing modification plans [32, 48]. The
+SWE-Debate reframes issue resolution through graph-guided local-          core challenge lies in the inherent perspective limitations that pre-
+ization and structured debate mechanisms. The framework operates          vent single agents from accurately assessing the trade-offs between
+through a three-stage pipeline. First, it creates multiple fault prop-    multiple viable solutions [2, 9].
+agation traces as localization proposals by dependency analysis              The Individual Exploration Problem As illustrated in Fig-
+across the codebase. Specifically, a static dependency graph is built     ure 1, single-agent individual exploitation approaches rely on indi-
+to represent relationships among code entities—such as function           vidual exploration where agents independently understand code
+calls, class inheritance, module imports, and variable references.        repositories and propose modification plans without systematic
+Using language model-based semantic matching, SWE-Debate iden-            evaluation of alternative approaches. Consider the Django-11999
+tifies entities that are most relevant to the issue description, which    issue where users cannot override get_FOO_display() methods
+serve as high-confidence entry points for chain construction. SWE-        in Django 2.2+. The isolated agent performs semantic search with
+Debate traverses the graph from each entry point, yielding a set of       query "get_FOO_display impl" and immediately focuses on django/
+candidate localization chains. Each chain captures a potential fault      db/models/base.py, specifically the _get_FIELD_display method.
+propagation path, reflecting different structural viewpoints, i.e., al-   This individual exploration path appears reasonable from a single
+ternative code organization contexts in which the issue may appear,       perspective but represents a fundamental misunderstanding of the
+such as along a call hierarchy, inheritance structure, or shared data     issue’s root cause.
+flow. Next, the algorithm creates a consensus fix plan through a             The individual exploration approach exemplifies the core limited
+structured three-round debate process. In the first round, multiple       observation scope problem [6, 14]: the agent cannot systemati-
+agents engage in competitive ranking to select the most promising         cally evaluate whether the base method implementation or the
+fault propagation trace. Based on the selected trace, agents inde-        field registration mechanism contains the actual fault source [32],
+pendently propose candidate modification plans based on different         lacks the diverse reasoning perspectives necessary to compare run-
+reasoning perspectives, then engage in competitive refinement to          time workarounds against structural solutions [18, 52], and cannot
+defend their proposals while critiquing alternatives. A discrimina-       effectively analyze the architectural trade-offs between different
+tor selects the most promising plan, synthesizing insights from the       modification plans [1, 10]. This individual exploration limitation
+debate to produce a coherent and actionable modification plan. In         prevents the agent from reconsidering its fundamental localization
+the final stage, the modification plan is used to initialize a Monte      strategy when initial approaches fail, leading to inefficient trial-and-
+Carlo Tree Search (MCTS) framework [1] for patch generation.              error cycles that characterize single-agent individual exploration
+    Our experimental evaluation on the SWE-Bench-Verified dataset         methods.
+systematically compares SWE-Debate against state-of-the-art base-            Multi-Agent Debate Resolution The correct resolution re-
+lines. SWE-Debate achieves new state-of-the-art results under open-       quires recognizing that method override failures stem from the
+source agent frameworks and outperforms baseline methods by a             field registration process in Field.contribute_to_class, where
+large margin. Ablation studies show that the multiple chain gen-          Django unconditionally overwrites user-defined methods during
+eration mechanism provides the largest contribution to overall            class construction. This structural insight emerges through multi-
+performance, validating our hypothesis that the fault propagation         agent debate where different agents examine alternative code re-
+traces proposal enables more accurate fault localization and issue        gions and systematically defend their localization strategies against
+resolution.                                                               competing interpretations, moving beyond individual exploration
+    Our main contributions include:                                       to structured competitive analysis [2, 9].
+                                                                             In the Django-11999 case, multi-agent debate directly addresses
+    • A novel method to generate multiple candidate fault propaga-        the limited observation scope: Agent A advocates for modifying
+      tion traces. The method captures diverse potential fault prop-      the base _get_FIELD_display method while Agent B argues for
+      agation paths through code dependencies and structural rela-        intervention in Field.contribute_to_class, forcing systematic
+      tionships.                                                          comparison of these structurally different approaches. Through
+    • A competitive multi-agent debate framework for precise fault        structured debate, different agents defend competing modifica-
+      localization through diverse reasoning perspectives and struc-      tion philosophies—runtime flexibility versus source-level preven-
+      tured argumentation.                                                tion—revealing architectural trade-offs and maintainability impli-
+    • Extensive experiments show that our competitive debate paradigms    cations that are invisible to individual exploration. When initial
+      achieve 6.7% improvement in issue resolution rate and 5.1% im-      approaches fail, competitive pressure prevents agents from aban-
+      provement in fault localization accuracy.                           doning promising directions and instead drives systematic analysis
+                                                                          of why specific strategies succeed or fail, transforming individual
+                                                                          exploration into collaborative reasoning that enables comprehen-
+2     MOTIVATION                                                          sive evaluation of the architectural soundness of different solutions.
+Repository-level issue resolution reveals the fundamental limited            Through this debate process, agents discover that the contribute_
+observation scope that agentic approaches face in complex software        to_class approach provides superior design properties: it prevents
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                                                 Conference’17, July 2017, Washington, DC, USA
+
+
+                                                                                  Localization Chain                           Modification Plan
+                    Issue django-11999：
+                                                                     Individual                                                ***stage 1***
+                                                                    Exploration                                                instruction:
+         Cannot override get_FOO_display() in                                                                                  Enhance the _get_FIELD_display method in
+         Django 2.2+.                                                                                                          django/db/models/base.py to support custom display
+                                                                                                                               methods by checking for a user-defined get_FOO_display
+         Description                                                                                                           method (where FOO is the field name) before falling back to
+         I cannot override the get_FIELD_display function on                                                                   the default display logic.
+         models since version 2.2. It works in version 2.1.                                                                    context:
+                                                                                                                               django/db/models/base.py:Model._get_FIELD_display, lines
+         Example:                                                                                                              939-944
+         class FooBar(models.Model):
+            foo_bar = models.CharField(_(“foo”), choices=[(1,                                                                                                        Wrong place!
+         'foo'), (2, 'bar')])
+            def __str__(self):
+                return self.get_foo_bar_display()
+                                                                                  Localization Chains                          Modification Plan
+         # This returns 'foo' or 'bar' in 2.2, but 'something' in
+         2.1
+         def get_foo_bar_display(self):                                                                                         ***stage 1***
+            return "something"                                                                                                  instruction:
+         What I expect is that I should be able to override this
+         function.                                                  Competitive
+                                                                                                                                Modify the contribute_to_class method in
+                                                                      Debate                                                    db/models/fields/__init__.py to check for existing
+                                                                                                                                get_FIELD_display method before setting the default
+                 Golden Patch：                                                                                                  implementation
+
+         --- a/django/db/models/fields/__init__.py                                                                              context:
+         +++ b/django/db/models/fields/__init__.py                                                                              db/models/fields/__init__.py:Field.contribute_to_class, lines
+         @@ -763,8 +763,12 @@                                                                                                   765-767
+             def contribute_to_class(self, cls, name,
+         private_only=False)                                                                                                                                        Correct place!
+                  …
+         -         setattr(cls, 'get_%s_display' % self.name,
+         -             partialmethod(cls._get_FIELD_display,
+         field=self))
+         +          if not hasattr(cls, 'get_%s_display' %                                                                           Debate
+         self.name):
+         +              setattr(cls,
+         +                'get_%s_display' % self.name,
+         +                partialmethod(cls._get_FIELD_display,
+         field=self),
+         +              )
+
+
+
+
+                                                                        Figure 1: Motivating example of multi-agent debate.
+
+
+method overwriting at the source rather than attempting runtime                                         employ a multi-agent debate to resolve modification disambiguation
+workarounds, requires minimal code changes at lines 765-767 in                                          and determine the most effective fix plan.
+django/db/models/fields/__init__.py with a simple existence                                                Our framework operates on the principle that accurate fault
+check using if not hasattr(cls,method_name), and maintains                                              localization requires diverse structural viewpoints combined with
+backward compatibility while enabling user method preservation.                                         rigorous evaluation mechanisms, as illustrated in Figure 2. To achieve
+This debate dynamic creates productive analytical tension where                                         this, we employ a dual-stage competitive debate architecture. The
+agents must defend their approaches against alternatives [19, 50],                                      first stage (Section 3.2) tackles the structural exploration problem
+transforming issue resolution from individual exploration to struc-                                     by efficiently identifying potential fault propagation paths through
+tured multi-perspective reasoning that enables precise architectural                                    graph traversal. The second stage (Section 3.3) performs compet-
+understanding and modification plans that individual agents cannot                                      itive debate on chain selection and modification disambiguation
+achieve [31, 53].                                                                                       among multiple agents. Finally, the selected modification plan is
+                                                                                                        integrated into an MCTS-based agentic framework for patch gener-
+                                                                                                        ation (Section 3.4).
+3 METHODOLOGY                                                                                           3.2    Fault Propagation Traces Proposal
+3.1 Problem Formulation                                                                                 Since issue descriptions rarely pinpoint exact modification loca-
+Given an issue description 𝑝 and a codebase state represented as                                        tions, agents need to identify the fault propagation trace for issue
+a set of code entities 𝑉 = {𝑣 1, . . . , 𝑣𝑚 }, an agent must identify                                   resolution. To enable competitive fault localization, our algorithm
+the subset of entities to be modified 𝑉𝑚𝑜𝑑 ⊂ 𝑉 through an explo-                                        generates multiple candidate fault propagation traces as localiza-
+ration chain {(𝑎 1, 𝑜 1 ), . . . , (𝑎𝑛 , 𝑜𝑛 )}, where 𝑎𝑡 and 𝑜𝑡 denote the                              tion proposals, followed by a competitive multi-agent debate to
+action and observation at time step 𝑡. Current approaches, however,                                     select the most promising trace. A fault propagation trace refers
+face two fundamental limitations. First, their exploration is ineffi-                                   to a structured chain of code entities (e.g., classes, methods, func-
+cient as it overlooks structural relationships between code entities                                    tions, variables) that reflect how defects may propagate through
+(e.g., classes, methods). Second, they struggle with modification                                       the codebase.
+disambiguation when multiple locations seem relevant but require                                        Dependency Graph Construction. The algorithm begins by
+different reasoning perspectives for a correct evaluation.                                              building a static dependency graph 𝐺 = (𝑉 , 𝐸), where the node
+   Our approach addresses both limitations through competitive                                          set 𝑉 represents code entities and the edge set 𝐸 captures their de-
+reasoning on a code dependency graph 𝐺 = (𝑉 , 𝐸), where 𝑉 is the                                        pendency relationships including function calls, class inheritance,
+set of code entities and 𝐸 represents their structural relationships.                                   module imports, and variable references. This graph serves as the
+We construct localization chains 𝐶 = (𝑣 1, . . . , 𝑣𝑘 ) composed of code                                structural backbone for tracing potential fault propagation traces,
+entities 𝑣𝑖 ∈ 𝑉 that trace fault propagation paths. Subsequently, we                                    allowing agents to explore the codebase in a systematic way.
+Conference’17, July 2017, Washington, DC, USA                                                                                                                                          Li et al.
+
+
+                                                                                                                   Fault Propagation Traces Proposal
+              Issue django-11999：                         Extract Initial Entities              Contain
+         Cannot override get_FOO_display()
+                                                                                                Inherit                          Chain 1
+         in Django 2.2+.                                         InitialEnitity1：
+         Description                                           get_foo_bar_display              Import
+         I cannot override the
+         get_FIELD_display function on                                                          Invoke                           Chain 2
+         models since version 2.2. It works in
+                                                                                                Entity
+         version 2.1.
+         Example:
+         class FooBar(models.Model):                                                                                             Chain 3
+                                                                 InitialEnitityk-1:
+         foo_bar = models.CharField(_("foo"),
+         choices=[(1, 'foo'), (2, 'bar')])                            FooBar
+         def __str__(self):
+         return self.get_foo_bar_display()                                                                                                                                 Debate
+         # This returns 'foo' or 'bar' in 2.2,                    InitialEnitityk：
+         but 'something' in 2.1                                 get_FIELD_display
+         def get_foo_bar_display(self):                                                                                          Chain N
+         return "something"
+         What I expect is that I should be
+         able to override this function.
+                                                                Synthesize Modification Plan
+                                                                                                                   Modification Plan Debate
+                                                                    <plan>
+                     MCTS                                           ***stage 1***                                                                       Localization Chain Selection
+                                                                    instruction:
+                                                                    Modify the contribute_to_class
+                                                                    method in
+                                                                    db/models/fields/__init__.py to
+                                                                    check for existing
+                                                                                                                                                                Best Chain
+                                                                    get_FIELD_display method
+             Environment                         Editor             before setting the default
+                                                                    implementation
+                                                                    context:
+                                                                    db/models/fields/__init__.py:Fi
+                                                                    eld.contribute_to_class, lines
+                                                                    765-767
+                                                                    ***stage 2***                         Round3        Round2                 Round1
+                                                                    ……
+                                                                    </plan>
+                                                 Patch
+
+
+                                                                               Figure 2: Overview of SWE-Debate framework.
+
+Identifying Entry Nodes via Semantic Matching. Next, the                                                            neighbor, we perform a depth-limited traversal (maximum depth
+algorithm identifies the top-𝐾 entities 𝐸𝑝 = 𝑒 1, . . . , 𝑒𝐾 that are                                               of 𝐿), selecting the most promising next entity at each step. The
+most relevant to the issue description through semantic matching.                                                   selection is guided by a composite scoring function that considers
+We employ a language model-based approach to extract structural                                                     both semantic similarity to the issue and structural importance
+identifiers that are explicitly referenced in the issue text from the                                               in the dependency graph. This process results in a total of top-𝐾
+dependency graph represented as an adjacency matrix and entity                                                      × top-𝑊 localization chains, each representing a plausible fault
+metadata. These entities encompass specific code-level structural                                                   propagation path.
+elements such as class names, function names, parameter names,                                                         These localization chains capture fault propagation patterns
+or error names (e.g., "UserSession", "Redis", "wholesale") that ap-                                                 through dependency relationships—defects in one component af-
+pear directly in the issue description. The extraction process priori-                                              fecting dependent components via call chains, inheritance hierar-
+tizes such structural identifiers while maintaining diversity through                                               chies, or data flow. This structured approach efficiently identifies
+deduplication mechanisms. To ensure precision, the selection is con-                                                propagation paths that would require extensive exploration to dis-
+strained to only include entities with direct textual correspondence                                                cover through search-based methods, enabling the competitive
+in the issue description, preventing the introduction of spurious en-                                               debate process described next.
+try points that could mislead subsequent chain construction. These
+high-confidence entities act as entry points for subsequent chain                                                   3.3     Multi-Agent Debate
+construction.
+                                                                                                                    With the localization chains identified through graph-guided anal-
+Chain Construction via Graph Traversal. To capture diverse
+                                                                                                                    ysis, we synthesize a consolidated fix plan through a competitive
+propagation patterns, we systematically traverse the dependency
+                                                                                                                    multi-agent debate. This requires evaluating competing architec-
+graph using a two-phase strategy for each seed entity 𝑒𝑖 ∈ 𝐸𝑝 : (1)
+                                                                                                                    tural approaches—some chains may target core system components
+Breadth-First Expansion: We identify top-𝑊 most issue-relevant
+                                                                                                                    while others suggest more localized fixes, each with different impli-
+neighboring nodes based on semantic and structural relevance. We
+                                                                                                                    cations for maintainability and system robustness. Our competitive
+first extract the top-K entities from the issue text, which are strongly
+                                                                                                                    debate forces agents to propose, defend, and refine their modifi-
+associated with the described problem. However, in many cases, the
+                                                                                                                    cation plans, ultimately converging on the most consolidated fix
+root cause of an issue is not explicitly linked to specific functions
+                                                                                                                    plan.
+or components within the issue description. To address this, we
+                                                                                                                    Localization Chain Selection. From the 𝐾 × 𝑊 candidate chains,
+expand the context by retrieving code snippets related to each of
+                                                                                                                    we form a diverse set by selecting the longest chain plus the (𝑚 −
+the top-K entities using the dependency graph. These code snippets,
+                                                                                                                    1) most distinct chains computed based on semantic embeddings.
+along with the original issue, are then fed into the LLM individually.
+                                                                                                                    Multiple specialized agents then engage in competitive ranking,
+This enriched context allows the model to identify more diverse
+                                                                                                                    where each agent independently evaluates and ranks these 𝑚 chains
+and informative entities as potential starting points for the localiza-
+                                                                                                                    based on their analytical perspective. Through this localization-
+tion chain, effectively expanding the search space and improving
+                                                                                                                    level debate, agents must defend their chain preferences against
+localization accuracy. (2) Depth-First Search: From each selected
+                                                                                                                    alternatives, revealing structural insights that single-agent selection
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                Conference’17, July 2017, Washington, DC, USA
+
+
+would miss. We select the chain with the highest aggregate vote as         3.4    Patch Generation
+the optimal localization path, which serves as the foundation for          Based on the modification plans, the final stage generates patches
+the subsequent modification plan debate.                                   and fixes the issue by employing a Monte Carlo Tree Search (MCTS)
+Modification Plan Proposal. Based on the selected localization             framework [1]. The MCTS process allows the agent to systemati-
+chain from the competitive debate, we generate a comprehensive             cally explore the codebase, refine its modification plans, and itera-
+modification plan, which systematically specifies the exact code           tively evaluate the impact of each action on the codebase [21]. Un-
+locations requiring changes, the types of modifications needed, and        like previous approaches that begin with arbitrary exploration [1],
+their implementation priorities.                                           our MCTS process starts from the structured modification plan
+   The transformation from localization chains to modification pro-        generated by the competitive debate framework, enabling focused
+posals is implemented through a specialized prompt-driven analysis         exploration with pre-specified target locations and strategic rea-
+framework. Given a localization chain 𝐶 = {𝑒 1, 𝑒 2, ..., 𝑒𝑘 } and issue   soning.
+description 𝐼 , each agent applies a structured analysis prompt that          The MCTS process unfolds as a search through a tree where
+guides the examination of each entity 𝑒𝑖 in the chain. The prompt          nodes represent states of the codebase and edges represent actions
+instructs agents to: (1) analyze code structure and functionality, (2)     (Search for code exploration, Plan for strategic reasoning, and
+identify specific modification targets, (3) determine modification         Edit for code modification). The initial branches of this search
+types (fix_bug, add_feature, refactor, optimize), (4) assess prior-        tree are constructed from the steps outlined in our modification
+ity levels, and (5) provide implementation reasoning. The output           plan, ensuring the exploration is grounded in the debate’s strategic
+is a structured JSON specification that maps each chain entity to          insights. The agent then iteratively navigates and expands this tree.
+concrete modification targets with precise location descriptions,          At each step, it selects an action based on a modified Upper Confi-
+priority rankings, and implementation strategies.                          dence Bound for Trees (UCT) [1] criterion that balances exploiting
+   We use 𝑁 such agents to form a pool of 𝑁 diverse modification           known high-reward paths with exploring less-visited states. After
+proposals. This multi-agent approach ensures comprehensive cover-          an action is executed, its outcome is assessed by a value function.
+age of potential modification strategies as each agent contributes its     This function, initially informed by the rationale from our modifi-
+unique analytical viewpoint to form a diverse pool of modification         cation plan, provides not only a numerical score but also a written
+proposals.                                                                 explanation of the decision’s quality. After each edit action, the
+Competitive Strategy Refinement. Each agent reviews all pro-               agent can also execute existing tests and create new ones to better
+posals from the independent analysis phase and engages in struc-           evaluate the current state. This qualitative feedback is then propa-
+tured argumentation to defend their approach while critically evalu-       gated back up the search tree, refining the agent’s value estimates
+ating alternatives. This competitive refinement phase addresses the        and guiding future decisions toward a successful resolution. This
+limitation of independent analysis by forcing agents to explicitly         process continues until the agent reaches a satisfactory resolution
+justify their reasoning against competing perspectives, revealing          of the issue or reaches a predefined exploration depth 𝐷𝑚𝑎𝑥 .
+hidden assumptions and identifying potential weaknesses in initial
+proposals. Agents generate refined modification plans that incor-          4 EXPERIMENTAL SETUP
+porate insights from cross-agent critique while maintaining their
+specialized analytical focus, driving deeper understanding of the          4.1 Research Questions
+fault localization.                                                        RQ1: How effective is SWE-Debate in terms of repository-level
+Synthesize modification plan. Based on the refined proposals               issue resolution?
+from the competitive refinement phase, a discriminator agent syn-          RQ2: How does each component of SWE-Debate contribute to its
+thesizes insights from all refined proposals to produce a coherent,        overall performance?
+actionable modification plan with prioritized steps and rationale.         RQ3: How is the fault localization performance of SWE-Debate
+This final selection phase is essential because competitive refine-        compared to other baselines?
+ment may produce multiple valid but incompatible strategies that           RQ4: How do the depth of chains in the debate influence the per-
+require unified resolution for practical implementation. The dis-          formance?
+criminator evaluates trade-offs between competing architectural
+approaches, considers implementation complexity and risk factors,          4.2    Datasets
+and generates a structured plan that guides downstream repair              We evaluate SWE-Debate on the SWE-Bench-Verified dataset [26],
+processes with both strategic direction and tactical specificity.          which contains 500 verified issues from SWE-bench [15]. We also
+   This competitive process addresses the limitations of agents’           evaluated on SWE-bench-Lite [15], which contains 300 carefully
+limited individual observation and exploration scope by leveraging         selected tasks.
+diverse specialized perspectives and finding architecturally sound
+solutions through argumentative rigor. The debate produces a struc-
+                                                                           4.3    Baselines
+tured modification plan with strategic insights, and this high-level
+plan can then be leveraged to guide the subsequent repair process.         We compare SWE-Debate with the following baselines on issue
+                                                                           resolution:
+                                                                            • Agentless [43]: A non-agentic pipeline that breaks down the
+                                                                              repair process into different phases of localization, repair, and
+                                                                              patch validation.
+Conference’17, July 2017, Washington, DC, USA                                                                                             Li et al.
+
+
+ • AutoCodeRover [52]: A software engineering-oriented ap-                we set 𝐾 = 5 for the number of entry points, 𝑊 = 4 for breadth-
+   proach that combines LLMs with sophisticated code search               first expansion width, and 𝐿 = 5 for maximum chain length. The
+   capabilities.                                                          multi-agent debate involves 𝑚 = 6 chains for competitive ranking
+ • SWE-Agent [46]: A custom agent-computer interface enabling             and 𝑁 = 5 specialized agents in the competitive refinement process.
+   LM agents to interact with repository environments through             These parameters are set based on the a held out set in the full
+   defined actions.                                                       SWE-Bench dataset [15]. For baseline methods, we directly use the
+ • SWE-Search [1]: A repository issue resolution agent that uses          reported results either from the official leaderboard [15] or from the
+   Monte Carlo Tree Search (MCTS) to explore the solution space.          official paper or repository. For experiments on DeepSeek-V3-0324,
+ • SWESynInfer [21]: An open-source LLM series trained with               we reproduce the results on representative baselines with their
+   development-process-centric data, simulating repository anal-          official repositories.
+   ysis, fault localization, and patch generation via a three-stage
+   Chain-of-Thought workflow.                                             5     RESULTS
+ • OpenHands [38]: An open-source platform for building general-          We present experimental results addressing each research question,
+   purpose AI agents that solve software and web tasks through            examining the effectiveness of SWE-Debate across multiple dimen-
+   code, terminal, and browser interaction.                               sions and providing detailed analysis of component contributions.
+  Additionally, we select the following baselines to compare the
+performance on fault localization:                                        5.1    RQ1: Effectiveness on Issue Resolution
+ • CodeActAgent [38]: An agent that interact with environments            Table 1 presents the main experimental results comparing SWE-
+   through executing file system search commands to locate faults.        Debate with state-of-the-art baselines on the SWE-Bench-Verified
+ • LocAgent [6]: A graph-guided LLM-agent framework designed              dataset. We observe that SWE-Debate is able to solve 207 out of 500
+   to enhance code localization through powerful multi-hop rea-           problems, achieving 41.4% success rate. While individual baseline
+   soning.                                                                approaches show varying performance across different language
+ • KGComposs [45]: A framwework ridges semantic gaps in                   models, SWE-Debate demonstrates consistent superiority over ex-
+   repository-level repair by constructing a repository-aware knowl-      isting methods. Specifically, when comparing with methods using
+   edge graph and leveraging path-guided reasoning to enhance             the same DeepSeek-V3-0324 model, SWE-Debate achieves signifi-
+   LLM-based patch generation.                                            cant improvements: 6.0% over SWE-Search, improving from 35.4%
+                                                                          to 41.4%, and 2.6% over SWE-Agent, improving from 38.8% to 41.4%.
+4.4     Metrics
+We employ the following metrics to evaluate the performance of            Table 1: Main effectiveness results on SWE-Bench-Verified.
+SWE-Debate:
+ • Pass@1: The percentage of issues that are resolved success-                  Method                    Model                  Pass@1
+   fully within the first attempt, following the evaluation protocol
+   established by [1, 46]. This metric directly measures the frame-             SWE-Agent            GPT-4o (2024-05-13)          23.0%
+   work’s ability to generate correct patches without requiring                                      Claude-3.5 Sonnet            33.6%
+   multiple iterations, representing the most practical scenario for                                 DeepSeek-V3-0324             38.8%
+   real-world deployment.                                                       SWE-Search           DeepSeek-V3-0324             35.4%
+ • Acc@1 (File): The localization accuracy at top-1 predictions                 Moatless Tools       DeepSeek-V3-0324             34.6%
+   at file level, where a localization is considered successful only            Agentless            GPT-4o (2024-05-13)          36.2%
+   when all required modification points are included within the
+                                                                                                     DeepSeek-V3-0324             36.6%
+   top-1 predicted locations [6, 43]. This metric evaluates the
+   model’s capacity to precisely and comprehensively identify                   AutoCodeRover        GPT-4o (2024-05-13)          38.4%
+   all code regions that require modification, providing a fine-                CodeAct              GPT-4o (2024-05-13)          30.0%
+   grained assessment of fault localization performance prior to                SWESynInfer          Claude-3.5 Sonnet            35.4%
+   the patch generation stage.                                                                       GPT-4o (2024-05-13)          31.8%
+                                                                                                     Lingma SWE-GPT 72B           30.2%
+4.5     Implementation Details                                                  OpenHands            DeepSeek-V3-0324             38.8%
+We implement SWE-Debate by extending the SWE-Search [1] frame-                  SWE-Debate            DeepSeek-V3-0324            41.4%
+work with our graph-based localization and multi-agent debate
+components. Due to unsuccessful testbed setup, we did not utilize it
+in our experiments. The code dependency graph is constructed us-             It is important to note that SWE-Debate outperforms even the
+ing static analysis tools2 , and the multi-agent debate employs offical   strongest baseline configurations, including OpenHands with DeepSeek-
+DeepSeek-V3-0324 [8] with different system prompts to simulate            V3-0324 and SWE-Agent with DeepSeek-V3-0324, both achieving
+diverse reasoning perspectives. For the graph traversal parameters,       38.8%. This demonstrates that our competitive multi-agent de-
+                                                                          bate framework provides substantial benefits beyond what can
+2 https://github.com/python/cpython/blob/3.13/Lib/ast.py                  be achieved through model selection alone.
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                 Conference’17, July 2017, Washington, DC, USA
+
+
+
+ Finding 1: SWE-Debate achieves 41.4% Pass@1 on issue reso-                5.3     RQ3: Localization Performance Comparison
+ lution, representing a 2.6 percentage point improvement over
+ the strongest baseline using the same model, demonstrating the               Table 3: Localization Performance on SWE-Bench-lite.
+ effectiveness of competitive multi-agent debate for repository-
+ level issue resolution.                                                         Method           Model                         Acc@1 (File)
+                                                                                 Agentless           GPT-4o (2024-05-13)             67.15
+5.2     RQ2: Ablation Study                                                                          Claude-3.5 Sonnet               72.63
+To understand the contribution of each component in SWE-Debate,                  SWE-Agent           GPT-4o (2024-05-13)             57.30
+we conduct comprehensive ablation studies by systematically re-                                      Claude-3.5 Sonnet               77.37
+moving key components and measuring performance degradation
+                                                                                                     DeepSeek-V3-0324                67.00
+on the SWE-Bench-Verified dataset. Table 2 shows the results of
+this analysis, revealing distinct contributions from different archi-            SWE-Search          GPT-4o (2024-05-13)             73.36
+tectural elements.                                                                                   Claude-3.5 Sonnet               72.63
+                                                                                 CodeActAgent        GPT-4o (2024-05-13)             60.95
+Table 2: Ablation study results showing the contribution of                                          Claude-3.5 Sonnet               76.28
+different components.                                                            LocAgent            Qwen2.5-7B (FT)                 70.80
+                                                                                                     Qwen2.5-32B (FT)                75.91
+      Method                                      Pass@1          Δ                                  Claude-3.5 Sonnet               77.74
+      SWE-Debate                                    41.4%          -             KGCompass           Claude-3.5 Sonnet               76.67
+       w/o Multiple Chain Generation                31.4%       -10.0%           SWE-Debate          DeepSeek-V3-0324           81.67 (+3.93)
+       w/o Multi-Agent Debate                       37.2%        -4.2%
+       w/o Edit plan                                35.4%        -6.0%        Table 3 shows the localization performance comparison across
+                                                                           different methods on the SWE-Bench-Lite dataset, which we adopt
+                                                                           to facilitate direct comparison with existing approaches [1, 6, 20, 43,
+   We observe that removing the multiple chain generation compo-
+                                                                           46], referecing the results from LocAgent [6]. SWE-Debate achieves
+nent causes the most significant performance drop, with the method
+                                                                           81.67% file-level localization accuracy, significantly outperform-
+achieving only 31.4% Pass@1, representing a 10.0 percentage point
+                                                                           ing all baseline methods. When comparing with methods using the
+degradation. This suggests that exploring diverse fault propagation
+                                                                           same DeepSeek-V3-0324 model, SWE-Debate demonstrates substan-
+paths through graph traversal significantly improves localization
+                                                                           tial improvements: 14.67% over SWE-Agent, improving from 67.00%
+accuracy. When this component is removed, the method must rely
+                                                                           to 81.67%. This represents an 3.93 percentage point improvement
+on single-path exploration, which frequently misses critical depen-
+                                                                           over the strongest baseline across all model configurations, surpass-
+dency relationships that span multiple files or modules.
+                                                                           ing LocAgent with Claude-3.5 Sonnet which achieves 77.74%.
+   Similarly, removing the edit plan component results in a 6.0
+                                                                              The improvement in localization accuracy is largely attributed
+percentage point performance drop, declining from 41.4% to 35.4%.
+                                                                           to our graph-guided approach for constructing multiple fault prop-
+This demonstrates that the structured modification plans generated
+                                                                           agation traces. By systematically exploring code dependency re-
+through competitive debate are essential for guiding the down-
+                                                                           lationships and generating diverse candidate chains, SWE-Debate
+stream patch generation process. Without these plans, the MCTS-
+                                                                           captures structural patterns that single-pass exploration methods
+based editing agent lacks strategic direction, leading to suboptimal
+                                                                           frequently miss. The dramatic improvement over SWE-Agent using
+exploration patterns and reduced fix accuracy.
+                                                                           the same model—from 67.00% to 81.67%—particularly highlights the
+   The multi-agent debate component also plays a critical role. Its
+                                                                           effectiveness of our structured reasoning approach compared to tra-
+removal leads to a 4.2 percentage point drop, reducing performance
+                                                                           ditional search-based methods. Compared to baseline approaches
+to 37.2%. This highlights the importance of competitive reason-
+                                                                           that perform localization once, our method aggregates multiple
+ing in resolving modification disambiguation. Without structured
+                                                                           potential paths, significantly increasing the likelihood that at least
+debate, the system relies on individual agent exploration, which
+                                                                           one trace contains the correct fix location.
+often gets stuck in local solutions when multiple plausible fix lo-
+                                                                              The results demonstrate that our architectural innovations pro-
+cations exist. Our experiments reveal that when the localization
+                                                                           vide benefits that transcend model capabilities. While methods
+chain contains numerous candidate files, the editing process be-
+                                                                           using stronger language models like Claude-3.5 Sonnet generally
+comes inefficient, with agents spending excessive exploration time
+                                                                           achieve better localization performance than those using GPT-
+without converging on optimal solutions.
+                                                                           4o, SWE-Debate with DeepSeek-V3-0324 surpasses even the best
+                                                                           Claude-3.5 Sonnet results. More importantly, the consistent supe-
+ Finding 2: Multiple chain generation provides the largest contri-         riority over other methods using the identical DeepSeek-V3-0324
+ bution to performance (+10.0%), followed by edit plan generation          model confirms that performance gains stem from enhanced rea-
+ (+6.0%) and Multi-agent debate (+4.2%), demonstrating that each           soning frameworks rather than model sophistication alone.
+ component addresses distinct limitations in repository-level is-             Furthermore, the gap between our localization performance and
+ sue resolution.                                                           that of specialized localization methods like LocAgent demonstrates
+Conference’17, July 2017, Washington, DC, USA                                                                                           Li et al.
+
+
+substantial improvement, with SWE-Debate achieving 81.67% com-              Finding 4: A chain depth of 5 achieves the best trade-off be-
+pared to LocAgent’s 77.74%. This shows that competitive multi-              tween reasoning depth and relevance, yielding the highest lo-
+agent debate can enhance even domain-specific approaches. The               calization accuracy. Further increases introduce distracting in-
+reason is that our debate process forces agents to systematically           formation that hinders effective decision-making during the
+evaluate competing localization hypotheses, preventing premature            debate.
+convergence on suboptimal solutions.
+
+ Finding 3: SWE-Debate achieves 81.67% file-level localization             5.5   Case Study
+ accuracy, surpassing the strongest baseline by 3.93%, demon-              To further verify the effectiveness of SWE-debate in actual use,
+ strating that graph-guided fault propagation traces combined              we analyzed a case in SWE-bench. In this case, we investigate an
+ with competitive debate enable more accurate fault localization           issue in SymPy related to the incorrect evaluation of powers ap-
+ than individual exploration approaches.                                   plied to TensorProduct expressions. Specifically, expressions like
+                                                                           TensorProduct(1,Pauli(3))*TensorProduct(1,Pauli(3)) fail
+                                                                           to simplify into TensorProduct(1,1) or 1, even though Pauli(3)**2
+5.4     RQ4: Impact of the Chain Depth.                                    =1. This failure arises because neither the expand(tensorproduct
+To investigate the optimal configuration for multi-agent reason-           =True) method nor the tensor_product_simp function are equipped
+ing in software fault localization, we study the impact of chain           to handle exponentiation of TensorProduct objects. The issue
+depth on localization performance. To balance computational effi-          is non-trivial as it requires coordinated reasoning over symbolic
+ciency with representative evaluation, we constructed a dataset of         power expressions and tensor algebra simplification.
+75 instances, termed SWE-Bench-Verified-S, consisting of 50 sam-               Our method first generates localization chains based on graph-
+ples from SWE-Bench-verified-mini 3 and 25 additional instances            based reasoning over symbolic dependencies, and then applies a
+randomly selected in SWE-Bench-Verified.                                   Multi-Agent Debate process to guide the repair. In the first stage,
+   Figure 3 shows the impact of varying chain depth in the com-            the agent constructs multiple candidate localization chains. Among
+petitive debate process on this dataset. We observe that increasing        the generated candidates, Chain 2 demonstrates high accuracy by
+the chain depth from 1 to 5 consistently boosts file-level localiza-       precisely capturing all necessary modules involved in the failure,
+tion accuracy, reaching a peak Acc@1(File) of 86.7%. This suggests         such as tensor_product_simp_Mul, tensor_product_simp, and
+that deeper reasoning chains enable more effective exploration of          TensorProduct.eval_expand_tensorproduct. This chain provides
+the code graph, capturing complex dependencies and contextual              a comprehensive view of the symbolic rewriting pipeline for tensor
+signals that shallow chains often miss. These results highlight the        expressions, effectively guiding the system to the correct set of
+benefits of multi-step reasoning in guiding the model toward more          files and even narrowing down the specific functions requiring
+informed and accurate localization decisions.                              modification.
+                                                                               Based on this chain, our debate process formulates a multi-
+                                                                           stage plan. It proposes a four-step approach: first, modifying the
+                        0.90                                               simplification logic in tensor_product_simp; second, updating
+                                                86.7%
+                        0.85                                               tensor_product_simp_Mul to support powers; third, extending
+                                                            82.7%
+          Acc@1(File)
+
+
+
+
+                                                                           eval_expand_tensorproduct for power handling; and fourth, adding
+                        0.80                                               an _eval_power method in the TensorProduct class. The edit de-
+                        0.75           72.0%
+                                                                           rived from this plan introduces a recursive rule that distributes the
+                               70.7%                                       exponent over the arguments of a TensorProduct, enabling cor-
+                        0.70                                               rect evaluation of symbolic powers. Notably, all modified functions
+                        0.65                                               were covered by the selected localization chain, demonstrating the
+                                1       3        5            7            accuracy and completeness of our code navigation strategy.
+                                        Chain Depth                            This case highlights the strength of our method in both locating
+                        Figure 3: Impact of the Chain Depth.               and resolving issues. The localization chain effectively surfaces
+                                                                           the relevant symbolic manipulation points, while the structured
+                                                                           planning and debate framework facilitates coordinated edits across
+   However, we also find that increasing the chain depth beyond            multiple modules. Together, they contribute to generating a valid
+5 leads to diminishing returns and even slight performance degra-          and verifiable patch that resolves the issue as expected.
+dation. This suggests a trade-off between reasoning depth and
+relevance. Longer chains are more likely to include information            6 DISCUSSION
+unrelated to resolving the issue, which can distract the model and
+                                                                           6.1 Strengths
+reduce its ability to judge which chain is most likely to lead to a
+correct fix. As a result, the debate process becomes less focused,         SWE-Debate demonstrates three key advantages over existing ap-
+making it harder to converge on accurate localization decisions.           proaches. First, the graph-based localization significantly improves
+                                                                           fault localization accuracy. By building dependency graphs from
+                                                                           code structure and generating multiple fault propagation traces, our
+3 https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini   method achieves 81.67% file-level accuracy. When comparing with
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                                                                   Conference’17, July 2017, Washington, DC, USA
+
+
+
+                          Issue: Evaluating powers of `TensorProduct`
+                     Powers of tensor product expressions are not possible to evaluate with either
+                     `expand(tensorproduct=True)` method nor the `tensor_product_simp`function.                                   Debate
+                     ......
+
+                                                                                                                       Plan
+                                                                                                      <plan>
+                                                                                                      ***stage 1***
+                                  Generate                                                            instruction: Modify the tensor_product_simp function to handle Pow expressions . . .
+                              Localization Chain                                       location
+                                                                                                      context: physics/quantum/tensorproduct.py:tensor_product_simp (lines 348-393)
+                                                                                                      ***stage 2***
+                                                                                                      instruction: Update tensor_product_simp_Mul to recognize and handle . . .
+                                                                                                      context: physics/quantum/tensorproduct.py:tensor_product_simp_Mul (lines 271-345)
+                     Chain1：
+                                                                                                      ***stage 3***
+                     ['physics/paulialgebra.py:Pauli’,                                                instruction: Extend _eval_expand_tensorproduct to handle Pow expressions . . .
+                     'physics/paulialgebra.py:Pauli._eval_power',                                     context:
+                     'physics/quantum/gate.py:CGate._eval_power',                                     physics/quantum/tensorproduct.py:TensorProduct._eval_expand_tensorproduct (lines
+                     'physics/quantum/operator.py:HermitianOperator._eval_power',                     241-258)
+                     'simplify/powsimp.py:_denest_pow’]                                               ***stage 4***
+                                                                                                      instruction: Add a _eval_power method to the TensorProduct class to handle power . . .
+                     Chain2：                                                                          context: physics/quantum/tensorproduct.py:TensorProduct class (lines 49-268)
+                     ['physics/paulialgebra.py:evaluate_pauli_product',                               </plan>
+                     'physics/quantum/tensorproduct.py:TensorProduct._eval_expand_tensorproduct',
+                     'tensor/functions.py:TensorProduct',
+                     'physics/quantum/tensorproduct.py:TensorProduct._eval_rewrite',                    location
+                                                                                                                                    Edit
+                     'diffgeom/diffgeom.py:TensorProduct.__new__']
+                                                                   location                                            location
+                     Chain3：
+                     ['tensor/tensor.py', 'tensor/tensor.py:TensMul’,                                  --- a/sympy/physics/quantum/tensorproduct.py
+                                                                                                       +++ b/sympy/physics/quantum/tensorproduct.py
+                     'tensor/tensor.py:TensMul._flatten’,
+                                                                                                       @@ -142,6 +142,20 @@
+                     'tensor/tensor.py:TensMul.__new__',
+                                                                                                                                                         location
+                     'physics/quantum/tensorproduct.py:TensorProduct.__new__',                             def _eval_adjoint(self):
+                     'tensor/functions.py:TensorProduct.__new__’]                                            return TensorProduct(*[Dagger(i) for i in self.args])
+                                                                                                       +
+                     Chain4：                                                                           +   def _eval_power(self, exponent):+
+                     ['physics/quantum/tensorproduct.py:TensorProduct',                                +     return TensorProduct(*[arg**exponent for arg in self.args])
+                     'physics/quantum/tensorproduct.py:tensor_product_simp_Mul',
+                                                                                                         def _eval_rewrite(self, pattern, rule, **hints):
+                     'physics/quantum/tensorproduct.py:tensor_product_simp',
+                                                                                                             sargs = self.args
+                     'physics/quantum/tensorproduct.py:TensorProduct._eval_expand_tensorproduct ',     @@ -382,7 +396,10 @@
+                     'matrices/expressions/matmul.py:MatMul.doit’, ]                                     if isinstance(e, Add):
+                                                                                                             return Add(*[tensor_product_simp(arg) for arg in e.args])
+                     Chain5：                                                                             elif isinstance(e, Pow):
+                     ['physics/quantum/tensorproduct.py:TensorProduct',                                -      return tensor_product_simp(e.base) ** e.exp
+                     'physics/quantum/tensorproduct.py:tensor_product_simp_Mul',                       +       base = tensor_product_simp(e.base)
+                     'core/mul.py:Mul._eval_power’,                                                    +       if isinstance(base, TensorProduct):
+                                                                                                       +           return TensorProduct(*[arg**e.exp for arg in base.args])
+                     'core/power.py:Pow._eval_expand_power_base',
+                                                                                                       +       return base ** e.exp
+                     'core/power.py:Pow._eval_expand_power_base.pred']                                   elif isinstance(e, Mul):
+
+
+
+
+                                               Figure 4: Case study of SWE-Debate with instance sympy-13974.
+
+methods using identical models, SWE-Debate demonstrates substan-                                     for downstream repair while maintaining compatibility with their
+tial improvements: 14.67% over SWE-Agent with DeepSeek-V3-0324                                       existing architectures. This plug-and-play design enables practical
+and 8.31% over SWE-Search with GPT-4o , representing an 3.93                                         adoption in real software engineering workflows.
+percentage point improvement over the strongest baseline across
+all configurations. The graph traversal strategy effectively captures                                6.2           Limitations and Future Work
+structural relationships that single-agent individual exploration                                    Despite the promising results, SWE-Debate has several limitations
+often misses, particularly for multi-file issues where traditional                                   that suggest directions for future work. The graph construction
+methods frequently fail due to insufficient architectural understand-                                process can be computationally expensive for large codebases, lim-
+ing. This superior localization performance directly translates to                                   iting scalability. Future work chould explore more efficient graph
+better issue resolution, with SWE-Debate achieving 41.4% Pass@1                                      construction algorithms and incremental analysis techniques to
+compared to baseline methods ranging from 23.0% to 38.8%.                                            handle enterprise-scale repositories. Additionally, the current static
+    Second, the competitive multi-agent debate resolves modification                                 analysis approach may miss dynamic relationships and runtime
+ambiguity more effectively than individual agent reasoning. Our                                      behaviors that could improve localization accuracy for certain types
+ablation study shows that removing the debate component causes                                       of issues. Our multi-agent debate currently relies on a single model
+a 4.2 percentage point drop in resolution rate. The three-round                                      with different prompts to simulate diverse reasoning perspectives,
+debate process—independent analysis, competitive refinement, and                                     which may not fully capture the breadth of real-world developer
+final selection—enables agents with different specializations to sys-                                reasoning styles. While our specialized prompts enforce distinct
+tematically evaluate competing fix strategies. This structured com-                                  analytical viewpoints and our ablation study confirms significant
+petitive approach achieves a 2.6 percentage point improvement                                        performance gains from the debate mechanism, integrating multi-
+over the strongest baseline using the same model, demonstrating                                      ple heterogeneous models or incorporating domain-specific knowl-
+that architectural innovations can transcend model capabilities                                      edge bases could further enhance the diversity and quality of the
+when multiple code locations appear relevant but require different                                   debate process. Future work could explore how different founda-
+architectural considerations for correct resolution.                                                 tion models with varying reasoning capabilities can be orchestrated
+    Third, the framework integrates seamlessly with existing issue                                   within the competitive debate framework to achieve even greater
+resolution systems without requiring major modifications. Our                                        analytical diversity. The current batch processing approach limits
+approach can improve the localization modules in frameworks                                          integration with real-time development workflows. Future work
+like SWE-Search and Agentless, providing better starting points                                      could investigate lightweight continuous analysis modes and tighter
+Conference’17, July 2017, Washington, DC, USA                                                                                            Li et al.
+
+
+integration with development environments to provide immediate             tools [32, 40, 42, 44]. LocAgent [6] leverages graph-based repre-
+issue resolution assistance during coding.                                 sentations to enable multi-hop reasoning across code dependen-
+                                                                           cies, while OrcaLoca [48] improves localization accuracy through
+                                                                           priority-based scheduling and distance-aware context pruning. And
+7    THREATS TO VALIDITY                                                   CoSIL [14] reduces search space using module call graphs with
+Internal. The primary internal threat stems from potential data            iterative context-aware exploration. However, these methods re-
+contamination, as the pre-training corpus of DeepSeek-V3-0324              main fundamentally limited by single-agent reasoning perspectives
+may contain repositories from SWE-Bench. To mitigate this con-             and struggle with modification disambiguation scenarios where
+cern, we emphasize that our evaluation focuses on reasoning pro-           multiple locations match issue descriptions but require different
+cesses rather than memorized solutions. Our method generates fault         architectural viewpoints for correct evaluation. Our work addresses
+propagation traces through systematic graph traversal and struc-           this limitation by introducing competitive multi-agent debate that
+tured multi-agent debate, relying on analytical reasoning rather           systematically evaluates competing localization hypotheses.
+than direct code recall. The substantial improvements over base-
+line methods using identical models provide evidence that perfor-
+                                                                           8.2    Repository-Level Issue Resolution
+mance gains derive from enhanced reasoning capabilities rather
+than memorization effects. Future work will include evaluation on          Automated repository issue resolution has evolved through two
+contamination-free datasets to further validate these findings.            main paradigms-agent-based and pipeline-based. Agent-based sys-
+   A second internal threat arises from experimental scope limita-         tems model software engineering as sequential decision-making,
+tions imposed by time and budget constraints. Our evaluation is            where language models interact with code environments through
+restricted to the open-source DeepSeek-V3-0324 model and a sub-            structured action spaces. SWE-Agent [46] established foundational
+set of the SWE-Bench-Verified dataset. While our results demon-            principles for agent-environment interaction, AutoCodeRover [52]
+strate that SWE-Debate outperforms numerous methods across                 focused on search-based localization, SWE-Search [1] introduced
+both identical and different foundation models, this constraint lim-       Monte Carlo Tree Search for systematic exploration, and CodeR [3]
+its our ability to comprehensively validate the generalizability of        explored collaborative multi-agent architectures with pre-defined
+our competitive debate framework across diverse language model             task graphs. Pipeline-based approaches break down issue reso-
+architectures. Future work will expand evaluation to encompass a           lution into specialized computational workflows. Agentless [43]
+broader range of foundation models and larger datasets to establish        pioneered this paradigm by separating localization, repair, and vali-
+more comprehensive performance benchmarks.                                 dation into targeted stages, while CodeMonkeys [10] investigated
+   External. The main external threat comes from evaluation on a           iterative refinement through test-time computation scaling. Recent
+single dataset SWE-Bench-Verified limited to Python repositories,          advances include long-context models with appropriate prompt-
+which may not generalize to other programming languages or soft-           ing [13], training-based approaches for specialized model fine-
+ware domains. To address this, our key components—dependency               tuning [27, 29, 47], and RepoUnderstander [23] which constructs
+graph construction, semantic matching, and debate frameworks—are           repository knowledge graphs for enhanced whole-repository un-
+designed to be language-agnostic, focusing on structural reasoning         derstanding.
+rather than language-specific patterns. And we will evaluate our               However, existing methodologies face a fundamental limitation
+method on more diverse datasets like Multi-SWE-Bench [49] in the           stemming from limited observation scope. They often get stuck
+future.                                                                    in local solutions and fail to resolve ambiguities when multiple
+                                                                           code locations appear plausible, as they lack the diverse analytical
+                                                                           perspectives needed to systematically evaluate competing mod-
+8 RELATED WORK                                                             ification plans [1, 7, 51]. Our approach targets this localization
+                                                                           bottleneck by providing more accurate fault localization through
+8.1 Fault Localization                                                     competitive multi-agent analysis, enabling seamless integration
+Traditional fault localization techniques, including spectrum-based        with current issue resolution systems while improving their overall
+fault localization (SBFL) [16], mutation-based fault localization          issue resolution rates.
+(MBFL) [28], and learning-based methods [17, 24, 36], mainly relied
+on test execution data and program analysis to identify buggy code
+regions. However, these techniques face fundamental limitations            8.3    LLM Multi-Agent Systems
+when applied to repository-level issue resolution: they require com-       Multi-agent systems have emerged as a promising approach for
+prehensive test suites to trigger fault patterns [25, 37], struggle with   complex problem-solving by leveraging diverse specialized per-
+complex dependency relationships across multiple files, and cannot         spectives and collaborative reasoning. In software engineering
+effectively bridge the semantic gap between natural language issue         contexts, these systems have shown success across various tasks
+descriptions and code structures.                                          including code generation [12, 41], automated testing and debug-
+   Recent LLM-based approaches have advanced fault localization            ging [11, 34]. Current multi-agent architectures mainly use col-
+through sophisticated code understanding and repository naviga-            laborative paradigms that emphasize consensus-building and in-
+tion capabilities. Methods like RCAgent [40] integrate multiple            formation sharing, with scaling achieved through either cognitive
+analysis tools for decision support, and AgentFL [32] scales fault         enhancement of individual agents or population scaling through
+localization through multi-agent collaboration with static analysis        large agent collectives [30, 53].
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                                   Conference’17, July 2017, Washington, DC, USA
+
+
+   Multi-agent debate systems represent a particularly relevant                            Graph-Guided LLM Agents for Code Localization. arXiv:2503.09089 [cs]
+approach for decision-making scenarios requiring systematic eval-                      [7] Alejandro Cuadron, Dacheng Li, Wenjie Ma, Xingyao Wang, Yichuan Wang,
+                                                                                           Siyuan Zhuang, Shu Liu, Luis Gaspar Schroeder, Tian Xia, Huanzhi Mao, Nicholas
+uation of competing alternatives. Existing debate frameworks typ-                          Thumiger, Aditya Desai, Ion Stoica, Ana Klimovic, Graham Neubig, and Joseph E.
+ically follow collaborative models where agents engage in struc-                           Gonzalez. 2025. The Danger of Overthinking: Examining the Reasoning-Action
+                                                                                           Dilemma in Agentic Tasks.
+tured argumentation to reach consensus through iterative refine-                       [8] DeepSeek-AI. 2025. DeepSeek-V3 Technical Report. arXiv:2412.19437 [cs]
+ment [2, 9]. However, these collaborative approaches face crit-                        [9] Yilun Du, Shuang Li, Antonio Torralba, Joshua B. Tenenbaum, and Igor Mor-
+ical limitations in technical domains: agents often suffer from                            datch. 2024. Improving Factuality and Reasoning in Language Models through
+                                                                                           Multiagent Debate. In Proceedings of the 41st International Conference on Machine
+thought degeneration and resist modification despite potentially                           Learning (ICML’24, Vol. 235). JMLR.org, Vienna, Austria, 11733–11763.
+incorrect stances. Recent work has attempted to address these is-                     [10] Ryan Ehrlich, Bradley Brown, Jordan Juravsky, Ronald Clark, Christopher Ré,
+sues through role assignment strategies and agreement modulation                           and Azalia Mirhoseini. 2025. CodeMonkeys: Scaling Test-Time Compute for
+                                                                                           Software Engineering.
+techniques [19, 50], but these approaches still maintain collabora-                   [11] Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu Zheng, Yuheng Cheng,
+tive consensus-seeking paradigms that may not generate sufficient                          Ceyao Zhang, Jinlin Wang, Zili Wang, Steven Ka Shing Yau, Zijuan Lin, Liyang
+                                                                                           Zhou, Chenyu Ran, Lingfeng Xiao, Chenglin Wu, and Jürgen Schmidhuber.
+analytical pressure for complex architectural decision-making. In                          2023. MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework.
+contrast, our work introduces a competitive debate framework for                           arXiv:2308.00352
+software fault localization that creates analytical tension by forcing                [12] Dong Huang, Qingwen Bu, Jie M. Zhang, Michael Luck, and Heming Cui. 2023.
+                                                                                           AgentCoder: Multi-Agent-based Code Generation with Iterative Testing and
+agents to rigorously defend their localization hypotheses against                          Optimisation. arXiv:2312.13010
+competing proposals. Our structured, multi-round debate, com-                         [13] Mingjian Jiang, Yangjun Ruan, Luis Lastras, Pavan Kapanipathi, and Tatsunori
+bined with graph-based dependency analysis, is designed to excel                           Hashimoto. 2025. Putting It All into Context: Simplifying Agents with LCLMs.
+                                                                                           arXiv:2505.08120 [cs]
+at tasks requiring precise disambiguation and strategic architec-                     [14] Zhonghao Jiang, Xiaoxue Ren, Meng Yan, Wei Jiang, Yong Li, and Zhongxin Liu.
+tural reasoning, overcoming the limitations of purely collaborative                        2025. CoSIL: Software Issue Localization via LLM-Driven Code Repository Graph
+                                                                                           Searching. arXiv:2503.22424 [cs]
+systems.                                                                              [15] Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir
+                                                                                           Press, and Karthik R. Narasimhan. 2024. SWE-bench: Can Language Models
+                                                                                           Resolve Real-world Github Issues?. In ICLR.
+9    CONCLUSION                                                                       [16] James A. Jones and Mary Jean Harrold. 2005. Empirical Evaluation of the Taran-
+In this paper, we presented SWE-Debate, a competitive multi-agent                          tula Automatic Fault-Localization Technique. In Proceedings of the 20th IEEE/ACM
+                                                                                           International Conference on Automated Software Engineering. ACM, Long Beach
+debate framework that addresses the agents’ limited observation                            CA USA, 273–282.
+scope problem in repository-level issue resolution. Our approach                      [17] Xia Li, Wei Li, Yuqun Zhang, and Lingming Zhang. 2019. DeepFL: Integrating
+combines graph-based fault propagation trace generation with                               Multiple Fault Diagnosis Dimensions for Deep Fault Localization. In Proceedings of
+                                                                                           the 28th ACM SIGSOFT International Symposium on Software Testing and Analysis.
+structured multi-agent debates to systematically evaluate compet-                          ACM, Beijing China, 169–180.
+ing localization hypotheses, overcoming the perspective limitations                   [18] Yizhou Liu, Pengfei Gao, Xinchen Wang, Jie Liu, Yexuan Shi, Zhao Zhang,
+of single-agent methods. Experimental evaluation on SWE-Bench-                             and Chao Peng. 2024. MarsCode Agent: AI-native Automated Bug Fixing.
+                                                                                           arXiv:2409.00899 [cs]
+Verified shows that SWE-Debate achieves 6.7% improvement in                           [19] Yuhan Liu, Yuxuan Liu, Xiaoqing Zhang, Xiuying Chen, and Rui Yan. 2025.
+issue resolution rate over state-of-the-art baselines. The framework                       The Truth Becomes Clearer Through Debate! Multi-Agent Systems with Large
+                                                                                           Language Models Unmask Fake News. arXiv:2505.08532 [cs]
+also demonstrates 5.1% improvement in fault localization accuracy,                    [20] Weijie Lv, Xuan Xia, and Sheng-Jun Huang. 2024. CodeACT: Code Adaptive
+with potential to enhance the fault localization phases of other                           Compute-efficient Tuning Framework for Code LLMs. arXiv:2408.02193 [cs]
+automated issue resolution methods.                                                   [21] Yingwei Ma, Rongyu Cao, Yongchang Cao, Yue Zhang, Jue Chen, Yibo Liu, Yuchen
+                                                                                           Liu, Binhua Li, Fei Huang, and Yongbin Li. 2024. Lingma SWE-GPT: An Open
+                                                                                           Development-Process-Centric Language Model for Automated Software Improve-
+ACKNOWLEDGMENT                                                                             ment. arXiv:2411.00622 [cs]
+                                                                                      [22] Yingwei Ma and Yue Liu. 2025. Improving Automated Issue Resolution via
+This research is funded by the National Key Research and Devel-                            Comprehensive Repository Exploration. In ICLR 2025 Third Workshop on Deep
+opment Program of China (Grant No. 2023YFB4503802) and the                                 Learning for Code.
+                                                                                      [23] Yingwei Ma, Qingping Yang, Rongyu Cao, Binhua Li, Fei Huang, and Yongbin Li.
+Natural Science Foundation of Shanghai (Grant No. 25ZR1401175).                            2024. How to Understand Whole Software Repository? arXiv:2406.01422 [cs]
+                                                                                      [24] Xiangxin Meng, Xu Wang, Hongyu Zhang, Hailong Sun, and Xudong Liu. 2022.
+                                                                                           Improving Fault Localization and Program Repair with Deep Semantic Features
+REFERENCES                                                                                 and Transferred Knowledge. In Proceedings of the 44th International Conference
+ [1] Antonis Antoniades, Albert Örwall, Kexun Zhang, Yuxi Xie, Anirudh Goyal, and          on Software Engineering. ACM, Pittsburgh Pennsylvania, 1169–1180.
+     William Wang. 2024. SWE-Search: Enhancing Software Agents with Monte Carlo       [25] Niels Mündler, Mark Niklas Mueller, Jingxuan He, and Martin Vechev. 2024.
+     Tree Search and Iterative Refinement. arXiv:2410.20285                                SWT-Bench: Testing and Validating Real-World Bug-Fixes with Code Agents. In
+ [2] Chi-Min Chan, Weize Chen, Yusheng Su, Jianxuan Yu, Wei Xue, Shanghang                 The Thirty-eighth Annual Conference on Neural Information Processing Systems.
+     Zhang, Jie Fu, and Zhiyuan Liu. 2023. ChatEval: Towards Better LLM-based         [26] OpenAI.       2024.                   Introducing       SWE-bench         Verified.
+     Evaluators through Multi-Agent Debate. In The Twelfth International Conference        https://openai.com/index/introducing-swe-bench-verified/.
+     on Learning Representations.                                                     [27] Jiayi Pan, Xingyao Wang, Graham Neubig, Navdeep Jaitly, Heng Ji, Alane Suhr,
+ [3] Dong Chen, Shaoxin Lin, Muhan Zeng, Daoguang Zan, Jian-Gang Wang, Anton               and Yizhe Zhang. 2024. Training Software Engineering Agents and Verifiers with
+     Cheshkov, Jun Sun, Hao Yu, Guoliang Dong, Artem Aliev, Jie Wang, Xiao Cheng,          SWE-Gym.
+     Guangtai Liang, Yuchi Ma, Pan Bian, Tao Xie, and Qianxiang Wang. 2024. CodeR:    [28] Mike Papadakis and Yves Le Traon. 2015. Metallaxis-FL: Mutation-based Fault
+     Issue Resolving with Multi-Agent and Task Graphs. arXiv:2406.01304 [cs]               Localization. Software Testing, Verification and Reliability 25, 5-7 (Aug. 2015),
+ [4] Yuxiao Chen, Jingzheng Wu, Xiang Ling, Changjiang Li, Zhiqing Rui, Tianyue            605–628.
+     Luo, and Yanjun Wu. 2024. When Large Language Models Confront Repository-        [29] Minh V. T. Pham, Huy N. Phan, Hoang N. Phan, Cuong Le Chi, Tien N. Nguyen,
+     Level Automatic Program Repair: How Well They Done?                                   and Nghi D. Q. Bui. 2025. SWE-Synth: Synthesizing Verifiable Bug-Fix Data to En-
+ [5] Zhi Chen, Wei Ma, and Lingxiao Jiang. 2025.           Unveiling Pitfalls: Un-         able Large Language Models in Resolving Real-World Bugs. arXiv:2504.14757 [cs]
+     derstanding Why AI-driven Code Agents Fail at GitHub Issue Resolution.           [30] Chen Qian, Zihao Xie, YiFei Wang, Wei Liu, Kunlun Zhu, Hanchen Xia, Yufan
+     arXiv:2503.12374 [cs]                                                                 Dang, Zhuoyun Du, Weize Chen, Cheng Yang, Zhiyuan Liu, and Maosong Sun.
+ [6] Zhaoling Chen, Xiangru Tang, Gangda Deng, Fang Wu, Jialong Wu, Zhiwei                 2024. Scaling Large Language Model-based Multi-Agent Collaboration. In The
+     Jiang, Viktor Prasanna, Arman Cohan, and Xingyao Wang. 2025. LocAgent:                Thirteenth International Conference on Learning Representations.
+Conference’17, July 2017, Washington, DC, USA                                                                                                                        Li et al.
+
+
+[31] Chen Qian, Zihao Xie, YiFei Wang, Wei Liu, Kunlun Zhu, Hanchen Xia, Yu-                 ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA
+     fan Dang, Zhuoyun Du, Weize Chen, Cheng Yang, Zhiyuan Liu, and Maosong                  2024). Association for Computing Machinery, New York, NY, USA, 1592–1604.
+     Sun. 2025. Scaling Large Language Model-based Multi-Agent Collaboration.           [53] Mingchen Zhuge, Wenyi Wang, Louis Kirsch, Francesco Faccio, Dmitrii
+     arXiv:2406.07155 [cs]                                                                   Khizbullin, and Jürgen Schmidhuber. 2024. Gptswarm: Language Agents as
+[32] Yihao Qin, Shangwen Wang, Yiling Lou, Jinhao Dong, Kaixin Wang, Xiaoling Li,            Optimizable Graphs. In Forty-First International Conference on Machine Learning.
+     and Xiaoguang Mao. 2025. AgentFL: Scaling LLM-based Fault Localization to
+     Project-Level Context. arXiv:2403.16362 [cs]
+[33] Yuchen Shao, Yuheng Huang, Jiawei Shen, Lei Ma, Ting Su, and Chengcheng Wan.       A     SWE-BENCH-VERIFIED-S
+     2025. Are LLMs Correctly Integrated into Software Systems?. In 2025 IEEE/ACM
+     47th International Conference on Software Engineering (ICSE). IEEE, 1178–1190.     SWE-Bench-verified-mini4 is a subset of SWE-Bench-Verified, con-
+[34] Yuling Shi, Songsong Wang, Chengcheng Wan, and Xiaodong Gu. 2024. From             taining 50 instead of 500 datapoints, requiring 5GB instead of 130GB
+     Code to Correctness: Closing the Last Mile of Code Generation with Hierarchical
+     Debugging. arXiv:2410.01215 [cs]                                                   of storage, while maintaining a similar distribution of performance,
+[35] Yuling Shi, Hongyu Zhang, Chengcheng Wan, and Xiaodong Gu. 2024. Between           test pass rates, and task difficulty as the original dataset. Building
+     Lines of Code: Unraveling the Distinct Patterns of Machine and Human Program-      on SWE-Bench-verified-mini, we augment it with 25 additional
+     mers. In 2025 IEEE/ACM 47th International Conference on Software Engineering
+     (ICSE). IEEE Computer Society, 51–62.                                              instances to better approximate the distribution and performance
+[36] Jeongju Sohn and Shin Yoo. 2017. FLUCCS: Using Code and Change Metrics to          characteristics of the full dataset, resulting in our constructed bench-
+     Improve Fault Localization. In Proceedings of the 26th ACM SIGSOFT International
+     Symposium on Software Testing and Analysis. ACM, Santa Barbara CA USA,
+                                                                                        mark, SWE-Bench-Verified-S.
+     273–283.
+[37] Xinchen Wang, Pengfei Gao, Xiangxin Meng, Chao Peng, Ruida Hu, Yun Lin,
+     and Cuiyun Gao. 2024. AEGIS: An Agent-based Framework for General Bug                        Table 4: Instance Id in SWE-Bench-Verified-S
+     Reproduction from Issue Descriptions. arXiv:2411.18015 [cs]
+[38] Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu, Xiangru Tang, Mingchen
+     Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, Hoang H. Tran, Fuqiang            django__django-11790                       django__django-11815
+     Li, Ren Ma, Mingzhang Zheng, Bill Qian, Yanjun Shao, Niklas Muennighoff,                  django__django-11848                       django__django-11880
+     Yizhe Zhang, Binyuan Hui, Junyang Lin, Robert Brennan, Hao Peng, Heng Ji,
+     and Graham Neubig. 2024. OpenHands: An Open Platform for AI Software
+                                                                                               django__django-11885                       django__django-11951
+     Developers as Generalist Agents. arXiv:2407.16741                                         django__django-11964                       django__django-11999
+[39] You Wang, Michael Pradel, and Zhongxin Liu. 2025. Are "Solved Issues" in                  django__django-12039                       django__django-12050
+     SWE-bench Really Solved Correctly? An Empirical Study.                                    django__django-12143                       django__django-12155
+[40] Zefan Wang, Zichuan Liu, Yingying Zhang, Aoxiao Zhong, Jihong Wang, Fengbin
+     Yin, Lunting Fan, Lingfei Wu, and Qingsong Wen. 2024. RCAgent: Cloud Root
+                                                                                               django__django-12193                       django__django-12209
+     Cause Analysis by Autonomous Agents with Tool-Augmented Large Language                    django__django-12262                       django__django-12273
+     Models. In Proceedings of the 33rd ACM International Conference on Information            django__django-12276                       django__django-12304
+     and Knowledge Management (CIKM ’24). Association for Computing Machinery,                 django__django-12308                       django__django-12325
+     New York, NY, USA, 4966–4974.
+[41] Qingyun Wu, Gagan Bansal, Jieyu Zhang, Yiran Wu, Beibin Li, Erkang Zhu, Li
+                                                                                               django__django-12406                       django__django-12708
+     Jiang, Xiaoyun Zhang, Shaokun Zhang, Jiale Liu, Ahmed Hassan Awadallah,                   django__django-12713                       django__django-12774
+     Ryen W. White, Doug Burger, and Chi Wang. 2023. AutoGen: Enabling Next-Gen                 django__django-9296                        sympy__sympy-13852
+     LLM Applications via Multi-Agent Conversation. arXiv:2308.08155 [cs]                       sympy__sympy-12481                         sympy__sympy-17318
+[42] Yonghao Wu, Zheng Li, Jie M. Zhang, Mike Papadakis, Mark Harman, and Yong
+     Liu. 2023. Large Language Models in Fault Localisation. arXiv:2308.15276 [cs]
+                                                                                                sympy__sympy-16766                         sympy__sympy-15976
+[43] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2024. Agent-              sympy__sympy-13974                         sympy__sympy-13798
+     less: Demystifying LLM-based Software Engineering Agents. arXiv:2407.01489                 sympy__sympy-13647                         sympy__sympy-20916
+[44] Aidan Z. H. Yang, Claire Le Goues, Ruben Martins, and Vincent Hellendoorn.                 sympy__sympy-12489                         sympy__sympy-24562
+     2024. Large Language Models for Test-Free Fault Localization. In Proceedings of
+     the IEEE/ACM 46th International Conference on Software Engineering (ICSE ’24).
+                                                                                                sympy__sympy-23824                         sympy__sympy-23950
+     Association for Computing Machinery, New York, NY, USA, 1–12.                              sympy__sympy-24661                         sympy__sympy-16792
+[45] Boyang Yang, Haoye Tian, Jiadong Ren, Shunfu Jin, Yang Liu, Feng Liu, and Bach             sympy__sympy-18189                         sympy__sympy-12096
+     Le. 2025. Enhancing Repository-Level Software Repair via Repository-Aware                  sympy__sympy-24539                         sympy__sympy-13757
+     Knowledge Graphs. arXiv preprint arXiv:2503.21710 (2025).
+[46] John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao,
+                                                                                                sympy__sympy-19495                         sympy__sympy-18698
+     Karthik R. Narasimhan, and Ofir Press. 2024. SWE-agent: Agent-Computer                     sympy__sympy-19346                         sympy__sympy-17139
+     Interfaces Enable Automated Software Engineering. In The Thirty-eighth Annual              sympy__sympy-15809                         sympy__sympy-22456
+     Conference on Neural Information Processing Systems.                                    sphinx-doc__sphinx-10323                   sphinx-doc__sphinx-10435
+[47] John Yang, Kilian Leret, Carlos E. Jimenez, Alexander Wettig, Kabir Khandpur,
+     Yanzhe Zhang, Binyuan Hui, Ofir Press, Ludwig Schmidt, and Diyi Yang. 2025.
+                                                                                             sphinx-doc__sphinx-10466                   sphinx-doc__sphinx-10673
+     SWE-smith: Scaling Data for Software Engineering Agents.                                sphinx-doc__sphinx-11510                    sphinx-doc__sphinx-7590
+[48] Zhongming Yu, Hejia Zhang, Yujie Zhao, Hanxian Huang, Matrix Yao, Ke Ding,               sphinx-doc__sphinx-7748                    sphinx-doc__sphinx-7757
+     and Jishen Zhao. 2025. OrcaLoca: An LLM Agent Framework for Software Issue               sphinx-doc__sphinx-7985                    sphinx-doc__sphinx-8035
+     Localization. arXiv:2502.00350 [cs]
+[49] Daoguang Zan, Zhirong Huang, Wei Liu, Hanwu Chen, Linhao Zhang, Shulin
+                                                                                              sphinx-doc__sphinx-8056                    sphinx-doc__sphinx-8265
+     Xin, Lu Chen, Qi Liu, Xiaojian Zhong, Aoyan Li, Siyao Liu, Yongsheng Xiao,               sphinx-doc__sphinx-8269                    sphinx-doc__sphinx-8475
+     Liangqiang Chen, Yuyu Zhang, Jing Su, Tianyu Liu, Rui Long, Kai Shen, and Liang          sphinx-doc__sphinx-8548                    sphinx-doc__sphinx-8551
+     Xiang. 2025. Multi-SWE-bench: A Multilingual Benchmark for Issue Resolving.              sphinx-doc__sphinx-8638                    sphinx-doc__sphinx-8721
+     arXiv:2504.02605 [cs]
+[50] Guibin Zhang, Yanwei Yue, Xiangguo Sun, Guancheng Wan, Miao Yu, Junfeng
+                                                                                              sphinx-doc__sphinx-9229                    sphinx-doc__sphinx-9230
+     Fang, Kun Wang, Tianlong Chen, and Dawei Cheng. 2025. G-Designer: Archi-                 sphinx-doc__sphinx-9281                    sphinx-doc__sphinx-9320
+     tecting Multi-agent Communication Topologies via Graph Neural Networks. In               sphinx-doc__sphinx-9367                    sphinx-doc__sphinx-9461
+     ICLR 2025 Workshop on Foundation Models in the Wild.                                     sphinx-doc__sphinx-9698
+[51] Linghao Zhang, Shilin He, Chaoyun Zhang, Yu Kang, Bowen Li, Chengxing
+     Xie, Junhao Wang, Maoquan Wang, Yufan Huang, Shengyu Fu, Elsie Nallipogu,
+     Qingwei Lin, Yingnong Dang, Saravan Rajmohan, and Dongmei Zhang. 2025.
+     SWE-bench Goes Live! arXiv:2505.23419 [cs]
+[52] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+     toCodeRover: Autonomous Program Improvement. In Proceedings of the 33rd            4 https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                                      Conference’17, July 2017, Washington, DC, USA
+
+
+                  Table 5: MCTS Hyperparameters
+                                                                                      2. ** Focus on direct mentions **: Only include
+                                                                                           entities that are clearly referenced in the
+Hyperparameter                             Description                      Default        issue .
+Main Search Parameters                                                                3. ** Avoid redundancy **: If multiple terms refer
+ c_param                                   UCT exploration parameter         1.41          to the same entity ( e . g . , " the payment
+ max_expansions                            Max children per node               2           handler " and ` PaymentProcessor `) , pick the
+ max_iterations                            Max MCTS iterations                20           most precise name .
+ provide_feedback                          Enable feedback                   True
+                                                                                      4. ** Prioritize key components **: Rank entities by
+ best_first                                Use best-first strategy           True
+ value_function_temperature                Value function temperature         0.2            how central they are to the issue .
+ max_depth                                 Max tree depth                     20      5. ** Return only names **: Do not include paths ,
+                                                                                           modules , or extra descriptions .
+UCT Score Calculation Parameters
+  exploration_weight                       UCT exploration weight             1.0     6. ** Limit to { max_entities } entities **: Select
+  depth_weight                             Depth penalty weight               0.8          only the { max_entities } most relevant and
+  depth_bonus_factor                       Depth bonus factor                200.0         important entities for this issue .
+  high_value_threshold                     High-value node threshold         55.0
+  low_value_threshold                      Low-value node threshold          50.0     ** Output Format :**
+  very_high_value_threshold                Very high-value threshold         75.0     Return a JSON list of exactly { max_entities }
+  high_value_leaf_bonus_constant           High-value leaf bonus             20.0
+                                                                                            entity names in order of relevance ( most
+  high_value_bad_children_bonus_constant   High-value bad children bonus     20.0
+  high_value_child_penalty_constant        High-value child penalty           5.0           relevant first ) :
+                                                                                      [" entity_name1 " , " entity_name2 " , " entity_name3 ",
+Action Model Parameters
+                                                                                            ...]
+  action_model_temperature                 Action model temperature           0.7
+Discriminator Parameters                                                              ** Examples :**
+  number_of_agents                         Number of Discriminator Agents      5
+  number_of_round                          Number of debate rounds             3
+  discriminator_temperature                Discriminator temperature           1      1. ** Issue Description :**
+                                                                                          Query syntax error with condition and distinct
+                                                                                                 combination
+                                                                                          Description :
+B     HYPERPARAMETERS OF MCTS                                                             A Count annotation containing both a Case
+The Monte Carlo Tree Search (MCTS) algorithm used in this study                                 condition and a distinct = True param
+                                                                                                produces a query error on Django 2.2 (
+employs several hyperparameters as following [15]:                                              whatever the db backend ) . A space is
+                                                                                                missing at least (... COUNT ( DISTINCTCASE
+C     PROMPT TEMPLATES                                                                          WHEN ...) .
+In the following section, we enumerate all the prompts used through-                     ** Output ( if max_entities =3) :**
+out our entire workflow, from the initial entity extraction to the                       [" Count " , " DISTINCTCASE " , " distinct "]
+final plan generation.
+                                                                                      2. ** Issue Description :**
+     Prompt 1: INITIAL ENTITY EXTRACTION PROMPT                                          " After upgrading to v2 .0 , the ` UserSession `
+                                                                                               class sometimes fails to store session
+                                                                                               data in Redis , causing login loops ."
+     You are a code analysis expert . Given an issue
+          description , your task is to identify the                                     ** Output ( if max_entities =2) :**
+          most relevant code entities ( classes , methods                                [" UserSession " , " Redis "]
+          , functions , variables ) that are likely
+          involved in the issue .                                                     3. ** Issue Description :**
+                                                                                         " The ` calculate_discount () ` function applies
+     Important : Only extract entities that are                                                incorrect discounts for bulk orders when `
+          explicitly mentioned or strongly implied by                                          customer_type = ' wholesale ' `."
+          the issue description . Do not invent names
+          that are not referenced in the text .                                          ** Output ( if max_entities =3) :**
+                                                                                         [" calculate_discount " , " customer_type " , "
+     ** Issue Description :**                                                                  wholesale "]
+     { issue_description }
+                                                                                      Note : Return only the simple names like " __iter__
+     ** Instructions :**                                                                    " , " page_range " , " MyClass " , " my_function ",
+     1. Analyze the issue description to identify :                                         etc . Do not include file paths or full
+         - ** Classes **: e . g . , ` UserAuthenticator `, `                                qualified names .
+               PaymentProcessor `                                                     Return exactly { max_entities } entities ,
+         - ** Methods / Functions **: e . g . , `                                           prioritizing the most important ones if there
+               validate_credentials () `, ` process_payment                                   are more candidates .
+               () `
+         - ** Variables / Parameters **: e . g . , ` user_id `, `
+               transaction_amount `
+         - ** Error Types / Exceptions **: e . g . , `
+               RateLimitExceededError `, `
+               DatabaseConnectionError `
+Conference’17, July 2017, Washington, DC, USA                                                                                     Li et al.
+
+
+    Prompt 2: CODE SNIPPET ENTITY EXTRACTION
+                                                                               " relevance_reason ": " Contains user - related
+    PROMPT                                                                            functionality mentioned in the issue
+                                                                                     ",
+    Based on the following code snippets and problem                           " diversity_value ": " Model layer from
+         statement , identify the 4 most relevant                                    different file "
+         entities ( files , classes , or functions ) that               }} ,
+         are likely involved in solving this issue .                    {{
+                                                                               " entity_id ": " src / views . py : UserView ",
+    ** Problem Statement :**                                                   " entity_type ": " class " ,
+    { problem_statement }                                                      " relevance_reason ": " Handles user
+                                                                                     interface logic that may need
+    ** Code Snippets :**                                                             modification " ,
+    { code_snippets }                                                          " diversity_value ": " View layer from
+                                                                                     different file "
+    ** Instructions :**                                                 }} ,
+    1. Analyze the problem statement to understand                      {{
+          what needs to be fixed / implemented                                 " entity_id ": " src / utils / validators . py :
+    2. Review the code snippets to identify relevant                                 validate_user_input " ,
+          entities                                                             " entity_type ": " function " ,
+    3. ** PRIORITIZE DIVERSITY **: Select entities from                        " relevance_reason ": " Input validation
+          different files whenever possible to ensure                                logic relevant to the user issue ",
+          comprehensive coverage                                               " diversity_value ": " Utility function from
+    4. ** BALANCE RELEVANCE AND DIVERSITY **: Choose                                 different module "
+          entities that are both highly relevant to the                 }} ,
+           issue AND come from different modules / files                {{
+    5. Avoid selecting multiple entities from the same                         " entity_id ": " src / config . py " ,
+           file unless absolutely necessary                                    " entity_type ": " file " ,
+    6. Select exactly 4 entities that collectively                             " relevance_reason ": " Configuration
+          provide the best coverage for solving the                                  settings that may affect user
+          issue                                                                      behavior " ,
+    7. For each entity , provide the exact entity ID in                        " diversity_value ": " Configuration file
+           the format expected by the codebase                                       from different location "
+                                                                        }}
+    ** Selection Strategy :**                                     ]
+    - First priority : High relevance to the problem +            ```
+          Different file locations
+    - Second priority : High relevance to the problem (           ** Remember **: Maximize both relevance to the issue
+          even if some files overlap )                                   AND diversity across different files / modules
+    - Ensure the selected entities represent different                   to ensure comprehensive localization chain
+           aspects or layers of the solution                            generation .
+
+    ** Output Format :**
+    Return a JSON list containing exactly 4 entities ,
+          each with the following format :                        Prompt 3: NEIGHBOR PREFILTERING PROMPT
+    ``` json
+    [
+         {{                                                       You are a code analysis expert helping to select
+             " entity_id ": " file_path : QualifiedName or             the most relevant and diverse neighbors for
+                   just file_path " ,                                  exploring a dependency graph to solve a
+             " entity_type ": " file | class | function " ,            specific issue .
+             " relevance_reason ": " Brief explanation of
+                   why this entity is relevant to the             ** Issue Description :**
+                   issue " ,                                      { issue_description }
+             " diversity_value ": " How this entity adds
+                   diversity ( e . g . , ' different file ', '    ** Current Entity :** { current_entity }
+                   different layer ', ' different                 ** Current Entity Type :** { current_entity_type }
+                   functionality ') "                             ** Traversal Depth :** { depth }
+         }}
+    ]                                                             ** Available Neighbor Entities ({ total_count } total
+    ```                                                                 ) :**
+                                                                  { neighbor_list }
+    ** Example :**
+    ``` json                                                      ** Your Task :**
+    [                                                             From the { total_count } available neighbors , select
+         {{                                                              up to { max_selection } most relevant and
+             " entity_id ": " src / models . py : UserModel " ,         diverse entities that would be most promising
+             " entity_type ": " class " ,                                to explore next .
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                          Conference’17, July 2017, Washington, DC, USA
+
+
+
+    ** Selection Criteria :**                                              - We are performing graph traversal to find code
+    1. ** Relevance to Issue **: How likely is this                             locations relevant to solving this issue
+          neighbor to contain code related to solving                      - Each neighbor represents a related code entity (
+          the issue ?                                                           file , class , or function )
+    2. ** Diversity **: Avoid selecting too many                           - We need to select the most promising node to
+          entities from the same file or with similar                           continue exploration
+          names
+    3. ** Strategic Value **: Prioritize entities that                     ** Instructions :**
+          could lead to discovering the root cause or                      1. Analyze how each neighbor might relate to
+          solution                                                               solving the issue
+    4. ** Entity Type Variety **: Balance between files ,                  2. Consider the traversal depth and whether we
+           classes , and functions when possible                                 should continue or stop
+                                                                           3. Evaluate which neighbor is most likely to
+    ** Instructions :**                                                          contain relevant code for the solution
+    1. Analyze each neighbor entity ID to understand                       4. Return your decision on whether to continue
+          what it likely represents                                              exploration and which neighbor to select
+    2. Consider file paths , entity names , and types to
+           assess relevance                                                ** Output Format :**
+    3. Ensure diversity by avoiding redundant                              Return a JSON object with your decision :
+          selections from the same file / module                           ``` json
+    4. Select entities that complement each other in                       {{
+          exploring different aspects of the issue                              " should_continue ": true / false ,
+    5. Return exactly the entity IDs that should be                             " selected_neighbor ": " neighbor_entity_id or
+          explored further ( up to { max_selection })                                 null " ,
+                                                                                " reasoning ": " Explanation of your decision ",
+    ** Output Format :**                                                        " confidence ": 0 -100
+    Return a JSON object with your selection :                             }}
+    ``` json                                                               ```
+    {{
+         " selected_neighbors ": [                                         If should_continue is false , set selected_neighbor
+              " neighbor_entity_id_1 " ,                                         to null .
+              " neighbor_entity_id_2 " ,                                   If should_continue is true , select the most
+              ...                                                               promising neighbor_entity_id .
+         ],
+         " selection_reasoning ": " Brief explanation of
+               your selection strategy and why these
+               neighbors were chosen " ,
+         " diversity_considerations ": " How you ensured                   Prompt 5: CHAIN VOTING PROMPT
+               diversity in your selection "
+    }}
+    ```                                                                    You are an expert software engineer tasked with
+                                                                                identifying the optimal modification location
+    Focus on strategic exploration that maximizes the                            for solving a specific software issue .
+         chance of finding issue - relevant code while
+         maintaining diversity .                                           ** Issue Description :**
+                                                                           { issue_description }
+
+                                                                           ** Available Localization Chains :**
+                                                                           { chains_info }
+    Prompt 4: NODE SELECTION PROMPT
+                                                                           ** Your Task :**
+    You are a code analysis expert helping to navigate                     Analyze each localization chain as a potential
+          a dependency graph to solve a specific issue                           modification target and vote for the ONE
+         . Given the current context and available                               chain where making changes would most likely
+         neighboring nodes , determine which node would                          resolve the issue described above .
+          be most promising to explore next .
+                                                                           ** Evaluation Criteria :**
+    ** Issue Description :**                                               1. ** Problem Location Accuracy **: Does this chain
+    { issue_description }                                                        contain the actual location where the bug /
+                                                                                 issue manifests ?
+    ** Current Entity :** { current_entity }                               2. ** Modification Impact **: How directly would
+    ** Current Entity Type :** { current_entity_type }                           changes to this code path affect the
+    ** Traversal Depth :** { depth }                                             described problem ?
+                                                                           3. ** Code Modifiability **: Is the code in this
+    ** Available Neighbor Nodes :**                                              chain well - structured and safe to modify ?
+    { neighbor_info }                                                      4. ** Solution Completeness **: Would fixing this
+                                                                                 chain likely resolve the entire issue , not
+    ** Context :**                                                               just symptoms ?
+Conference’17, July 2017, Washington, DC, USA                                                                     Li et al.
+
+
+
+    5. ** Risk Assessment **: What are the risks of                     " chain_2 ": " Contains the actual iterator
+         modifying this particular code path ?                                implementation where the bug
+                                                                              manifests - ideal modification target
+    ** Key Questions to Consider :**                                          ",
+    - Which chain contains the root cause rather than                   " chain_3 ": " Related display logic but
+          just related functionality ?                                        changes here would not fix the
+    - Where would a developer most likely need to make                        underlying iteration problem "
+           changes to fix this specific issue ?                    }}
+    - Which code path , when modified , would have the        }}
+          most direct impact on resolving the problem ?
+    - Which chain provides the clearest entry point
+          for implementing a fix ?
+                                                              Prompt 6: ROUND 1 MODIFICATION LOCATION
+    ** Instructions :**                                       PROMPT
+    1. For each chain , analyze whether modifying its
+          code would directly address the issue
+    2. Consider the logical flow : which chain is most        You are an expert software engineer tasked with
+          likely to contain the problematic code ?                 identifying specific code locations that need
+    3. Evaluate implementation feasibility : which                  to be modified to solve a given issue .
+          chain would be safest and most effective to
+          modify ?                                            ** Issue Description :**
+    4. Vote for exactly ONE chain that represents the         { issue_description }
+          best modification target
+    5. Focus on where to make changes , not just what ' s     ** Selected Localization Chain :**
+           related to the issue                               { chain_info }
+
+
+    ** Output Format :**                                      ** Your Task :**
+    Return a JSON object with your vote :                     Analyze the localization chain and identify the
+    ``` json                                                        specific locations within this chain that
+    {{                                                              need to be modified to solve the issue . Focus
+         " voted_chain_id ": " chain_X " ,                           on pinpointing the exact functions , methods ,
+         " confidence ": 85 ,                                        or code blocks that require changes .
+         " reasoning ": " Detailed explanation of why this
+                 chain is the best modification target        ** CRITICAL REQUIREMENT FOR INSTRUCTIONS :**
+               for solving the issue " ,                      - Each suggested_approach must be a DETAILED , STEP
+         " modification_strategy ": " Brief description of          - BY - STEP instruction
+                 what type of changes would be needed in      - Include specific code examples , parameter names ,
+               this chain " ,                                         and implementation details
+         " chain_analysis ": {{                               - Specify exact lines to modify , functions to add ,
+              " chain_1 ": " Assessment of this chain as a            and variables to change
+                    modification target " ,                   - Provide concrete implementation guidance that a
+              " chain_2 ": " Assessment of this chain as a          developer can directly follow
+                    modification target " ,                   - Include error handling , edge cases , and
+              ...                                                   validation requirements
+         }}                                                   - Mention specific imports , dependencies , or setup
+    }}                                                                needed
+    ```
+                                                              ** Instructions :**
+    ** Example :**                                            1. Examine each entity in the localization chain
+    ``` json                                                        and its code
+    {{                                                        2. Identify which specific parts of the code are
+         " voted_chain_id ": " chain_2 " ,                          causing the issue or need enhancement
+         " confidence ": 88 ,                                 3. Determine the precise locations where
+         " reasoning ": " Chain 2 contains the pagination           modifications should be made
+               iterator __iter__ method which is where        4. Explain why each location needs modification
+               the infinite loop issue described in the             and what type of change is required
+               problem statement actually occurs .            5. Prioritize the modifications by importance (
+               Modifying the logic in this method to                most critical first )
+               properly handle the iteration termination      6. For each modification , provide DETAILED
+                 would directly solve the reported bug ." ,         implementation instructions with specific
+         " modification_strategy ": " Add proper boundary           code examples
+               checking and iteration termination logic
+               in the __iter__ method " ,                     ** Output Format :**
+         " chain_analysis ": {{                               Return a JSON object with your analysis :
+              " chain_1 ": " Contains utility functions but   ``` json
+                     modifications here would not address     {{
+                     the core iteration logic issue ",             " modification_locations ": [
+                                                                        {{
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution                          Conference’17, July 2017, Washington, DC, USA
+
+
+
+                     " entity_id ": " specific_entity_id " ,               ** Your Task :**
+                     " location_description ": " Specific                  Based on the issue , the localization chain , your
+                           function / method / lines that need                   initial analysis , and insights from other
+                           modification " ,                                      agents , provide a refined and comprehensive
+                     " modification_type ": " fix_bug |                          analysis of where and how the code should be
+                           add_feature | refactor | optimize " ,                 modified .
+                     " priority ": " high | medium | low " ,
+                     " reasoning ": " Detailed explanation of              ** CRITICAL REQUIREMENT FOR REFINED INSTRUCTIONS :**
+                           why this location needs                         - Each suggested_approach must be EXTREMELY
+                           modification " ,                                      DETAILED with complete implementation
+                     " suggested_approach ": " DETAILED step -                   guidance
+                           by - step implementation                        - Include specific code snippets , exact function
+                           instructions with specific code                       signatures , and parameter details
+                           examples , parameter names , exact              - Provide line - by - line modification instructions
+                           function signatures , error                           where applicable
+                           handling , and complete                         - Specify all necessary imports , dependencies , and
+                           implementation guidance that can                       setup requirements
+                           be directly executed by a                       - Include comprehensive error handling and edge
+                           developer "                                           case considerations
+               }}                                                          - Mention testing requirements and validation
+          ],                                                                     steps
+          " overall_strategy ": " Overall approach to                      - Provide specific examples of input / output or
+                solving the issue using these                                    before / after code states
+                modifications " ,
+          " confidence ": 85                                               ** Instructions :**
+    }}                                                                     1. Review your initial analysis and the analyses
+    ```                                                                          from other agents
+                                                                           2. Identify common patterns and disagreements in
+    ** Example of DETAILED suggested_approach :**                                the proposed modifications
+    Instead of : " Add proper termination condition "                      3. Synthesize the best insights from all analyses
+    Provide : " Modify the __iter__ method in the                          4. Refine your modification recommendations based
+          Paginator class by adding a counter variable                           on collective wisdom
+          ' current_page = 1' at the beginning . Then add                  5. Provide a more comprehensive and well - reasoned
+            a while loop condition ' while current_page                          final recommendation
+          <= self . num_pages : ' to replace the infinite                  6. Ensure each suggested_approach contains
+          loop . Inside the loop , yield ' self . page (                         exhaustive implementation details
+          current_page ) ' and increment ' current_page +=
+            1 '. Add try - catch block to handle                           ** Output Format :**
+          PageNotAnInteger and EmptyPage exceptions by                     Return a JSON object with your refined analysis :
+          catching them and breaking the loop . Import                     ``` json
+          the exceptions ' from django . core . paginator                  {{
+          import PageNotAnInteger , EmptyPage ' at the                          " refined_modification_locations ": [
+          top of the file ."                                                         {{
+                                                                                         " entity_id ": " specific_entity_id ",
+                                                                                         " location_description ": " Specific
+                                                                                               function / method / lines that need
+    Prompt 7: ROUND 2 COMPREHENSIVE MODIFICA-                                                  modification " ,
+    TION PROMPT                                                                          " modification_type ": " fix_bug |
+                                                                                               add_feature | refactor | optimize ",
+                                                                                         " priority ": " high | medium | low " ,
+    """                                                                                  " reasoning ": " Enhanced reasoning
+    You are an expert software engineer participating                                          incorporating insights from other
+         in a collaborative code review process to                                               agents " ,
+         determine the best approach for solving a                                       " suggested_approach ": " EXHAUSTIVE step
+         software issue .                                                                      - by - step implementation guide
+                                                                                               including : exact code snippets to
+    ** Issue Description :**                                                                     add / modify / remove , complete
+    { issue_description }                                                                      function signatures , all required
+                                                                                                 imports , parameter validation ,
+    ** Selected Localization Chain :**                                                         error handling , edge cases ,
+    { chain_info }                                                                             testing considerations , and
+                                                                                               specific examples of before / after
+    ** Your Initial Analysis :**                                                                 states " ,
+    { your_initial_analysis }                                                            " supporting_evidence ": " References to
+                                                                                               other agents ' insights that
+    ** Other Agents ' Analyses :**                                                             support this decision "
+    { other_agents_analyses }                                                        }}
+Conference’17, July 2017, Washington, DC, USA                                                                             Li et al.
+
+
+
+          ],                                                  7. Use action verbs like : " Add " , " Modify " , "
+          " overall_strategy ": " Comprehensive strategy           Replace " , " Insert " , " Update " , " Change " , "
+                refined through collaborative analysis " ,         Remove " , " Implement "
+          " confidence ": 90 ,
+          " key_insights_learned ": " What you learned from   ** Output Format :**
+                 other agents ' analyses " ,                  Return a comprehensive modification plan :
+          " potential_risks ": " Potential risks or           ``` json
+                challenges identified through                 {{
+                collaborative review "                             " final_plan ": {{
+    }}                                                                  " summary ": " High - level summary of the
+    ```                                                                       modification approach " ,
+                                                                        " modifications ": [
+     Remember : Each suggested_approach should be so                         {{
+          detailed that a developer can implement it                              " step ": 1 ,
+          without additional research or clarification .                          " instruction ": " Concrete
+                                                                                        modification instruction
+                                                                                        using action verbs ( Add /
+                                                                                        Modify / Replace / etc .) " ,
+                                                                                  " context ": " File path and specific
+                                                                                          location ( e . g . , function ,
+    Prompt 8: FINAL DISCRIMINATOR PROMPT                                                method , line range ) " ,
+                                                                                  " type ": " fix_bug | add_feature |
+                                                                                        refactor | optimize " ,
+    You are the lead software architect making the                                " priority ": " critical | high | medium |
+         final decision on a code modification plan .                                   low " ,
+         Multiple expert engineers have provided their                            " rationale ": " Why this
+          analyses for solving a software issue .                                       modification is necessary and
+                                                                                          how it contributes to
+    ** Issue Description :**                                                            solving the issue " ,
+    { issue_description }                                                         " implementation_notes ": " Specific
+                                                                                        technical details for
+    ** Selected Localization Chain :**                                                  implementation "
+    { chain_info }                                                           }}
+                                                                        ],
+    ** All Agents ' Final Analyses :**                                  " execution_order ": " The recommended order
+    { all_agents_analyses }                                                   for implementing these modifications
+                                                                              ",
+    ** Your Task :**                                                    " testing_recommendations ": " Suggested
+    Synthesize all the expert analyses and create a                           testing approach for validating the
+          definitive , actionable modification plan that                      modifications " ,
+           will solve the issue effectively and safely .                " risk_assessment ": " Potential risks and
+                                                                              mitigation strategies "
+    ** CRITICAL REQUIREMENTS FOR INSTRUCTIONS :**                  }} ,
+    - Every instruction MUST be a concrete                         " confidence ": 95 ,
+          modification action ( Add , Remove , Modify ,            " expert_consensus ": " Summary of areas where
+          Replace , Insert , etc .)                                      experts agreed " ,
+    - NO verification , checking , or validation                   " resolved_conflicts ": " How conflicting expert
+          instructions ( avoid " Verify " , " Ensure " , "               opinions were resolved "
+          Check ", " Maintain " , etc .)                      }}
+    - Each instruction should specify exactly WHAT to         ```
+          change and HOW to change it
+    - Focus on direct code modifications that                 ** Examples of GOOD instructions :**
+          implement the solution                              - " Add maxlength attribute to the widget
+                                                                    configuration "
+    ** Instructions :**                                       - " Modify the widget_attrs method to include
+    1. Analyze all the expert recommendations and                   max_length parameter "
+          identify the most reliable and consistent           - " Replace the current field initialization with
+          suggestions                                               max_length support "
+    2. Resolve any conflicts between different expert         - " Insert validation logic for maximum length "
+          opinions using technical merit
+    3. Create a prioritized , step - by - step modification   ** Examples of BAD instructions ( DO NOT USE ) :**
+           plan with ONLY concrete modification actions       - " Verify the max_length setting "
+    4. Ensure the plan is practical , safe , and              - " Ensure proper validation "
+          addresses the root cause of the issue               - " Check if the field is configured correctly "
+    5. Include specific instructions for each                 - " Maintain the existing functionality "
+          modification
+    6. The output context should be as detailed as
+          possible
+SWE-Debate: Competitive Multi-Agent Debate for Software Issue Resolution   Conference’17, July 2017, Washington, DC, USA
+
+
+
+    Focus on creating a plan that can be directly
+         executed by a modification agent with clear ,
+         actionable steps .
+

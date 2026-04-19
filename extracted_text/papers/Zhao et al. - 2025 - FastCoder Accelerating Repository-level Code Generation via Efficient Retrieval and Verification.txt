@@ -1,0 +1,847 @@
+                                            FAST C ODER: Accelerating Repository-level Code
+                                            Generation via Efficient Retrieval and Verification
+                                                                    Qianhui Zhao1 , Li Zhang1 , Fang Liu1∗ , Xiaoli Lian1∗ , Qiaoyuanhe Meng1
+                                                                                  Ziqian Jiao1 , Zetong Zhou1 , Jia Li3 , Lin Shi2
+                                             1
+                                                 State Key Laboratory of Complex & Critical Software Environment, School of Computer Science and Engineering
+                                                                                           Beihang University, China
+                                                                                2
+                                                                                  School of Software, Beihang University, China
+                                                                                           3
+                                                                                             Peking University, China
+                                                                            Email: {zhaoqianhui, fangliu, lianxiaoli}@buaa.edu.cn
+arXiv:2502.17139v2 [cs.AI] 30 Sep 2025
+
+
+
+
+                                            Abstract—Code generation is a latency-sensitive task that            ensures the program performs its intended behaviors accu-
+                                         demands high timeliness. However, with the growing interest and         rately, efficiency of code generation is also crucial for real-
+                                         inherent difficulty in repository-level code generation, most exist-    world software development but often overlooked. Therefore,
+                                         ing code generation studies focus on improving the correctness of
+                                         generated code while overlooking the inference efficiency, which        optimizing the efficiency of code generation approaches has
+                                         is substantially affected by the overhead during LLM generation.        become a pressing issue.
+                                         Although there has been work on accelerating LLM inference,                In real-world software development, developers typically
+                                         these approaches are not tailored to the specific characteristics       work within a specific context—such as a repository—that
+                                         of code generation; instead, they treat code the same as natural        contains rich domain knowledge. Since target code often relies
+                                         language sequences and ignore its unique syntax and semantic
+                                         characteristics, which are also crucial for improving efficiency.       on functions or classes already defined in the repository,
+                                         Consequently, these approaches exhibit limited effectiveness in         effective repository-level code generation must consider the
+                                         code generation tasks, particularly for repository-level scenarios      context of the entire repository. However, due to the large
+                                         with considerable complexity and difficulty. To alleviate this issue,   scale of code repositories and the limited context window of
+                                         following draft-verification paradigm, we propose FAST C ODER,          LLMs, it is infeasible to directly leverage the entire reposi-
+                                         a simple yet highly efficient inference acceleration approach
+                                         specifically designed for code generation, without compromising         tory as input. Thus, most existing studies adopt a retrieval-
+                                         the quality of the output. FAST C ODER constructs a multi-              augmented generation (RAG) strategy [9, 10, 11], using the
+                                         source datastore, providing access to both general and project-         natural language requirement or partially written code as a
+                                         specific knowledge, facilitating the retrieval of high-quality draft    query to retrieve relevant code snippets from the repository,
+                                         sequences. Moreover, FAST C ODER reduces the retrieval cost by          which are then combined with the original query to guide code
+                                         controlling retrieval timing, and enhances efficiency through
+                                         parallel retrieval and a context- and LLM preference-aware              generation.
+                                         cache. Experimental results show that FAST C ODER can reach                The RAG strategy can bring benefits to the functional
+                                         up to 2.53× and 2.54× speedup compared to autoregressive de-            correctness of the generated code, but neglects generation
+                                         coding in repository-level and standalone code generation tasks,        efficiency. The latency of this paradigm is primarily composed
+                                         respectively, outperforming state-of-the-art inference acceleration     of two stages: the retrieval stage and generation stage. As
+                                         approaches by up to 88%. FAST C ODER can also be integrated
+                                         with existing correctness-focused code generation approaches to         we all know, during the generation stage, LLMs face the
+                                         accelerate the LLM generation process, and reach a speedup              challenge of the significant inference time caused by au-
+                                         exceeding 2.6×.                                                         toregressive decoding mechanism. In this process, each new
+                                            Index Terms—code generation, inference acceleration, large           token is generated sequentially, conditioned on all previously
+                                         language models, retrieval-augmented generation                         generated tokens and the given context, resulting in repeated
+                                                                                                                 and computationally expensive forward passes. Moreover, the
+                                                                    I. I NTRODUCTION                             growing complexity of relevant context retrieval and prompt
+                                            Code generation is a crucial task in software engineering,           construction in RAG approaches further increases the overall
+                                         which can reduce manual effort by automating repetitive and             time cost of code generation. However, developers typically
+                                         time-consuming programming tasks. Large Language Models                 hold high expectations regarding the responsiveness of code
+                                         (LLMs), such as DeepSeek-Coder [1], CodeLlama [2], GPT-4o               recommendations [12]. If LLMs fail to deliver precise and ef-
+                                         [3], etc., have demonstrated impressive performance in code             ficient feedback, it may directly affect development efficiency
+                                         generation tasks, revolutionizing the landscape of software             and user experience.
+                                         development [4, 5]. Substantial researches have been proposed              Although there exist approaches for LLM inference accel-
+                                         to improve the correctness of code (evaluated by the passing            eration, they exhibit limited effectiveness in code generation,
+                                         rate [6]) generated by LLMs [7, 8, 9]. While code correctness           especially in repository-level code generation. For example,
+                                                                                                                 Self-speculative decoding [13] achieves approximately 1.5×
+                                           * Corresponding author                                                acceleration compared to autoregressive decoding in stan-
+dalone code generation (Fig. 5), but falls short when applied        • We identify limitations of current correctness-focused
+to repository-level tasks, offering virtually no speedup (Ta-          code generation studies and LLM inference acceleration
+ble I). Most of these approaches follow a draft-verification           approaches in repository-level code generation and pro-
+paradigm [13, 14, 15, 16], which utilizes a small model or             vide insights for potential improvements.
+a retrieval system to draft several candidate output tokens,         • We propose FAST C ODER , a simple yet efficient approach
+and then employs the target LLM to verify the acceptability            to accelerate LLM inference for code generation by lever-
+of draft tokens through a single forward step, keeping the             aging effective retrieval and verification mechanisms,
+output consistent with that decoded autoregressively by the            which can also be integrated with correctness-focused
+target LLM itself. The suboptimal performance on repository-           code generation approaches following RAG strategy.
+level code generation may be attributed to the reason that           • We conduct a comprehensive evaluation of the infer-
+existing approaches treat source code as sequences similar             ence efficiency of FAST C ODER, and results show that it
+to natural language, without accounting for code’s unique              achieves state-of-the-art results in both repository-level
+syntactic and semantic characteristics. For instance, the fixed        and standalone code generation tasks. We provide the
+retrieval datastore of retrieval-based acceleration approach           code, data, and an initial demo at https://github.com/
+struggles to provide high-quality drafts for different repos-          whisperzqh/FastCoder.
+itories that follow customized functions and coding styles,
+                                                                                       II. R ELATED W ORK
+and cannot adapt to output preferences of different LLMs.
+Additionally, performing retrieval uniformly across all code       A. Repository-level Code Generation
+locations overlooks the varying difficulty levels of code gener-      LLMs have made significant progress in recent years, yet
+ation at different positions. Therefore, there lack acceleration   widely-used evaluation datasets for code generation task, such
+techniques specifically tailored for repository-level code         as HumanEval [6] and MBPP [19], predominantly focus on
+generation tasks, which are orthogonal to correctness-             standalone code generation tasks. This over-simplified setting
+focused approaches, enabling improvements in inference             falls short of representing the real-world software development
+speed without compromising correctness performance.                scenario where repositories span multiple files with numerous
+   To alleviate this issue, in this paper, we primarily focus on   cross-file dependencies. In practice, a substantial portion of
+improving the inference speed of LLMs on repository-level          code relies on methods and properties defined in other files.
+code generation task, without compromising the quality of          These non-standalone functions constitute more than 70%
+the output. We propose FAST C ODER, a simple yet highly            of the functions in popular open-source projects, making
+efficient approach to accelerate the inference of LLMs through     evaluations based solely on standalone functions insufficient
+an efficient and effective retrieval strategy. Concretely, to      for assessing model effectiveness [20, 21].
+better align with the characteristics of different repositories,      Consequently, repository-level code generation has gained
+we first construct a multi-source datastore, providing access      increasing attention due to the inter-dependencies among
+to both general and project-specific knowledge and enhancing       code files, such as cross-module API calls and shared global
+the quality of draft sequences. Then, FAST C ODER reduces          snippets, which are crucial for context-aware code genera-
+unnecessary retrieval overhead by controlling the retrieval        tion. However, due to the vast size of code repositories and
+timing. Besides, FAST C ODER improves retrieval efficiency         the limitations of LLMs’ context length, it is impossible to
+through parallel retrieval and the maintenance of a context-       leverage the entire repository directly as context. Most prior
+and LLM preference-aware cache. Finally, draft sequences           studies adopt a retrieval-augmented generation (RAG) strategy,
+are constructed using a weighted Trie, and tree attention is       using the natural language requirement or unfinished code as a
+employed to avoid redundant computation caused by verifying        query to retrieve snippets from the repository, which are then
+multiple draft sequences.                                          combined with the query for code generation. RepoFuse [7]
+   Experimental results show that the decoding speed of FAST-      employs BM25 [22] for lexical retrieval based on textual sim-
+C ODER surpasses existing inference acceleration approaches        ilarity with the unfinished code. RepoHyper [8] adopts dense
+substantially on both repository-level and standalone code         retrieval by encoding code into vectors to capture semantic
+generation tasks. For repository-level code generation, FAST-      similarity. RepoCoder [11] enhances retrieval iteratively using
+C ODER achieves up to 2.30× and 2.53× speedup compared             intermediate completions to better align context and genera-
+with autoregressive decoding on DevEval [17] and RepoE-            tion. RLCoder [18] leverages reinforcement learning to train
+val [11], respectively. FAST C ODER can also achieve up to         the retriever without labeled data. As context retrieved based
+2.54× acceleration on standalone code generation dataset,          on text similarity may be insufficiently relevant to generation
+HumanEval [6]. Moreover, it is worth mentioning that FAST-         targets, Draco [10] constructs a repo-specific context graph
+C ODER can be integrated with existing functional correctness-     via dataflow analysis to precisely retrieve relevant background
+focused code generation methods to improve their generation        knowledge. GraphCoder [9] integrates graph-based retrieval
+efficiency while preserving the consistency of output se-          with LLMs to combine general and repository-specific knowl-
+quences. When combined with RepoCoder [11] and RLCoder             edge for code generation. However, these approaches focus
+[18], FAST C ODER can bring a speedup exceeding 2.6×.              solely on improving the functional correctness of the generated
+   Our contributions can be summarized as follows:                 code, while neglecting generation efficiency. The construction
+of information-rich prompts further increases the overall time         To avoid additional training and identifying a suitable draft
+cost of code generation.                                            model, as well as the extra computational overhead introduced
+   Researchers have also introduced several benchmarks to           by draft models, more recently, researchers have explored
+evaluate code generation in realistic scenarios. RepoEval [11]      retrieval-based approaches, which replace the draft model
+focuses on repository-level code completion covering line, API      with a retrieval system [16, 31]. By searching in a retrieval
+invocation, and function body granularities. CoderEval [20] is      datastore to obtain candidate sequences, these approaches
+a context-aware benchmark that categorizes code generation          can easily be ported to any LLM and reduce computational
+tasks into six levels based on external dependencies, ranging       overhead. LLMA [31] is an inference-with-reference decoding
+from standalone to project-level functions. CrossCodeEval           mechanism by exploiting the overlap between the output
+[23] is a multilingual benchmark that emphasizes cross-file         and the reference of an LLM. It provides generic speedup
+contextual understanding and employs static analysis to iden-       through speculative retrieval and batched verification. REST
+tify examples requiring such context. DevEval [17] aligns           [16] replaces the parametric draft model with a non-parametric
+with real-world repositories in terms of code and dependency        retrieval datastore. As many subsequences during generation
+distributions, and includes comprehensive metadata annotated        likely appear in the datastore, it can frequently generate
+manually by developers.                                             multiple correct tokens per step.
+                                                                       Our approach adopts the retrieval-based acceleration
+B. LLM inference acceleration approaches                            paradigm following REST [16], but has distinctive innova-
+   Autoregressive decoding generates tokens in a step-by-step       tions, as it is specifically tailored to the characteristics of code
+manner and results in a slow and costly decoding process.           generation. In particular, we design a multi-source datastore
+To accelerate decoding, previous non-autoregressive decoding        to reduce retrieval overhead while enhancing the relevance of
+approaches [12, 24] were proposed to generate multiple tokens       retrieved results, exploit structural properties of code to avoid
+in parallel. However, this parallelism often comes at the           unnecessary retrieval in positions where it is unlikely to be
+cost of degraded model performance. To address this issue,          beneficial, and incorporate a caching mechanism to ensure that
+researchers have explored decoding acceleration methods that        retrieved drafts are better aligned with the preferences of the
+preserve model performance. Among these, draft-verification         LLM and the characteristics of the target repository.
+approaches [15, 16, 25] have gained widespread adoption,
+                                                                                          III. P RELIMINARIES
+which employ an alternative method to quickly produce
+candidate output tokens and then utilize the target LLM to          A. Retrieval-based Speculative Decoding
+verify them in a single forward pass. These methods can be             Building upon the draft-verification framework introduced
+further categorized into generation-based and retrieval-based       by speculative decoding [25, 26], retrieval-based decoding
+approaches, depending on how the initial draft is produced.         acceleration approaches leverage a retrieval mechanism to
+   For generation-based approaches, the draft token can be          generate draft tokens [16, 31], which can eliminate the
+generated either by a small model or the target LLM itself.         challenge of selecting an appropriate draft model and avoid
+Speculative decoding [25, 26] minimizes the target LLM              additional training costs. A notable example is Retrieval-Based
+forward steps by using a smaller model for drafting and             Speculative Decoding (REST) [16], which has proven to be
+then employing the target LLM to verify the draft in a low-         effective in standalone function generation task [6]. Below is
+cost parallel manner. Based on this, Ouroboros [14] generates       an explanation of how it works. Pre-built from a code corpus,
+draft phrases to parallelize the drafting process and lengthen      the datastore D = {(ci , ti )} serves as the source for the draft
+drafts. Specinfer [15] uses many draft models obtained from         token sequence, where ci represents a context and ti represents
+distillation, quantization, and pruning to conduct speculations     the corresponding continuation of ci . As an alternative to the
+together. However, identifying an appropriate draft model con-      draft model, the objective of retrieval is to identify the most
+tinues to pose significant challenges, as it must align with the    likely continuations of the current context from the datastore
+vocabulary of the target LLM and achieve a delicate balance         D using a suffix match [32]. Specifically, given a context
+between keeping quick decoding speed and ensuring output            s = (x1 , ..., xt ), it aims to find contexts in D that match the
+quality. Thus, researchers have investigated utilizing the target   longest suffix of s. Starting from a pre-defined match length
+LLM itself to generate efficient draft sequences. Blockwise         upper limit nmax (measured in the number of tokens), for each
+Decoding [27] and Medusa [28] introduce multiple heads to           suffix length n, it extracts the suffix of s with n tokens, denoted
+enable parallel generation of multiple tokens per step. Looka-      as q, and obtains all contexts ci that match q as a suffix.
+head decoding [29] uses an n-gram pool to cache the historical      If at least one context in D matches q, the corresponding
+n-grams generated so far. Eagle [30] conducts the drafting          context continuation pairs are returned as the retrieval result
+process at the more structured feature level. Self-speculative      S; otherwise, the match length n is decreased by one to at-
+decoding [13] employs the target LLM with selectively certain       tempt matching a shorter suffix. Subsequently, the top-k high-
+intermediate layers skipped as the draft model. However,            frequency prefixes in S are selected as the draft sequences
+using the target LLM itself to generate draft tokens often          for later verification. Inspired by REST, FAST C ODER also
+requires modifications to the model architecture, necessitating     incorporates a similar suffix-match-based retrieval algorithm,
+additional training to achieve optimal performance.                 leveraging its advantages in time and memory efficiency.
+         1 from dash.exceptions import InvalidCallbackReturnValue
+         2 from ._utils import AttributeDict, stringify_id
+         3
+         4 def flatten_grouping(grouping, schema=None):
+         5      """
+         6      This function takes a grouping value and converts it into a
+         list of scalar values. ...
+         ...
+         11      """
+timing
+
+                                                       timing
+               Autoregressive           datastore cache         FastCoder
+                 decoding
+                       Time: 13.5s                  draft sequences   Time: 7.0s
+         12        if schema is None:                                                            (a)                              (b)
+         13            schema = grouping
+         14        if isinstance(grouping, dict):                                  Fig. 3: Heatmaps of (a) retrieval performance and (b) whites-
+         ...
+         28            return [flatten_grouping(grouping[key], schema[key])
+                                                                                   pace distribution with token positions in REST. The maximum
+                               for key in schema.keys()]                           token index is selected based on the average token number per
+         ...
+         52        else:                                                           line (12).
+         53            raise InvalidCallbackReturnValue("""Invalid....""")
+
+     Fig. 1: Time overhead of a practical code generation example                  retrieval operation at every position, which may bring unneces-
+     using CodeLlama-7B on a single NVIDIA 4090 GPU.                               sary cost. To investigate the relationship between retrieval per-
+                                                                                   formance and token position in code generation, we randomly
+                                                                                   selected 200 samples from DevEval [17], a repository-level
+                                                                                   code generation benchmark, and employed DeepSeek-Coder-
+                                                                                   6.7B [1] for evaluation. For each token, we recorded whether
+                                                                                   it was: (a) retrieved from the datastore rather than generated
+                                                                                   by the model, and (b) a whitespace character (e.g., spaces
+                                                                                   or newline characters). Results are presented as heatmaps in
+                                                                                   Fig. 3. As seen from Fig. 3(a), retrieval failures are frequent,
+                                                                                   with a particularly notable pattern: the second token in each
+                                                                                   line has the lowest probability of being successfully retrieved.
+                                                                                   A comparison with the whitespace rate heatmap suggests that
+                                                                                   this phenomenon may stem from the fact that the second
+                        Fig. 2: Localness of source code.                          token is typically the first non-whitespace character at the
+                                                                                   beginning of a line. The first non-whitespace token in each
+     B. Motivating Examples
+                                                                                   line dictates the direction of the line, making it more variable
+        We first present a practical example in Figure 1. Given                    and consequently more challenging to retrieve. Thus, skipping
+     a function signature and its context as input, autoregressive                 retrieval or reducing the retrieval probability at such positions
+     decoding with an LLM (CodeLlama-7B) takes about 13.5                          may improve performance.
+     seconds on a single NVIDIA 4090 GPU to generate the                              Motivated by the above observations, we propose FAST-
+     function body, where such latency may negatively affect user                  C ODER, which is specifically tailored for code generation.
+     experience. This highlights the need for efficient methods                    As shown in Figure 1, FAST C ODER significantly reduces the
+     to accelerate code generation. To identify the limitations of                 function body generation time from 13.5s to 7.0s.
+     current inference acceleration methods, we present motivating
+     examples that highlight the localness of source code and the                                          IV. A PPROACH
+     retrieval performance in retrieval-based approaches.                             To improve the inference efficiency of LLMs on code
+        Localness of source code. Human-written programs are                       generation tasks, we propose FAST C ODER, an LLM inference
+     typically localized [33], with program entities (token se-                    acceleration approach tailored to the characteristics of code
+     quences) defined or used in the preceding snippets frequently                 generation. The architecture of FAST C ODER is shown in
+     being reused in the subsequent code snippets within the                       Fig. 4. FAST C ODER constructs a multi-source datastore com-
+     same code file. As shown in Fig. 2, user id file path is a                    bining general and repository-specific knowledge to improve
+     user-defined variable within the current code segment, which                  draft quality. It then reduces retrieval overhead by controlling
+     does not exist in the datastore but appears multiple times in                 timing, boosts efficiency via parallel retrieval and a context and
+     subsequent code snippets. Additionally, the blue-highlighted                  LLM preference-aware cache. Finally, it uses tree attention to
+     statements demonstrate the repetition of token sequences.                     avoid redundant computation.
+     By effectively leveraging these frequently occurring token
+     sequences within the file, such as storing them in a cache for                A. Multi-source Datastore Construction
+     subsequent retrieval, the acceptance length for draft validation                 The quality of the retrieval datastore, which serves as the
+     can be increased, thereby enhancing the inference speed.                      source of draft sequences, critically determines the accelera-
+        Retrieval is not always essential. Current work performs                   tion potential. A larger datastore may enhance the probability
+                                       draft sequences
+
+
+
+                    Datastore Construction                           Draft Construction and Verification
+                                                                                                                                          ROOT
+
+                           Datastore                                  name = self.       [from 𝑫𝒓 ]      ×      construct           α+β            α
+                                                                 3                                              weighted Trie                  name
+                                   common
+                                                          𝐷c
+                                                                      _id = (            [from 𝑫𝒄 ]      ×                            _
+
+                                   code
+                                                                      _id_file           [from 𝑫𝒓 ]      √                           id                 =
+                                   repo
+                                   code                   𝐷𝑟                                                                    _          =                self
+                                                                     Retrieval Strategy
+                                                                 2                                                         file                (                   .
+                            Cache
+                                 LLM output sequences
+                                                                                 Retriever
+                                                                                                                𝑴                         construct
+                               if _user_id_     file_is_old(                                             missing table
+                                                                                                                                          tree attention
+                                                                     autoregressive                      𝑡𝑜𝑘𝑒𝑛𝑠𝑘𝑖𝑝
+                             verified retrieved sequences            decoding
+                                      user_id_file_path                                      timing
+                                                                                             selection
+                    Cache Construction                    4 update          1
+                                              if _user_id_file_is_old (user_id_file_path                                                               verify
+                       LLM                context 𝒔                               matched suffix
+                                                          Fig. 4: Architecture of FAST C ODER.
+                                                                                                                                                    𝑠 in
+of result acceptance, but it also correspondingly increases                                                              |Dr | (|Dc |)find
+                                                                                   responding continuation of ci (cj ),timing
+                                                                                                                      selection
+                                                                                                                                         is whether
+                                                                                                                                            the number
+retrieval time, making the trade-off between the two critically                    of samples in Dr (Dc ). Specifically, Dr can be omitted in
+                                                                                                                                                         no
+important. To achieve optimal performance with a compact                           standalone code generation where such 𝑠context
+                                                                                                                              ends withis𝑡𝑜𝑘𝑒𝑛 𝑠𝑘𝑖𝑝 ?
+                                                                                                                                           unreachable.                                                yes
+datastore and facilitate effective retrieval, FAST C ODER in-                                                                                                      yes      with probability 1 − 𝑝
+corporates a smaller repository-related datastore Dr and a                         B. Context- and LLM Preference-aware Caching
+                                                                                                                                                       no                with probability 𝑝     end retrieval
+larger common code datastore Dc to construct a compre-                                 To reduce retrieval costs and improve the alignment of
+                                                                                                                                            cache is available
+hensive retrieval datastore D. This design supports parallel                       retrieved results with context and LLM             preferences—thereby Cache
+                                                                                                                                 Retriever
+retrieval, providing access to both general and project-specific                   increasing both the accepted sequence              length andnoinference
+                                                                                                                            cache is not             results
+                                                                                                                            available
+knowledge. To enable fast retrieval with minimal overhead,                         speed—we design a context- and LLM preference-aware
+we organize the datastore into context-continuation pairs,                         caching strategy to cache the verified retrieved sequences and
+facilitating a rapid exact-match method for context search.                        LLM-generated sequences.                    parallel         𝐷𝑟 𝑅𝑟
+                                                                                                                               search                              𝑹
+   Repository-related datastore Dr . During software devel-                            Based on the observations in Section III-B that program               en-
+                                                                                                                                                𝐷c 𝑅𝑐 retrieved sequence
+opment, developers often reference cross-file elements such as                     tities (token sequences) defined or used in preceding snippets
+                                                                                                                                       Datastore
+                                                                                   are often reused in the subsequent code snippets, we design
+classes and methods, making intra-repository files highly rel-
+evant to the generated code. Additionally, repository-specific                     the CACHE mechanism from two perspectives. On the one
+factors, including domain variations and coding conventions,                       hand, although datastore D contains vast content, typically
+lead to distinct patterns of idiomatic expressions. For in-                        only a small portion is highly relevant to the code currently
+stance, web development repositories frequently involve HTTP                       being generated. In contrast, the validated retrieval tokens are
+request-response handling, while data science repositories fo-                     exactly the sequences that exhibit high relevance to the current
+cus on data processing and modeling tasks. To this end, we                         generation code, and are thus more likely to be retrieved again
+collect the code files from current repository (with the portions                  in subsequent stages than other content within the datastore D.
+to be generated excluded to avoid data leakage) and form                           Consequently, if the draft sequence r = (y1 , ..., yj ), retrieved
+repository-related datastore Dr .                                                  by the context s = (x1 , ..., xt ), is verified by the LLM, we con-
+   Common datastore Dc . To ensure that common program-                            catenate them as (x1 , ..., xt , y1 , ..., yj ) and add it into CACHE.
+ming operations are also retrievable, a subset of data from                        On the other hand, since the datastore D is static, as it remains
+commonly used pre-trained code datasets [34] is used to form                       unmodified after construction, the draft sequences retrieved
+Dc , which serves as another component of datastore D.                             for the identical context s also remain consistent. However,
+   Datastore organization. For efficient retrieval, the datastore                  different LLMs exhibit distinct generation preferences, which
+is organized as contexts and the corresponding continuations                       is reflected in the fact that they may generate different outputs
+following [16]. Specifically, for each code file utilized in                       given the same input. As a result, a static datastore struggles to
+constructing the datastore, the content preceding every position                   accommodate the diverse preferences of various LLMs. Earlier
+will constitute a context, whereas the content subsequent to                       decoding outputs can to some extent reflect LLM-specific
+that position is the corresponding continuation. The datastore                     tendencies and ensure contextual coherence. Therefore, we
+D of FAST C ODER can be summarized as:                                             also incorporate the verified decoding output sequence into
+                                                                                   CACHE for future use.
+                  D = (Dr , Dc )                                         (1)
+                                    |D |               |D |
+                                                                                       To maintain the CACHE, we assess whether the two afore-
+          (Dr , Dc ) = ({(ci , ti )}i=1r , {(cj , tj )}j=1c )            (2)       mentioned update conditions are satisfied after each forward
+where ci (cj ) represents the context, ti (tj ) represents the cor-                step of the LLM. If the number of sequences inside the CACHE
+exceeds the pre-defined threshold l, it is accessible and will            Algorithm 1: Retrieval Algorithm
+remain active throughout the entire inference process.                  Input: current context s, datastore D, retrieval cache
+                                                                                CACHE , minimum activation size l, missing table M ,
+C. Dynamic and Efficient Retrieval Strategy                                     skip token tokenskip , retrieval probability p
+   Algorithm 1 illustrates the complete retrieval process of            Output: Retrieved sequences R
+                                                                      1 if CACHE .size ≥ l then
+FAST C ODER. Before each forward step, given current context
+                                                                      2     // retrieval from cache
+s, FAST C ODER initially verifies the availability of CACHE.          3     R ← search(CACHE)
+If the CACHE is accessible, that is, the number of sequences
+                                                                      4 if CACHE.size < l or R = ∅ then
+inside exceeds l, retrieval is prioritized from CACHE. If             5     // retrieval timing selection
+CACHE is unavailable or fails to yield valid (non-empty)              6     if s ∈ M then
+results, FAST C ODER utilizes a dynamic and efficient retrieval       7          pass
+strategy to minimize unnecessary retrieval cost. Specifically,        8           else if s ends with tokenskip then
+FAST C ODER optimizes retrieval timing by addressing two key          9               if random number < p then
+considerations as follows.                                           10                    // parallel retrieval from datastore
+   Skip token. As mentioned in Section III-B, the intrinsic          11                    Rr , Rc ← par search(Dr , Dc )
+                                                                     12                    R ← (Rr , Rc )
+characteristics of code lead to a low retrieval success rate at
+the first non-whitespace character of each line. Since obvious       13 if R = ∅ then
+patterns are not found in other positions, and the introduction      14     // update missing table
+of intricate judgment processes may incur additional compu-          15     M ← M ∪ {s}
+tational overhead, we set the first non-whitespace character of      16    else
+each line as the skip token. We strategically reduce the retrieval   17           update CACHE
+probability of skip tokens through a control parameter p, which      18    return R;
+refers to the retrieval probability at these positions.
+   Missing table. When utilizing the current context s to
+                                                                     generate draft sequences that better align with repository-
+retrieve its continuations from datastore D, it may fail to
+                                                                     specific characteristics. We select top-k weighted sequences
+yield any valid results in some cases. To prevent time wastage
+                                                                     from the Trie as the draft sequences.
+resulting from invalid retrieval, we maintain a missing table
+                                                                        As many draft sequences may share common prefixes,
+M = {smi } that stores suffixes smi for which no valid
+                                                                     to avoid redundant computation of Transformer layers, we
+results can be retrieved from the datastore D. Thus, when
+                                                                     employ tree attention [15, 35] to verify the draft sequences. We
+smi is encountered again during the subsequent inference,
+                                                                     represent the tree formed by the draft sequences, which is part
+FAST C ODER will bypass the retrieval and directly utilize the
+                                                                     of the Trie, as T = (V, E), where V is the set of all generated
+LLM to generate the next token.
+                                                                     tokens and E is the set of edges representing token transitions
+   If FAST C ODER decides to proceed with retrieval according
+                                                                     in the candidates. The total number of nodes is N = |V |. In
+to the above strategy, parallel retrieval is conducted from Dr
+                                                                     tree attention, only a token’s predecessors are considered as
+and Dc to further boost the retrieval efficiency, and the results
+                                                                     historical context, and the attention mask restricts attention to
+refer to Rr and Rc , separately. Specifically, if Rr and Rc
+                                                                     these predecessors. Let A ∈ {0, 1}N ×N be the attention mask
+are both empty, s will be denoted as sm and added into the
+                                                                     matrix, where Aij = 1 indicates that token i can attend to
+missing table M . Otherwise, relevant sequences are employed
+                                                                     token j. To reflect the tree structure, we define:
+to update the CACHE.                                                            (
+                                                                                  1, if token j is a predecessor of token i in T
+D. Draft Construction and Verification with Weighted Prefix             Aij =
+                                                                                  0, otherwise
+Optimization
+                                                                                                                                   (4)
+   The retrieval results R = (Rr , Rc ) contain potential contin-    This ensures that each token can only attend to its own con-
+uations of the current context s, often sharing the same prefix.     tinuation path, and tokens from different candidate branches
+To reduce the cost brought by verification each ri ∈ R one           are isolated in the attention computation.
+by one, we construct the draft sequences using a Trie, where            By applying tree attention mask and appropriately adjusting
+the unique path from a node to the root node corresponds to          the positional indices for encoding, we are able to process mul-
+a prefix of the retrieval results, aiming to reduce the repeated     tiple candidates simultaneously without increasing the batch
+verification of shared prefixes in R. We use following equation      size. As our objective is to accelerate the inference without
+to assign a weight for each node:                                    compromising model performance, all correct tokens from the
+                   Nweight = α · tr + β · tc                  (3)    beginning will be accepted, while the draft tokens following
+where tr and tc represents the times that the node occurs in Rr      the first error will be rejected.
+and Rc respectively, and α and β refers to the corresponding                                         V. E VALUATION
+coefficient. We retain α and β as tunable parameters to accom-
+modate diverse scenarios. For instance, in highly specialized          To evaluate the effectiveness of FAST C ODER, we address
+code generation tasks, increasing the α/β value can help             the following research questions:
+   RQ1: Overall Performance. How does the inference accel-            tokens and T represents the time spent for generation,
+   eration performance of FAST C ODER compare against state-          decoding speed is computed by:
+   of-the-art approaches?                                                               Decoding Speed = T /L                   (5)
+   RQ2: Ablation Study. What are the contributions of each
+   component of FAST C ODER?                                      •   Speedup: The ratio by which the decoding speed of an
+   RQ3: Integration with Correctness-Focused Approaches.              evaluated method is increased compared to vanilla autore-
+   Can FAST C ODER enhance generation speed when integrated           gressive decoding. Specifically, if SpeedA and SpeedB rep-
+   with existing code generation methods that focus on the code
+                                                                      resent the decoding speed of vanilla autoregressive decoding
+   correctness improvement?
+                                                                      and the evaluated approach, respectively, the speedup can be
+                                                                      calculated by:
+A. Datasets and Backbone Models.
+                                                                                     Speedup = SpeedA /SpeedB                  (6)
+   FAST C ODER is not only applicable to repository-level         •   Average Acceptance Length: The average number of to-
+code generation, but can also be adapted to standalone code           kens accepted per forward step by the target LLM, which
+generation with minimal modifications. Thus, we conduct               represents the theoretical upper bound of achievable acceler-
+experiments on both repository-level and standalone code              ation for retrieval-based approaches. Formally, if L denotes
+generation benchmarks. For repository-level code generation,          the length of generated tokens, and F represents the number
+we choose two widely-used benchmarks, DevEval [17] and                of forward steps by the target LLM, it can be calculated by:
+RepoEval [11]. DevEval comprises 1,825 testing samples from
+115 repositories, covering 10 popular domains. It aligns with                     Average Acceptance Length = L/F               (7)
+real-world repositories in code distributions and dependency         Although FAST C ODER can generate code theoretically con-
+distributions. RepoEval is constructed using the high-quality     sistent with the target LLM’s output, we still evaluate the
+repositories sourced from GitHub. We use the function-level       correctness of the generated code to enable quantitative as-
+subset for evaluation, which contains 455 testing samples.        sessment. For DevEval [17] and HumanEval [6], we report
+For standalone code generation, we conduct experiments on         Pass@1 results. For RepoEval [11], we report Edit Similarity
+HumanEval [6], a widely-used standalone code generation           (ES) results, since Pass@k scripts are unavailable due to
+dataset including 164 human-written programming problems.         licensing as stated in their GitHub repository.
+   For backbone models, we use the 1.3B and 6.7B configu-
+rations of Deepseek-Coder-base [1], as well as 7B and 13B         D. Implementation Details.
+configurations of CodeLlama-Python [2] for evaluation, which         To provide essential contextual information, we prepend
+are popular and well-performing LLMs in code generation.          preceding code snippets from the same file as context for
+B. Baselines.                                                     DevEval and RepoEval. Following existing works [11, 16, 17],
+                                                                  all results are obtained with a maximum input length of
+   We compare FAST C ODER with vanilla Autoregressive de-         2k and generation length of 512 under greedy decoding.
+coding and the following state-of-the-art inference accelera-     Dc is constructed from the first Python file of pre-training
+tion approaches that follow the draft-verification framework      code in The Stack [34], taking approximately 9 minutes and
+and have demonstrated effectiveness in code generation:           yielding a 0.9GB datastore. Dr ranges from 60KB to 289MB
+• Self-speculative     decoding [13]: This approach is            across repositories, taking an average of 10 seconds. Based
+   generation-based and employs the target LLM with               on preliminary experiments, we set the hyper-parameters to
+   selectively certain intermediate layers skipped as the draft   l = 50, p = 0.5, and α = β = 1, with LLM output truncated
+   model, without the need for an auxiliary model.                every 20 tokens and added to the CACHE. Evaluation of p
+• Ouroboros [14]: This is a generation-based approach and         over the range 0.1 to 0.9 and l from 10 to 100 showed an
+   demands manual selection of a suitable draft model for the     initial improvement followed by a decline, and the final values
+   target LLM. To maximize the utility of discarded drafts,       were chosen for best performance. α and β were similarly
+   it generates phrases from them to parallelize the drafting     selected from a range of tested combinations. Following [16],
+   process and lengthen drafts in a training-free manner.         for retrieval, the starting context suffix length nmax = 16,
+• REST [16]: REST is a retrieval-based and draft model-           and a maximum of 64 draft tokens of the top-k sequences are
+   free approach, which draws from the reservoir of existing      selected in the Trie. All experiments with Deepseek-Coder-
+   knowledge, retrieving and employing relevant tokens based      1.3B/6.7B and CodeLlama-7B use a single NVIDIA 4090
+   on the current context.                                        GPU and 28 CPU cores, and CodeLlama-13B experiments
+                                                                  use a single NVIDIA A6000 GPU and 12 CPU cores.
+C. Evaluation Metrics.
+                                                                     The implementation details of baseline approaches can be
+  Following existing work [13, 14, 16], we adopt the follow-      seen as follows. For Self-speculative decoding, we adopt the
+ing metrics to assess the inference efficiency:                   skipped layers from [13] for CodeLlama-13B. For DeepSeek-
+• Decoding speed (ms/token): The average generation time of       Coder and CodeLlama-7B, where specific layers are not pro-
+  one token for the LLM with batch size set to 1 on a single      vided, we follow the instruction to determine them, which
+  GPU. Formally, if L denotes the length of the generated         takes several hours. For Ouroboros, while selecting the draft
+TABLE I: Decoding speed and speedup ratio on repository-level code generation datasets. For FAST C ODER, we additionally
+report the average per-sample decoding time and Pass@1 / ES score, with the comparison to autoregressive decoding
+shown in the upper-right corner, which are highlighted with a blue background ( Avg.T ime/P ass@1∆v.s.AR for DevEval and
+Avg.T ime/ES ∆v.s.AR for RepoEval).
+
+                                              Deepseek-Coder-1.3B               Deepseek-Coder-6.7B               CodeLlama-7B                CodeLlama-13B
+           Dataset       Approach
+                                              ms/token   Speedup                ms/token   Speedup              ms/token Speedup             ms/token Speedup
+                         Autoregressive          20.00          1.00×             26.15           1.00×           26.29           1.00×        46.35             1.00×
+                         Self-speculative        18.72          1.07×             22.55           1.16×           25.10           1.05×        42.74             1.08×
+                         Ouroboros                 -               -              15.69           1.67×           29.14           0.90×        39.73             1.17×
+           DevEval
+                         REST                    12.10          1.65×             15.28           1.71×           15.57           1.69×        43.38             1.07×
+                         FAST C ODER             8.71           2.30×             11.69           2.24×           12.17           2.16×        21.56             2.15×
+                                                 4.4s↓5.8s / 20.38−               6.0s↓7.4s / 27.01−              6.2s↓7.3s / 29.81−          11.0s↓12.7s / 30.90−
+
+                         Autoregressive          19.91          1.00×             25.75           1.00×           26.21           1.00×        47.86             1.00×
+                         Self-speculative        19.63          1.02×             22.48           1.16×           24.36           1.08×        42.09             1.14×
+                         Ouroboros                 -               -              14.56           1.77×           33.12           0.79×        35.60             1.34×
+           RepoEval
+                         REST                    12.09          1.65×             15.46           1.67×           15.43           1.70×        44.59             1.04×
+                         FAST C ODER             7.88           2.53×             10.83           2.38×           10.80           2.43×        19.02             2.52×
+                                                 4.0s↓6.2s / 34.33−               5.5s↓7.7s / 37.79−              5.5s↓7.9s / 38.17−          9.7s↓14.8s / 37.58−
+
+           50
+                      Autoregressive        Self-speculative           Ouroboros           REST      FastCoder                                               1.30x
+           40
+                                                                                                                                             1.55x
+ms/token
+
+
+
+
+           30                                                                                                                                        1.81x
+                                                               1.57x                                  1.43x                                                          2.54x
+           20                                                                                                 1.93x 1.90x 2.41x
+                         1.51x     1.88x 2.38x                         2.30x 2.02x 2.45x
+           10
+            0
+                Deepseek-Coder-1.3B (34.76)          Deepseek-Coder-6.7B (48.17)                   CodeLlama-7B (39.02)                   CodeLlama-13B (43.29)
+Fig. 5: Decoding speed and speedup ratio on standalone code generation dataset HumanEval. We also report the Pass@1 results
+of FAST C ODER in parentheses with a blue background, which are the same with autoregressive decoding.
+model, we prioritize the smaller model from the same se-                                   of backbone models and datasets, demonstrating its robustness.
+ries as the target LLM. Thus, we choose Deepseek-Coder-                                    On average, FAST C ODER saves 12.7s per sample on DevEval
+base-1.3B for Deepseek-Coder-base-6.7B, and CodeLlama-                                     and 14.8s per sample on RepoEval compared with autore-
+Python-7B for CodeLlama-Python-13B as draft models. For                                    gressive decoding. The Pass@1 and Edit Similarity scores
+CodeLlama-7B, which is the smallest model in its series, we                                further confirm that FAST C ODER produces sequences identical
+opt for TinyLlama-1.1B as the draft model due to its shared                                to those of autoregressive generation, as FAST C ODER accepts
+architecture and tokenizer compatibility. Due to the small size                            draft tokens only when they match the target LLM’s outputs.
+of DeepSeek-Coder-1.3B, identifying a suitable draft model                                    Compared to the substantial speedups gained by FAST-
+for it is challenging, and therefore, results for this setting are                         C ODER, baseline approaches achieve limited accelerations. As
+not reported. For REST, to construct the datastore, we select                              a retrieval-based approach, the datastore utilized by REST
+the first 10 files in Python subset of The Stack dataset [34],                             is approximately 8 times the size of the one employed by
+resulting in a datastore of approximately 8.7 GB in size. The                              FAST C ODER, but the fixed datastore may suffer from mis-
+values of the other hyper-parameters are consistent with those                             alignment between retrieval sequences and the LLM output.
+in the original paper.                                                                     REST exhibits the optimal speedup of around 1.7× in most
+                                                                                           cases, but it performs poorly in experiments of CodeLlama-
+                          VI. R ESULTS AND A NALYSIS
+                                                                                           13B. This may be attributed to the fact that the significant CPU
+A. RQ1: Overall Performance                                                                resource demands posed by both the 13B model inference and
+   To answer this research question, we compare the inference                              the retrieval of data from a large datastore in REST, leading
+acceleration performance of FAST C ODER against state-of-the-                              to decreased performance. Besides, Ouroboros demonstrates
+art approaches on both repository-level and standalone code                                comparable performance to REST on Deepseek-Coder-6.7B,
+generation tasks, and the detailed results and analysis are                                yet its generation speed is even slower than autoregressive
+presented as follows.                                                                      decoding on CodeLlama-7B, indicating that its efficacy is
+   1) Repository-level Code Generation: The comparison re-                                 subject to considerable fluctuations influenced by factors such
+sults between FAST C ODER and baselines are shown in Table I.                              as model selection, further demonstrating the challenge of
+FAST C ODER achieves up to 2.30× and 2.53× speedup on                                      appropriate draft model selection. Self-speculative decoding
+DevEval and RepoEval, respectively, outperforming state-of-                                consistently maintains a stable yet modest acceleration, and the
+the-art approaches by up to 88%. FAST C ODER consistently                                  preliminary search for skipped layers may introduce significant
+maintains a stable speedup of more than 2× across a variety                                time overhead. In contrast, FAST C ODER does not require a
+draft model or additional training, yet it can maintain              TABLE II: Ablation study results of FAST C ODER on DevEval
+a stable speedup ratio even under resource-constrained               using Deepseek-Coder-6.7B. AccLen refers to average accep-
+conditions.                                                          tance length.
+   2) Standalone Code Generation: For FAST C ODER, we                                                       AccLen   ms/token   Speedup
+remove Dr from the datastore and retain Dc , which is the              Baseline                              1.89     15.86      1.65×
+same as the one used in the previous experiments. The results          + datastore D (Dr + Dc )              2.28     14.82      1.76×
+are shown in Fig. 5. Even without the benefit of the multi-            + retrieval strategy                  1.89     15.41      1.70×
+source datastore, FAST C ODER still outperforms the base-              + CACHE                               2.47     14.13      1.85×
+lines, further demonstrating the effectiveness of the retrieval        + datastore D & retrieval strategy    2.28     14.19      1.84×
+strategy and caching modules. The identical Pass@1 scores              + retrieval strategy & CACHE          2.48     13.80      1.89×
+                                                                       + datastore D & CACHE                 2.85     11.94      2.19×
+between FAST C ODER and autoregressive decoding indicate
+that FAST C ODER achieves acceleration without compromising            FAST C ODER                           2.85     11.69      2.24×
+model performance. Additionally, we observe that the base-
+lines consistently perform better on HumanEval compared              account for approximately 4% of the total retrievals. Crucially,
+to repository-level datasets. This may be affected by the            this optimization has a negligible impact on the average
+difference in difficulty between standalone and repository-          acceptance length, ensuring minimal trade-off between effi-
+level code generation tasks. For instance, Deepseek-Coder-           ciency and performance. Among all components, the CACHE
+1.3B achieves pass@1 scores of 34.8 on HumanEval and 18.2            mechanism proves to be the most effective, delivering a
+on DevEval. Thus, for approaches such as Ouroboros and Self-         substantial 30%+ improvement in average acceptance length
+speculative, which require a draft model, the performance in         over the baseline. Statistical analysis shows that, although the
+repository-level code generation may be negatively affected          CACHE contains only 174 sequences at most for DevEval,
+by the poor performance of the draft model. For REST,                33.13% of all retrieval operations can successfully obtain valid
+HumanEval involves no project-specific knowledge, and the            results directly from the CACHE. Besides, the average retrieval
+common datastore may adequately satisfy retrieval require-           time from the cache is 0.2ms, which is approximately 15%
+ments. The performance differences of existing approaches            of the retrieval time from the datastore D. This highlights
+on the two types of code generation tasks also highlight that        the importance of alignment with the repository context and
+evaluations based solely on standalone datasets may fail to          LLM preference. Furthermore, the combination of any two
+reflect performance in real-world application scenarios.             components consistently outperforms their individual effects,
+                                                                     while integrating all three components achieves optimal perfor-
+ Answer to RQ1: FAST C ODER achieves state-of-the-art                mance, confirming positive interactions between components.
+ performance on both repository-level and standalone code
+ generation tasks. It consistently maintains a stable speedup         Answer to RQ2: Each component of FAST C ODER makes
+ across a variety of backbone models and datasets, demon-             a contribution to the overall performance, with the CACHE
+ strating its effectiveness and generalization.                       mechanism proving to be the most effective, providing a
+                                                                      substantial improvement in average acceptance length and
+B. RQ2: Ablation Study                                                speedup ratio.
+   To analyze the effectiveness of each component within
+FAST C ODER, we conduct an ablation study. Since REST                C. RQ3: Integration with Correctness-Focused Approaches
+serves as a standard pipeline for retrieval-based draft-                To evaluate whether FAST C ODER can benefit existing
+verification acceleration approach, we treat the results obtained    correctness-focused code generation approaches, we select
+using REST (with Dc as the datastore) as the baseline results.       RepoCoder [11] and RLCoder [18] for experiments, both of
+To ensure a thorough analysis, we first evaluate the perfor-         which follow RAG strategy. These approaches can be sum-
+mance of the baseline with each individual component added           marized as a two-phase process: ① retrieval of relevant code
+separately, followed by an evaluation of the baseline with any       snippets from the repository through an optimized retrieval
+two components combined.                                             strategy to facilitate informative prompt construction, followed
+   Table II reports the results for decoding speed and average       by ② code generation via LLM inference using the constructed
+acceptance length, demonstrating that each component con-            prompt. Since FAST C ODER solely accelerates LLM generation
+tributes to a speedup gain. The multi-source datastore improves      while preserving output consistency, it can be seamlessly
+retrieval performance by offering richer and more interrelated       integrated into the code generation phase without modifying
+content. This performance also represents REST using the             the prompt construction stage from the original approach.
+same datastore (Dr + Dc ) as FAST C ODER, along with parallel           The speedup results can be seen in Table III, including
+retrieval. It indicates that the multi-source datastore design not   the time spent on each phrase as well as the total execution
+only increases the average acceptance length but also reduces        time (seconds). As RepoCoder utilizes an iterative retrieval-
+the external retrieval overhead through efficient parallel search    generation pipeline, we adopt the optimal configuration (iter-
+mechanisms. The retrieval strategy optimizes the inference           ations = 2) from the original work and report the cumulative
+speed by eliminating unnecessary retrieval operations, which         time consumption for each phase. From the results, we can
+TABLE III: Speedup and ES results of integration of FAST-                   TABLE V: The resource consumption comparison on RepoE-
+C ODER with existing correctness-focused code generation                    val using DeepSeek-Coder-6.7B.
+approaches on RepoEval using Deepseek-Coder-1.3B.
+                                                                                     Approach         GPU-VRAM            CPU             Memory
+                              Time (s)                                               Autoregressive     21GB              114%             1.0GB
+  Approach                                             Speedup       ES
+                  Prompt     Generation     Total
+                                                                                     REST               21GB              335%             32.6GB
+  RepoCoder                  11,731.88    11,823.05        1.00×    30.35            FAST C ODER        21GB              128%             2.8GB
+                  91.17
+  + FAST C ODER              4,326.71      4,408.88        2.68×    30.35
+                                                                                                                   Communications         2.79          11.29
+  RLCoder                     5,419.50    5,623.61         1.00×    38.28
+                  204.11                                                                                                     Utilities    2.78          11.43
+  + FAST C ODER               1,908.78    2,112.89         2.66×    38.28
+                                                                                                               Scientific-Engineering     2.81          11.65
+                                                                                                            Software-Development          2.80          11.65
+
+TABLE IV: Comparison of average acceptance length between                                                                   Security      2.61           12.42
+                                                                                                                             System       2.76          11.67
+FAST C ODER and REST. DE, RE, and HE denote DevEval,                                                                     Multimedia       2.72          11.76
+RepoEval, and HumanEval respectively.                                                                                      Database       2.72          11.90
+                                                                                                                            Internet      2.80         11.43
+                                  REST                 FAST C ODER                                                   Text-Processing      2.87         11.29
+  Bckbone Model
+                           DE      RE     HE         DE    RE     HE                                                                     -4 -2 0 2 4 6 8 10 12 14
+
+                                                                                                                         Acceptance Length        ms/token
+  Deepseek-Coder-1.3B      2.04   2.04    2.38      2.97     3.21   2.87
+  Deepseek-Coder-6.7B      2.06   2.08    2.38      2.85     3.05   2.92                  (a)                                            (b)
+  CodeLlama-7B             2.05   2.07    2.27      2.77     3.06   2.79
+  CodeLlama-13B            2.06   2.06    2.25      2.75     2.99   2.63    Fig. 6: (a) Retrieval performance of FAST C ODER; (b) Perfor-
+                                                                            mance of FAST C ODER on different code topics.
+observe that, with prompt construction time held constant,                  comparison, FAST C ODER shows markedly lower resource
+FAST C ODER substantially reduces the time required during                  consumption than REST: its memory usage is less than one
+the generation phase, achieving speedups of 2.68× and 2.66×                 tenth, and its CPU usage is about one third, comparable to au-
+on RepoCoder and RLCoder, respectively. To quantitatively                   toregressive decoding. With a compact yet effective datastore
+assess code correctness, we also report Edit Similarity results             and accelerated construction speed, FAST C ODER provides a
+in Table III, which demonstrates that FAST C ODER and autore-               more lightweight and efficient inference acceleration approach.
+gressive decoding show consistent performance. This indicates               In conclusion, FAST C ODER can achieve a high average ac-
+high compatibility of FAST C ODER, achieving inference speed                ceptance length, reflecting its ability to generate high-quality
+acceleration through flexible integration with diverse existing             drafts, while also attaining a higher speedup ratio.
+code generation approaches following the RAG strategy while
+                                                                            B. Heatmap of FAST C ODER’s Retrieval Performance
+maintaining their correctness performance.
+                                                                               As mentioned in Section III-B, previous retrieval-based
+ Answer to RQ3: FAST C ODER can be flexibly integrated                      approaches often fail at the first non-whitespace token in each
+ with existing correctness-focused RAG-based code genera-                   code line. To explicitly illustrate FAST C ODER’s effectiveness,
+ tion approaches, achieving a speedup of over 2.6× while                    we depict its retrieval performance heatmap in Fig. 6(a), with
+ preserving their original performance on correctness.                      the evaluated samples and experimental settings aligned with
+                                                                            Fig. 3(a). A clear observation is that Fig. 6(a) has a markedly
+                          VII. D ISCUSSION                                  darker color intensity, especially at the first non-whitespace
+A. Average Acceptance Length and Cost Analysis                              token, indicating a significant increase in the probability of
+                                                                            FAST C ODER retrieving valid results. This improvement can
+   As average acceptance length can reflect the theoretical                 be attributed to two factors: on the one hand, our retrieval
+upper bound of achievable acceleration for retrieval-based                  strategy probabilistically avoids retrievals at such positions; on
+approaches, we compare the average acceptance length of                     the other hand, the multi-source datastore and the context- and
+FAST C ODER with REST, the strongest retrieval-based baseline               LLM preference-aware CACHE store high-quality sequences,
+in most cases. The results are shown in Table IV. FAST C ODER               which enhances the retrieval hit rate. Overall, this comparison
+consistently exhibits a longer acceptance length across all                 underscores the enhanced retrieval efficacy of FAST C ODER.
+datasets and backbone models, with an increase exceeding
+50% compared on RepoEval. Specifically, the size of REST’s                  C. Performance on Different Topics
+datastore is approximately 8 times that of FAST C ODER, but                    In practical software development, repositories are typically
+FAST C ODER still achieves a higher acceleration upper bound,               categorized into various domains, such as web development,
+which demonstrates the importance of multi-source datastore                 text processing, etc. Each domain tends to exhibit distinct
+as well as the context- and LLM preference-aware caching.                   coding styles and conventions. Therefore, to investigate the
+Moreover, we further compare the resource consumption of                    generalization capacity of FAST C ODER across different do-
+FAST C ODER with REST and autoregressive decoding, as                       mains, we report Deepseek-Coder-6.7B results on DevEval’s
+reported in Table V. Since neither FAST C ODER nor REST                     10 topics. As shown in Fig. 6(b), FAST C ODER demonstrates
+introduces an additional draft model, they incur no extra                   consistent and substantial acceleration across all topics, high-
+GPU overhead compared with autoregressive decoding. In                      lighting its robustness across diverse contexts.
+  import functools                                                            Prompt         we adopted precautionary measures during the construction of
+  from typing import Any, Dict, List, MutableMapping, Tuple, Union
+                                                                                             datastore D. Specifically, when building the repository-related
+  import numpy as np
+  import torch                                                                               datastore Dr , we excluded all portions requiring generation,
+  import torch.distributed as dist
+  import torch.nn as nn                                                                      thereby ensuring that Dr contains no ground-truth code. For
+  import torch.nn.functional as F              tokens retrieved from datastore
+  import transformers                          tokens retrieved from cache                   the common datastore Dc , where potential leakage may occur
+                                               tokens that cannot be retrieved by baseline
+  try:
+                                                                                             due to the use of The Stack [34], we examined the collection
+      from opendelta import (                                                                timelines of all relevant resources: DevEval [17] (downloaded
+          AdapterModel,
+          BitFitModel,                                                                       in November 2023), RepoEval [11] (repositories created after
+          LoraModel,
+          PrefixModel,                                                                       January 1, 2022), and The Stack (collected from January
+          SoftPromptModel,
+      )                                                                                      2015 to June 2022). These timelines indicate that The Stack
+      HAS_OPENDELTA = True
+                                                                                             and DevEval share no temporal overlap, with only minor
+  except ModuleNotFoundError:                                                                overlap possible with RepoEval. Moreover, only 1/145 of the
+      HAS_OPENDELTA = False
+                                                                                             Python subset of The Stack was utilized, thereby substantially
+  def make_head(n_embd: int, out: int, dtype: type = torch.float32)                          reducing the likelihood of leakage. As previous studies [16]
+       -> nn.Sequential:
+      """Returns a generic sequential MLP head."""                                           have also employed The Stack to construct datastores, we
+          return nn.Sequential(
+                                                                           LLM output        adopt a consistent practice in this work.
+          nn.Linear(n_embd, n_embd, dtype=dtype),
+          nn.GELU(),
+          nn.Linear(n_embd, out, dtype=dtype),
+                                                                                                External. The external threat to validity stems from dataset
+      )                                                                                      and backbone model limitations, as we perform experiments
+                                                                                             on a limited set of datasets and models. Thus, the results
+  def make_head_with_dropout(
+      n_embd: int, out: int, dropout: float, dtype: type = torch.float32                     obtained may not generalize to other experimental settings.
+  ) -> nn.Sequential:
+      """Returns a generic sequential MLP head with dropout."""                              To mitigate this limitation, we evaluate FAST C ODER on three
+      return nn.Sequential(
+          nn.Linear(n_embd, n_embd, dtype=dtype),                                            datasets spanning both repository-level and standalone code
+          nn.GELU(),
+          nn.Dropout(dropout),
+                                                                                             generation tasks, where FAST C ODER consistently outperforms
+          nn.Linear(n_embd, out, dtype=dtype),                                               baseline approaches, confirming its generalization. Further-
+      )
+                                                                                             more, FAST C ODER maintains robust performance regardless
+  def make_head_with_dropout_and_layer_norm(                                                 of the underlying LLM, validated through systematic ex-
+      n_embd: int, out: int, dropout: float, dtype: type = torch.float32
+  ) -> nn.Sequential:                                                                        periments with LLMs ranging from 1B to 13B parameters.
+      """Returns a generic sequential MLP head with dropout and layer norm."""
+      return nn.Sequential(                                                                  Although we do not provide results on larger models due
+          nn.LayerNorm(n_embd, dtype=dtype),
+          nn.Linear(n_embd, n_embd, dtype=dtype),
+                                                                                             to resource constraints, FAST C ODER’s LLM preference-aware
+          nn.GELU(),                                                                         cache helps ensure that retrieved drafts remain effective by
+          nn.Dropout(dropout),
+          nn.Linear(n_embd, out, dtype=dtype),                                               aligning them with the output style of the target LLM, thereby
+      )
+                                                                                             supporting generalization across different model scales.
+Fig. 7: Case study of an example sourced from RepoEval, with
+legends positioned in the upper-right corner.                                                                    VIII. C ONCLUSION
+
+D. Case Study                                                                                   In this paper, we propose FAST C ODER, a simple yet effi-
+                                                                                             cient LLM inference acceleration approach for repository-level
+   To further illustrate the effectiveness of FAST C ODER, we                                code generation without compromising generation quality.
+conduct a case study. As shown in Fig. 7, we use differ-                                     FAST C ODER leverages a multi-source datastore as well as a
+ent background colors to highlight the sources of the ac-                                    context- and LLM preference- aware cache to improve the
+cepted draft tokens utilizing FAST C ODER. Additionally, the                                 acceptance length of the retrieved draft, while minimizing
+underlined tokens refer to those that can be retrieved by                                    redundant retrieval operations through a dynamic and effi-
+FAST C ODER but not by the baseline (REST with Dc as                                         cient retrieval strategy. Experimental results demonstrate that
+the datastore). When generating the earlier parts, the CACHE                                 FAST C ODER outperforms state-of-the-art inference accelera-
+remains unavailable due to an insufficient accumulation of                                   tion approaches on both repository-level and standalone code
+sequences. Nonetheless, lots of repository-related tokens can                                generation tasks. FAST C ODER can also be integrated with
+be additionally retrieved by FAST C ODER, benefiting from                                    correctness-focused code generation approaches to accelerate
+the multi-source datastore. When the CACHE is available,                                     their inference speed. Requiring no draft model or additional
+a larger number of consecutive tokens becomes retrievable,                                   training, FAST C ODER provides a lightweight and practical
+thereby enhancing the inference speed by extending acceptable                                solution for LLM inference acceleration in code generation.
+sequences and reducing retrieval overhead.
+E. Threats to Validity                                                                                           ACKNOWLEDGMENT
+   Internal. The internal threat to validity lies in the potential                              This research is supported by the National Natural Science
+risk of data leakage during the construction of the datastore D,                             Foundation of China Grants Nos. 62302021 and 62332001.
+as the code contained within the datastore D may overlap with                                We thank Borui Zhang and Runlin Guo for their contributions
+the code that is intended to be generated. To mitigate this issue,                           to the demo development.
+                           R EFERENCES                                         ference of the North American Chapter of the Association
+                                                                               for Computational Linguistics: Human Language Technologies
+ [1] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang,                       (Volume 1: Long Papers), 2024, pp. 1582–1595.
+     G. Chen, X. Bi, Y. Wu, Y. Li et al., “Deepseek-coder: When           [17] J. Li, G. Li, Y. Zhao, Y. Li, H. Liu, H. Zhu, L. Wang, K. Liu,
+     the large language model meets programming–the rise of code               Z. Fang, L. Wang et al., “Deveval: A manually-annotated code
+     intelligence,” arXiv preprint arXiv:2401.14196, 2024.                     generation benchmark aligned with real-world code reposito-
+ [2] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan,        ries,” in Findings of the Association for Computational Lin-
+     Y. Adi, J. Liu, R. Sauvestre, T. Remez et al., “Code llama: Open          guistics ACL 2024, 2024, pp. 3603–3614.
+     foundation models for code,” arXiv preprint arXiv:2308.12950,        [18] Y. Wang, Y. Wang, D. Guo, J. Chen, R. Zhang, Y. Ma, and
+     2023.                                                                     Z. Zheng, “Rlcoder: Reinforcement learning for repository-
+ [3] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya,                     level code completion,” in 2025 IEEE/ACM 47th International
+     F. L. Aleman, D. Almeida, J. Altenschmidt, S. Altman,                     Conference on Software Engineering (ICSE). IEEE Computer
+     S. Anadkat et al., “Gpt-4 technical report,” arXiv preprint               Society, 2024, pp. 165–177.
+     arXiv:2303.08774, 2023.                                              [19] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski,
+ [4] Github, “Github copilot,” 2021. [Online]. Available: https:               D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le et al., “Pro-
+     //github.com/features/copilot                                             gram synthesis with large language models,” arXiv preprint
+ [5] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,           arXiv:2108.07732, 2021.
+     M. Marone, C. Akiki, J. Li, J. Chim et al., “Starcoder: may the      [20] H. Yu, B. Shen, D. Ran, J. Zhang, Q. Zhang, Y. Ma, G. Liang,
+     source be with you!” arXiv preprint arXiv:2305.06161, 2023.               Y. Li, Q. Wang, and T. Xie, “Codereval: A benchmark of
+ [6] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto,                   pragmatic code generation with generative pre-trained models,”
+     J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman                   in Proceedings of the 46th IEEE/ACM International Conference
+     et al., “Evaluating large language models trained on code,”               on Software Engineering, 2024, pp. 1–12.
+     arXiv preprint arXiv:2107.03374, 2021.                               [21] X. Chen, X. Hu, Y. Huang, H. Jiang, W. Ji, Y. Jiang, Y. Jiang,
+ [7] M. Liang, X. Xie, G. Zhang, X. Zheng, P. Di, H. Chen, C. Wang,            B. Liu, H. Liu, X. Li, X. Lian, G. Meng, X. Peng, H. Sun,
+     G. Fan et al., “Repofuse: Repository-level code completion with           L. Shi, B. Wang, C. Wang, J. Wang, T. Wang, J. Xuan, X. Xia,
+     fused dual context,” arXiv preprint arXiv:2402.14323, 2024.               Y. Yang, Y. Yang, L. Zhang, Y. Zhou, and L. Zhang, “Deep
+ [8] H. N. Phan, H. N. Phan, T. N. Nguyen, and N. D. Bui, “Repohy-             learning-based software engineering: Progress, challenges,
+     per: Better context retrieval is all you need for repository-level        and opportunities,” Science China Information Sciences,
+     code completion,” CoRR, 2024.                                             vol. 68, no. 1, p. 111102, 2025. [Online]. Available:
+ [9] W. Liu, A. Yu, D. Zan, B. Shen, W. Zhang, H. Zhao, Z. Jin,                http://www.sciengine.com/publisher/Science-China-Press/
+     and Q. Wang, “Graphcoder: Enhancing repository-level code                 journal/SCIENCE-CHINA-Information-Sciences/68/1/10.1007/
+     completion via coarse-to-fine retrieval based on code context             s11432-023-4127-5
+     graph,” in Proceedings of the 39th IEEE/ACM International            [22] S. Robertson, H. Zaragoza et al., “The probabilistic relevance
+     Conference on Automated Software Engineering, 2024, pp. 570–              framework: Bm25 and beyond,” Foundations and Trends® in
+     581.                                                                      Information Retrieval, vol. 3, no. 4, pp. 333–389, 2009.
+[10] W. Cheng, Y. Wu, and W. Hu, “Dataflow-guided retrieval               [23] Y. Ding, Z. Wang, W. Ahmad, H. Ding, M. Tan, N. Jain,
+     augmentation for repository-level code completion,” in Pro-               M. K. Ramanathan, R. Nallapati, P. Bhatia, D. Roth et al.,
+     ceedings of the 62nd Annual Meeting of the Association for                “Crosscodeeval: A diverse and multilingual benchmark for
+     Computational Linguistics (Volume 1: Long Papers), 2024, pp.              cross-file code completion,” Advances in Neural Information
+     7957–7977.                                                                Processing Systems, vol. 36, 2024.
+[11] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan,               [24] M. Ghazvininejad, O. Levy, Y. Liu, and L. Zettlemoyer,
+     Y. Mao, J.-G. Lou, and W. Chen, “Repocoder: Repository-level              “Mask-predict: Parallel decoding of conditional masked
+     code completion through iterative retrieval and generation,” in           language models,” in Proceedings of the 2019 Conference
+     Proceedings of the 2023 Conference on Empirical Methods in                on Empirical Methods in Natural Language Processing
+     Natural Language Processing, 2023, pp. 2471–2484.                         and the 9th International Joint Conference on Natural
+[12] F. Liu, Z. Fu, G. Li, Z. Jin, H. Liu, Y. Hao, and L. Zhang, “Non-         Language Processing (EMNLP-IJCNLP), K. Inui, J. Jiang,
+     autoregressive line-level code completion,” ACM Transactions              V. Ng, and X. Wan, Eds. Hong Kong, China: Association
+     on Software Engineering and Methodology, 2024.                            for Computational Linguistics, Nov. 2019, pp. 6112–6121.
+[13] J. Zhang, J. Wang, H. Li, L. Shou, K. Chen, G. Chen, and                  [Online]. Available: https://aclanthology.org/D19-1633/
+     S. Mehrotra, “Draft & verify: Lossless large language model          [25] C. Chen, S. Borgeaud, G. Irving, J.-B. Lespiau, L. Sifre, and
+     acceleration via self-speculative decoding,” in Proceedings of            J. Jumper, “Accelerating large language model decoding with
+     the 62nd Annual Meeting of the Association for Computational              speculative sampling,” arXiv preprint arXiv:2302.01318, 2023.
+     Linguistics (Volume 1: Long Papers), 2024, pp. 11 263 – 11 282.      [26] Y. Leviathan, M. Kalman, and Y. Matias, “Fast inference
+[14] W. Zhao, Y. Huang, X. Han, W. Xu, C. Xiao, X. Zhang, Y. Fang,             from transformers via speculative decoding,” in International
+     K. Zhang, Z. Liu, and M. Sun, “Ouroboros: Generating longer               Conference on Machine Learning. PMLR, 2023, pp. 19 274–
+     drafts phrase by phrase for faster speculative decoding,” in              19 286.
+     Proceedings of the 2024 Conference on Empirical Methods in           [27] M. Stern, N. Shazeer, and J. Uszkoreit, “Blockwise parallel
+     Natural Language Processing, 2024, pp. 13 378–13 393.                     decoding for deep autoregressive models,” in Advances
+[15] X. Miao, G. Oliaro, Z. Zhang, X. Cheng, Z. Wang, Z. Zhang,                in Neural Information Processing Systems, S. Bengio,
+     R. Y. Y. Wong, A. Zhu, L. Yang, X. Shi et al., “Specinfer:                H. Wallach, H. Larochelle, K. Grauman, N. Cesa-Bianchi,
+     Accelerating large language model serving with tree-based                 and R. Garnett, Eds., vol. 31. Curran Associates, Inc., 2018.
+     speculative inference and verification,” in Proceedings of the            [Online]. Available: https://proceedings.neurips.cc/paper files/
+     29th ACM International Conference on Architectural Support                paper/2018/file/c4127b9194fe8562c64dc0f5bf2c93bc-Paper.pdf
+     for Programming Languages and Operating Systems, Volume              [28] T. Cai, Y. Li, Z. Geng, H. Peng, J. D. Lee, D. Chen, and T. Dao,
+     3, 2024, pp. 932–949.                                                     “Medusa: Simple llm inference acceleration framework with
+[16] Z. He, Z. Zhong, T. Cai, J. Lee, and D. He, “Rest: Retrieval-             multiple decoding heads,” in Proceedings of the 41st Interna-
+     based speculative decoding,” in Proceedings of the 2024 Con-              tional Conference on Machine Learning, 2024, pp. 5209–5235.
+[29] Y. Fu, P. Bailis, I. Stoica, and H. Zhang, “Break the sequential
+     dependency of llm inference using lookahead decoding,” in
+     International Conference on Machine Learning, 2024.
+[30] Y. Li, F. Wei, C. Zhang, and H. Zhang, “Eagle: Speculative sam-
+     pling requires rethinking feature uncertainty,” in International
+     Conference on Machine Learning, 2024.
+[31] N. Yang, T. Ge, L. Wang, B. Jiao, D. Jiang, L. Yang,
+     R. Majumder, and F. Wei, “Inference with reference: Loss-
+     less acceleration of large language models,” arXiv preprint
+     arXiv:2304.04487, 2023.
+[32] U. Manber and G. Myers, “Suffix arrays: a new method for
+     on-line string searches,” siam Journal on Computing, vol. 22,
+     no. 5, pp. 935–948, 1993.
+[33] Z. Tu, Z. Su, and P. Devanbu, “On the localness of software,” in
+     Proceedings of the 22nd ACM SIGSOFT International Sympo-
+     sium on Foundations of Software Engineering, 2014, pp. 269–
+     280.
+[34] D. Kocetkov, R. Li, C. Mou, Y. Jernite, M. Mitchell, C. M.
+     Ferrandis, S. Hughes, T. Wolf, D. Bahdanau, L. Von Werra
+     et al., “The stack: 3 tb of permissively licensed source code,”
+     Transactions on Machine Learning Research, 2022.
+[35] B. F. Spector and C. Re, “Accelerating llm inference with staged
+     speculative decoding,” in Workshop on Efficient Systems for
+     Foundation Models@ ICML2023, 2023.
+

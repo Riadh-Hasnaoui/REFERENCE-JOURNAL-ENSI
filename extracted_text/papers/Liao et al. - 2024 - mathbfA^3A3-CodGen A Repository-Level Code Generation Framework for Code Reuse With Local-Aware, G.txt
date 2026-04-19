@@ -1,0 +1,1149 @@
+          IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024                                                                        3369
+
+
+
+
+            A3-CodGen: A Repository-Level Code Generation
+             Framework for Code Reuse With Local-Aware,
+             Global-Aware, and Third-Party-Library-Aware
+                  Dianshu Liao , Shidong Pan , Xiaoyu Sun , Xiaoxue Ren , Qing Huang , Zhenchang Xing ,
+                                                 Huan Jin , and Qinying Li
+
+
+              Abstract—LLM-based code generation tools are essential to                                            I. INTRODUCTION
+          help developers in the software development process. Existing
+          tools often disconnect with the working context, i.e., the code
+          repository, causing the generated code to be not similar to human
+          developers. In this paper, we propose a novel code generation
+                                                                                          I   N the realm of Software Engineering, the advent of Large
+                                                                                              Language Models (LLMs) has revolutionized various tasks,
+                                                                                          including code generation [1], [2], [3], [4], [5]. The automatic
+          framework, dubbed A3 -CodGen, to harness information within                     generation of code by these models significantly reduces de-
+          the code repository to generate code with fewer potential logical
+          errors, code redundancy, and library-induced compatibility is-                  velopment time and effort [6]. Specifically, in the process of
+          sues. We identify three types of representative information for the             evolving software projects, software engineering developers are
+          code repository: local-aware information from the current code                  frequently tasked to add new features and functionality [7].
+          file, global-aware information from other code files, and third-                LLMs such as ChatGPT [8], GitHub Copilot [9], Codex [10]
+          party-library information. Results demonstrate that by adopting                 are capable of automatically generating code based on the de-
+          the A3 -CodGen framework, we successfully extract, fuse, and
+          feed code repository information into the LLM, generating more                  velopers’ requirements (e.g., natural language descriptions of
+          accurate, efficient, and highly reusable code. The effectiveness                functions and function definitions).
+          of our framework is further underscored by generating code                         A significant gap still persists between the code generated
+          with a higher reuse rate, compared to human developers. This                    by LLMs and that crafted by human developers. When adding
+          research contributes significantly to the field of code generation,             new functionality to a specific module, developers already had
+          providing developers with a more powerful tool to address the
+          evolving demands in software development in practice.                           sufficient knowledge about the current task and the entire code
+                                                                                          repository. Also, according to a previous study [11], developers
+            Index Terms—Code generation, repository knowledge mining,
+          code reuse, retrieval-augmented generation.
+                                                                                          often expect that code generation tools could be aware of more
+                                                                                          context/knowledge by using specific frameworks/libraries [12].
+                                                                                          In addition, they hope the generated code maximum utilizes
+                                                                                          specific third-party libraries (e.g., invocation of an API in a
+                                                                                          library) [13], [14], [15]. Above all, in contrast to straightforward
+                                                                                          LLM-based code generation, developers especially consider
+                                                                                          three primary categories of information:
+             Received 3 March 2024; revised 30 September 2024; accepted 13 October            1 Local Information: This category encompasses informa-
+          2024. Date of publication 24 October 2024; date of current version 12 De-
+          cember 2024. This work was supported in part by the National Nature Science     tion within the current working context, including defined func-
+          Foundation of China under Grant 62302437, Grant 62262031, and Grant             tion signatures and variables. It also covers the relative file paths
+          62367003, in part by the Distinguished Youth Fund Project of the Natural        of the module within the project, such as the module’s Fully
+          Science Foundation of Jiangxi Province under Grant 20242BAB23011, in
+          part by Gan Po Talent Support Program-Academic and Technical Leaders            Qualified Names (FQNs), like unstructured.documents.html.
+          Training Program in Major Disciplines of Jiangxi Province under Grant           Local information is crucial to ensuring the generated code
+          20243BCE51007. Recommended for acceptance by B. Adams. (Correspond-             utilizes accurate variables and operates harmoniously with the
+          ing author: Qing Huang.)
+             Dianshu Liao and Xiaoyu Sun are with the School of Computing, Australian     other functions in the project.
+          National University, Canberra, ACT 2601, Australia.                                 2 Global Information: This category involves functions
+             Shidong Pan and Zhenchang Xing are with CSIRO’s Data61, Sydney, NSW          from other code files within the same repository, accessible via
+          2015, Australia, and also with the School of Computing, Australian National
+          University, Canberra, ACT 2601, Australia.                                      fully qualified import API names. A previous research high-
+             Xiaoxue Ren is with the State Key Laboratory of Blockchain and Data          lighted that only around 30% of methods operate independently
+          Security, Zhejiang University, Hangzhou 310027, China, and also with            in open-source projects [16]. Hence, these external functions
+          Hangzhou High-Tech Zone (Binjiang) Institute of Blockchain and Data
+          Security, Hangzhou 310027, China.                                               are essential for implementing new functions without dupli-
+             Qing Huang is with the School of Computer Information Engineering,           cating code. For example, developers import functions “from
+          Jiangxi Normal University, Jiangxi 330022, China (e-mail: qh@jxnu.edu.cn).      unstructured.partition.text_type import is_bulleted_text” from
+             Huan Jin and Qinying Li are with Jiangxi University of Technology, Jiangxi
+          330022, China.                                                                  other modules, instead of writing a function to judge “bulleted
+             Digital Object Identifier 10.1109/TSE.2024.3486195                           text” from scratch.
+
+                                 0098-5589 © 2024 IEEE. Personal use is permitted, but republication/redistribution requires IEEE permission.
+                                               See https://www.ieee.org/publications/rights/index.html for more information.
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3370                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+
+               3 Third-Party-Library Information: This category in-                     Our experimental results confirm the efficacy of incorpo-
+           cludes third-party libraries pre-installed in the code repository’s       rating three types of code repository-awareness knowledge in
+           environment. These libraries can be accessed directly through             aiding the foundational model to reuse code repository knowl-
+           import statements, enhancing functionality without extra de-              edge. The A3 -CodeGen framework excels in recognizing and
+           pendencies.                                                               utilizing these three types of code repository knowledge, lead-
+              Unfortunately, none of the existing code generation methods            ing to exceptional performance metrics in terms of local reuse,
+           take the above three types of information into consideration              global reuse, and third-party library reuse. Thanks to its out-
+           simultaneously. As the most common code generation tool,                  standing code reuse capabilities, our framework is capable of
+           ChatGPT [8] demonstrates commendable coding ability [17]                  generating concise code that seamlessly integrates with the code
+           but relies solely on user input. GitHub Copilot [9], which ex-            repository’s working environment. Furthermore, we identify
+           plicitly utilizes local information spanning the current working          optimal configurations for local and global information, en-
+           context, often struggles to harness the full potential of global          abling the model to effectively leverage essential knowledge
+           information presented in the entire code repository.1 When                while avoiding the potential pitfalls of information overload.
+           these methods disregard local and global module information,              By comparing A3 -CodGen with GitHub CoPilot, we find that
+           they risk omitting crucial logic during code generation [18]. For         while both perform similarly in local reuse, A3 -CodGen sur-
+           instance, they might forget to extract text from a tag before             passes CoPilot in global reuse and third-party library reuse. We
+           attempting to identify it as a bullet point (is_bulleted_text).           propose potential methods for improving industry products like
+           Furthermore, neglecting third-party library information may               CoPilot by incorporating our approach.
+           cause the LLMs to randomly select third-party libraries and                  The main contributions of this paper are as follows.
+           generate code based on them. If the selected libraries third-                • To the best of our knowledge, we are the first to conduct an
+           party are unsupported under the given environment, it can lead                  extensive empirical study, systematically investigating the
+           to compatibility issues, such as “ModuleNotFoundError: No                       usefulness of local information, global information, and
+           module named xxx.”                                                              third-party-library information in code generation tasks.
+              Therefore, to encounter the insufficient information aware-               • We introduce a novel framework, dubbed A3 -CodGen
+           ness issue in LLM code generation tasks, we introduce novel                     Framework, effectively knowledge mining and knowl-
+           A3 -CodGen (Local Aware, Global Aware, and Third-Party-                         edge utilization, aiding models in better understanding and
+           Library Aware Code Generation). This framework systemat-                        fully utilizing the knowledge within code repositories.
+           ically mines and utilizes external knowledge from the local                  • We construct a new benchmark dataset, namely RepoE-
+           module, global modules, and third-party libraries. First, our                   val, to reflect the effectiveness on code-repository-aware
+           framework begins by acquiring foundational information about                    code generation. Results demonstrate the validity of the
+           functions and third-party libraries within the code repository.                 three types of code repository information and show
+           This initial step provides a solid function base and a third-party-             that our framework can effectively mine and utilize this
+           library base that supports subsequent information retrieval pro-                knowledge.
+           cesses. Next, it conducts knowledge retrieval from the function              • We open-source our replication package [19], including
+           base, the third-party library base, and the current file. These                 the dataset, source code, and experimental results, for
+           retrieved insights are systematically organized into three dis-                 follow-up research.
+           tinct categories of code repository-aware knowledge. Subse-
+           quently, the framework seamlessly fuses these three types of                                        II. MOTIVATION
+           code repository-aware knowledge into a cohesive prompt. This
+                                                                                     A. Limitation of Existing Code Generation Approaches
+           prompt serves as the input to the foundational LLM, enabling
+           the model to generate code that closely resembles the work of                Benefiting from the rapid development of Transformer struc-
+           human developers.                                                         tures and pre-trained LLMs in the early 2020s, code-LLMs
+              Our experiments are driven by two primary objectives: 1)               experienced significant growth. Transformer code models, ex-
+           To investigate the effectiveness of three distinct types of code          emplified by milestone works such as CodeT5 [20], CodeBERT
+           repository information in assisting the model with code gen-              [21], and GraphCodeBERT [22], dominated the scene. More
+           eration for specific code repositories. 2) To assess whether our          recently, decoder-only Transformer models have become the
+           framework can efficiently extract and utilize these three types of        mainstream in generative models. Represented by Codex [10],
+           information. We crawl and filter 29 representative Python code            CodeGen [23], and others like [24], [25], [26], [27], [28].
+           repositories from PyPI, assembling 13,784 functions. To ensure               Nowadays, to Software Engineering developers, LLM-
+           a diverse benchmark dataset, we conduct a sampling process,               empowered code generation has become an irreplaceable as-
+           selecting representative functions from each repository to total          sistant tool in their development cycle [29], [30]. Although the
+           383 functions. We subsequently label these benchmarks and                 code-LLM has been developed for years, those code generation
+           the model outputs generated under different configurations to             tools still play a supporting role in the actual SE development.
+           evaluate the performance of A3 -CodGen.                                   Essentially, there are significant differences between the code
+                                                                                     generated by LLMs and that crafted by human developers.
+                                                                                     Specifically, we conclude the phenomenon in the following
+              1 https://githubnext.com/projects/copilot-view/                        threefold:
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                       3371
+
+
+
+
+          Fig. 1.   Knowledge-Starved Code Generation vs. Code Repository Aware Code Generation.
+
+
+
+             • Observation 1: Followed by the innate features of LLMs,                   already implemented can mitigate the shortcomings of
+               the content and quality of generated codes heavily depend                 advanced-level programming challenges. For example,
+               on the human-crafted prompts.                                             Python developers are likely to import functions from
+               Discussion 1: Providing longer prompts with richer con-                   networkx package to build a graph, not building graphs
+               tent seems a plausible solution. With the growth of LLM                   by the dictionary-like data structure.
+               size, the maximum input length increases from 512 to-
+               kens for the early models [31] to 32,000 tokens for the
+               extended GPT-4 models [32]. However, it is still impos-              B. Code Generation in Code Repository
+               sible to feed the entire code repository and all other rel-             During software development, programmers typically work
+               evant information into the LLMs. Furthermore, studies                within a specific code environment, essentially a designated
+               have demonstrated that irrelevant context in prompts not             code repository. This repository encompasses all project mod-
+               only affects model efficiency and increases expenses, but            ules, functions in these modules, and third-party libraries, serv-
+               also potentially compromises the model performance [33].             ing as the foundational framework for building and expanding
+               Therefore, to maintain the practicability and effectiveness          software applications. In this context, developers, especially
+               simultaneously for code generation tasks, external context           experienced ones, must thoroughly navigate and understand
+               information should be extracted and selectively fed into             this code repository environment to ensure seamless integra-
+               LLMs.                                                                tion of newly added code with the existing one. When it
+             • Observation 2: Existing methods focus on generating                  comes to LLM-based code generation techniques, solely relying
+               independent and often small-scale code units [16], [34].             on inputting developer requirements to these models fails to
+               According to a previous study [34], the code generated               fully utilize the potential of LLMs in interacting with existing
+               by LLMs shows lower method-level correctness. Although               code repository environments. Specifically, these techniques
+               various benchmarks have been proposed (Details are dis-              are blind to the repository’s unique naming conventions and
+               cussed in the Related Work (Section VII)), newly gener-              programming styles, particularly when the completion target
+               ated code remains questionable.                                      is relevant to cross-file context [36], [37], [38]. Instead of
+               Discussion 2: The correctness relates to many factors, and           using a single code file, well-designed programs emphasize
+               evaluation of correctness is already challenging enough.             separating complicated functionality into independent modules,
+               Studies have shown that larger and more powerful foun-               each implementing only one aspect of the desired functionality
+               dation LLMs lead to better code generation correctness.              [39], [40].
+               Additionally, retrieving and reusing existing functions or              As illustrated in Fig. 1, in the Direct Generation method,
+               APIs (which are usually verified by other human develop-             developers input their requirements directly into ChatGPT, ex-
+               ers), as the skeleton for code generation, could also funda-         pecting to receive code for a function that executes the task of
+               mentally improve the correctness. This is also the strategy          “checking to see if a tag contains bulleted text”. However,
+               that human developers commonly apply in practice.                    the generated code, due to its lack of knowledge about local
+             • Observation 3: Some code-LLMs (e.g., GPT-4) have                     modules, fails to adequately consider a crucial factor: before
+               developed superior skills in simple algorithms such as               determining whether a tag contains bulleted text, it’s essential
+               greedy algorithm and searching strategies, but they per-             to first extract the text content from the provided tag_elem,
+               form poorly in complicated data structures such as tree              which is a vital prerequisite. As a result, the generated code
+               structure and graph theory [35].                                     (highlighted in the yellow box) simply searches for content
+               Discussion 3: Similarly, instead of generating complex               within the <ul> and <ol> tags. If bullet text exists outside these
+               code snippets from scratch, importing functions that are             tags, for example, in the input “<div>\u0095 This is a list
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3372                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           item.< /div>”, the generated code will be unable to extract text                            III. A3 -CODGEN FRAMEWORK
+           content, thus preventing accurate detection.
+                                                                                        In this section, we elaborate on our novel A3 -CodGen Frame-
+              Furthermore, since the model is unaware of the existence of
+                                                                                     work to harness the full potential of code repository knowledge
+           the “check text for bullet characters” function in the global
+                                                                                     for assisting LLMs in code generation. As depicted in Fig. 2,
+           module, it defines a new function is_bullet_text (highlighted
+                                                                                     the A3 -CodGen Framework comprises three essential phases.
+           in blue) in the generated code. A large part of this code du-
+                                                                                     First, we obtain the function base and third-party library base
+           plicates the function is_bullet_text in the global module un-
+                                                                                     (Section III-A), providing sufficient knowledge to support sub-
+           structured/partition/text_type.py, resulting in code redundancy.
+                                                                                     sequent retrieval. Then, we retrieve the code repository knowl-
+           It also brings additional concerns about the correctness of the
+                                                                                     edge from other code files, the third-party library repository,
+           newly generated function.
+                                                                                     and the current file. After that, we organize them into 3 types
+              Additionally, since the model is unaware of which third-party
+                                                                                     of code repository aware knowledge (Section III-B). Finally, the
+           libraries are available, it arbitrarily imports and uses the bs4
+                                                                                     three code repository-aware knowledge are fused into a prompt
+           (BeautifulSoup4 ) library. This can result in the generated code
+                                                                                     (Section III-C), serving as input to the foundation LLM, to
+           that refers to a library that is not available, leading to the bug
+                                                                                     ultimately generate codes with three essential awareness.
+           “ModuleNotFoundError: No module named ***”.
+              These knowledge gaps highlight the limitations of existing
+                                                                                     A. Repository Knowledge Base Construction
+           code generation approaches, highlighting the need for more
+           context-aware methods that can effectively interact with the                 Code repositories contain a wealth of knowledge to exploit,
+           code repository environment. In summary, a lack of knowledge              but this knowledge usually exists in an unstructured form and
+           about local and global modules can result in models gen-                  cannot be directly utilized effectively, scattering in the code
+           erating code lacking functional constraints or containing re-             repository. Therefore, we need to perform systematic knowl-
+           dundancies. A lack of knowledge about third-party libraries               edge extraction to transform and compress this knowledge into
+           in the code repository can lead to models using arbitrary                 a structured form in order to build a knowledge base to support
+           third-party libraries, causing problems with the generated                subsequent knowledge utilization, such as knowledge retrieval.
+           code not working. As a result, generating code in specific                Thus, we perform code repository information extraction
+           modules of the code repository is more than just meeting                  (Section III-A1) and third-party library extraction (Sec-
+           functional requirements. To generate code similar to human                tion III-A2) to obtain the function base and third-party-library
+           developers, the approach must fully understand and effec-                 base, respectively.
+           tively utilize this diverse contextual knowledge to ensure that              1) Code Repository Information Extraction: For a code
+           newly introduced code seamlessly coordinates with the existing            repository, we can effortlessly obtain all code files in the entire
+           code repository.                                                          repository by traversing all the directories within the project.
+                                                                                     Then, for each file, we extract all included functions, gathering
+                                                                                     both basic code information and semantic code knowledge. This
+                                                                                     process snowballs to extract all essential repository information.
+           C. Bridging the Gap: Making LLMs Aware of Three Types                        Basic Code Knowledge Extraction. Abstract Syntax Tree
+           of Repository Knowledge
+                                                                                     (AST) is a tree representation of the source code, and studies
+              Above all, in order to enable LLMs to fully utilize informa-           have demonstrated its usefulness on various SE tasks [41]. In
+           tion spanning over the code repository environment for code               this study, we employ the Python library ast to analyze the
+           generation, it is essential to provide the model with three types         AST for each source code file in the code repository. From
+           of knowledge: local modules, global modules, and third-party              the AST, we extract six essential types of basic information:
+           library information.                                                      1) Comment. 2) Signature. This knowledge illustrates the pa-
+              As shown in Fig. 1 Local Module Aware & Global Module                  rameters and returns of a function. For example, the signature
+           Aware & Third-Party Library Aware Code Generation, when                   of the function _construct_text is def _construct_text(tag_elem,
+           the developer requirement is entered, since the model is aware            include_tail_text)->str. 3) Function Source code. 4) Class asso-
+           of the knowledge of the local module, the generated code reuses           ciated with the function (if a function is a member of a class). 5)
+           the _construct_text function (highlighted in yellow) in the local         Is_Empty tag. True means empty function, False means empty
+           module to extract the text content in the text label element.             label. For example, function _construct_text has is_Empty value
+           In addition, because the model is aware of knowledge of the               False. 6) The file path of the function. This reflects the relative
+           global module, the generated code reuses the is_bulleted_text             location of the current function in the entire code repository.
+           function (highlighted in blue) from the global module un-                    Semantic Code Knowledge Extraction. AST is criticized
+           structured/partition/text_type.py, thus reducing redundant code           for its prone to long-term dependency problems. Also, simply
+           definitions. In addition, the model is aware of the existence             employing AST potential weakens the capability to capture real
+           of third-party libraries and therefore reuses the lxml library to         and complex semantics [41]. Thus, we extract three types of
+           ensure its availability.                                                  semantic code knowledge to enhance the basic code knowledge,
+              In the next section, we comprehensively describe how to                as follows:
+           extract, structure, and utilize local aware, global aware, and               1) Fully Qualified Name (FQN) of Functions. FQN in-
+           third-party library aware information from code repositories.             dicates the function’s origin in the code repository and, if
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                       3373
+
+
+
+
+          Fig. 2.   A3 -CodGen Framework.
+
+
+          applicable, the specific class within the module. For example,
+          in the local module of the Fig. 1, the function _con-
+          struct_text (highlighted in yellow) has the FQN unstruc-
+          tured.documents.html._construct_text.
+             2) Function Summary. Not every function is elaborated by
+          comments. Even comments exist, their quality varies; some lack
+          clear descriptions of the function’s basic functionality, while
+          others might be over-detailed. Overly lengthy descriptions can
+          distract from understanding the function’s actual usage and be-
+          havior. Therefore, we generate a function summary to precisely
+          describe the purpose and functionality of the function. Previous
+          work has demonstrated that large language models (LLMs) are
+          capable of in-context learning [42], [43], [44], where a task
+          description and examples can enable LLMs to perform well.
+          Thus, we use GPT-3.5-Turbo [45] as the foundation model due               Fig. 3.   Function Summarizer Unit.
+          to its demonstrated code understanding and summarization ca-
+          pabilities, as well as its cost-effectiveness. The selection of the
+          foundation model is flexible, and our method is also applicable              2) Third-Party Library Extraction: Third-party libraries of-
+          to advanced models such as GPT-4 [32], although they come at              ten appear in code files, and when specific libraries are provided
+          a higher cost.                                                            to a model, it likely has learned how to use them during training
+             Function Summarizer Unit. To generate natural language                 [46], [47]. Therefore, supplying just the library name allows the
+          semantic information for functions, we design a prompt as the             model to automatically understand how to use it for a given task.
+          core of the Function Summarizer Unit. This prompt creates                 For example, we can ask the model to use the NumPy library
+          summaries for each function. As shown in Fig. 3, the prompt               to compute the cosine similarity, given the input vector_a and
+          includes a task description (highlighted in purple), five demon-          vector_b. In this case, the model can directly call functions in
+          stration examples, and an input template. The input to this unit          the NumPy library, such as numpy.dot and numpy.linalg.norm,
+          is the function’s code (highlighted in green), and the output is          to perform the required computations. The pre-trained model’s
+          the model-generated summary (highlighted in red).                         prior knowledge and extensive large-scale training enable them
+             3) Vector Representations. In the previous two steps, we               to effectively utilize third-party libraries, improving the effi-
+          underlined explictly select information. To ensure efficient re-          ciency and accuracy of code generation. Therefore, we extract
+          trieval of global functions later on, having an effective code            the import statements of third-party libraries directly from all
+          representation that faithfully captures function semantics is             code files via AST and saved their library names to construct
+          essential. Hence, we employ a dual-pronged approach, con-                 the third-party library base. It is important to note that the same
+          ducting separate embeddings for both the source code and the              library can have different versions, and API call methods may
+          function summaries. This results in the creation of code vector           vary between versions. To address this, the current repository’s
+          and summary vector, respectively.                                         Python interpreter or the “pip list” command can be used to
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3374                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           determine the versions of pre-installed libraries, guiding the            be reused, we retrieve global functions in the code repository
+           model in generating accurate code.                                        and organize them in a structured way. The global module
+                                                                                     knowledge mining process is divided into three phases: what-
+                                                                                     if code generation, global function retrieval, and information
+           B. Three Types of Repo-Aware Knowledge Retrieval
+                                                                                     unification.
+              As we discussed in Section II-A, although the maximum                     • What-If Code Generator Unit: In Section III-A1, we
+           input length grows greatly, it is still impossible to feed the entire           construct a function base derived from the code repository.
+           code repo and third-party library information to LLMs. Further-                 To retrieve global functions from this base, we consider
+           more, irrelevant context not only affects model efficiency and                  both textual and code semantic similarity. For code se-
+           increases expenses, but also potentially compromises the model                  mantic similarity matching, we utilize the code genera-
+           performance [33].                                                               tion capability of the LLM, inputting user requirements
+              To enable the model to fully utilize the three types of                      to generate a what-if code, which encapsulates the logic
+           information extracted from the code repository, we conduct                      to fulfill those requirements and serves as input for code
+           comprehensive knowledge mining: extracting four types of lo-                    similarity matching in the Global Function Retrieval Unit.
+           cal information (Section III-B1), retrieving global functions                   For in-context learning, we provide three representative
+           from the function base using developer requirements to obtain                   examples. Notably, as the generated code is not the final
+           global-aware information (Section III-B2), and structuring                      code and only used to retrieve the global function, so
+           third-party library information from the third-party library                    completeness is not required. As shown in the experiment
+           base (Section III-B3).                                                          results in Section V-B, using function descriptions for text
+              1) Local-Module Knowledge Mining: Within the user’s                          similarity and what-if code for code similarity retrieval can
+           working context, referred to as the local module, four types of                 retrieve more useful global functions compared to using
+           local-module information can be encountered:                                    only function descriptions.
+              • Local functions. Local functions encompass all functions                • Global Function Retrieval Unit: This unit uses func-
+                that are defined and implemented within the local mod-                     tion descriptions and the what-if function-code as input
+                ule. We extract these local functions and represent them                   to retrieve reusable global functions from the function
+                in the form of <Fully Qualified Name (FQN), Function                       base. Specifically, we first embed function_description
+                Summary, Function Signature>. The FQN provides details                     into vectordes and compute the cosine similarity between
+                about the function’s location within the module, the Func-                 this vector and the summary vectors of all functions in
+                tion Summary reflects the natural language description of                  the function base. Thus, we can rank and obtain the
+                the function’s purpose, and the Function Signature reveals                 top k RetrievedF undes . Second, we embed the what-if
+                its input and output specifications.                                       function-code as a vectorf and compute the cosine simi-
+              • Class Instance Attributes. Class instance attributes (or                   larity between this vector and the code vectors of all the
+                instance variables) are variables defined within a class’s                 functions in the function base, so we can rank and obtain
+                constructor function (__init__ in Python). These variables                 the top k RetrievedF uncode . Finally, we merge the sets
+                are specific to instances of the class and store instance-                 of RetrievedF undes and RetrievedF undes to obtain the
+                specific attributes or state information. Some local                       global function that is most relevant to the provided input,
+                functions may be defined within a class might involve                      which is denoted as RetrievedF un.
+                interactions with class instance attributes, accessing or               • Information Unification Unit: For each RetrievedF un,
+                modifying them to achieve specific functionality.                          we organize and display the retrieved information as
+              • Local Module FQN. Local Module FQN partially reflects                      <FQN, function signature, summary> in a structured
+                the structural information of the working context (local                   format.
+                module) within the entire code repository. It helps the                 3) Third-Party Library Knowledge Mining: In the process
+                model understand the context of how local functions, class           of code generation, to behavior similar to human developers, it’s
+                instance attributes, and variables within this module are            crucial for the LLM to be aware of the third-party libraries pre-
+                used.                                                                installed in the current code repository environment. Without
+              • Module variables. Local modules may define variables,                this awareness, there’s a risk of generating code that relies on
+                some of which can directly interact with local functions,            third-party libraries unsupported by the current environment,
+                potentially supporting the functionality of newly added              rendering the code non-functional. To ensure that, we create a
+                functions. We unify the declarations of these variables.             comprehensive list of all the third-party libraries found in the
+                However, if there are no variables defined within the mod-           third-party library base, as extracted in section III-A2. It’s im-
+                ule, we indicate this with None.                                     portant to note that we extract only the names of these libraries
+              2) Global-Module Knowledge Mining: In addition to using                and do not include any of their code. This approach is supported
+           local module knowledge, global module knowledge also plays a              by recent studies showing that LLMs can serve as neural knowl-
+           significant role in code generation. Instead of letting the model         edge bases for SE knowledge due to their pre-training on ex-
+           implement complicated logic steps from scratch, we expect the             tensive source code corpora, which includes third-party library
+           model can directly call functions if they are already present in          knowledge [42], [48], [49], [50]. Several works demonstrate
+           other code files. To help models realize that global functions can        library-oriented code generation, where LLMs generate code
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                       3375
+
+
+
+                                                                                       • Following that, in @command3, we guide the model to
+                                                                                           think about whether there are any reusable global functions
+                                                                                           within the global-aware knowledge and utilize them if
+                                                                                           present.
+                                                                                       • Subsequently, in @command4, we prompt the model
+                                                                                           to explore how to leverage the third-party library-aware
+                                                                                           knowledge to interact with libraries effectively.
+                                                                                       • Finally, in @command5, if the model cannot leverage any
+                                                                                           information, it is instructed to generate code directly based
+                                                                                           on the logic and steps it has formulated.
+                                                                                       • Additionally, we include an @command that reiterates the
+                                                                                           importance of strictly following the steps from 1 to 5.
+                                                                                       In the @rule, we establish three rules to govern the code gen-
+                                                                                    erated by the model, including calling import FQN, restricting
+                                                                                    the use of specified third-party libraries, and ensuring that the
+                                                                                    generated code is not empty (as the model may occasionally
+                                                                                    generate abstract functions). We then provide three represen-
+          Fig. 4.   A3 Code Generator Unit.                                         tative examples. Finally, we input the developer requirement
+                                                                                    and our 3 knowledge into Unit to get the A3 function code
+                                                                                    (i.e., _to_be_generated_code in Fig. 4 (b)). Notably, developers
+          based on specific library APIs [48], [49], [50], [51]. By con-            only needs to input requirements, and all 3 types of repo-aware
+          structing this list of third-party libraries, we empower the LLM          knowledge are obtained automatically.
+          to generate code that aligns with the available environment and              Due to the page limitation, we have organized all prompts for
+          utilizes the appropriate libraries effectively, reducing the risk of      our AI units (e.g., Code Summarizer, and A3 Code Generator)
+          non-executable code.                                                      in the “prompts/” folder of our artifact [19].
+          C. A3 Code Generation                                                                         IV. EXPERIMENT SETTING
+             After section III-B, we obtain structured local-aware knowl-
+                                                                                       In this section, we first outline the selection of foundation
+          edge, global-aware knowledge, and third-party-library-aware
+                                                                                    models, the dataset, and evaluation metrics for assessing our
+          knowledge. To ensure the model’s full awareness of these three
+                                                                                    framework. We then introduce five Research Questions (RQs):
+          types of knowledge, we design an A3 Code Generation
+                                                                                       • RQ1: Does Local Module Aware Knowledge indeed help
+          Unit that seamlessly integrates user requirements with the three
+                                                                                         LLMs fully utilize local module knowledge during code
+          knowledge sources to generate A3 functional code.
+                                                                                         generation, and which types are most effective in improv-
+             The A3 Code Generation Unit, as depicted in Fig. 4, consists
+                                                                                         ing local awareness?
+          of four key components: task description, examples, input, and
+                                                                                       • RQ2: Is Global Module Aware Knowledge effective in
+          output. In the task description (purple part), we employ a struc-
+                                                                                         assisting LLMs to utilize global module knowledge during
+          tured prompt to delineate the repository-aware code generation
+                                                                                         code generation, and what is the optimal “k” value for
+          task. Key components of the prompt include: 1) @persona:
+                                                                                         retrieving global functions?
+          Guiding the model to assume the role of an expert developer,
+                                                                                       • RQ3: Does Third-Party Library Aware Knowledge signif-
+          providing clarity on the task. 2) @terminology: Defining crucial
+                                                                                         icantly impact LLMs’ awareness of available third-party
+          information in a keyword format. 3) @instruction: This section
+                                                                                         libraries during code generation?
+          furnishes explicit instructions for executing the task:
+                                                                                       • RQ4: What is the overall performance of our A3 -CodGen
+             • @command: Offering an overarching strategy for the
+                                                                                         framework?
+               model to follow during the task.
+                                                                                       • RQ5: How does A3 -CodGen framework compare to exist-
+             • @rule: Outlining the basic limitations and considerations
+                                                                                         ing code generation tools like GitHub Copilot?
+               to be observed during code generation.
+             • @format: Detailing the expected presentation format for
+                                                                                    A. Foundation Models
+               the source code generated for the new function.
+             In the @command, we guide the model through the code                      We select GPT-3.5-Turbo-16k [45] as the default founda-
+          generation process step by step by employing chain-of-thought             tion LLM for this study due to its excellent performance in
+          [52], [53], [54].                                                         various SE tasks, along with its popularity and cost-efficiency.
+             • Firstly, in @command1, we prompt the model to contem-                As for the embedding model, we use the ada-embedding-002
+               plate the logic and steps required to fulfill the developer’s        model [55], which generates high quality sentence embeddings
+               request.                                                             for effective similarity computation and retrieval operations.
+             • Next, in @command2, we encourage the model to consider               [56], [57]. Similar to other LLM-empowered frameworks in
+               whether there is any reusable information within the local-          SE domain, the more powerful model is selected, the better
+               aware knowledge and utilize it if available.                         performance can be achieved, generally.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3376                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           B. Dataset Collection                                                        Given a function, code reuse falls into one of the three cate-
+               While there exist some benchmark datasets designed for code           gories: 1) It could be part of locally defined functions within the
+           generation, such as [16], [34], [58], [59], [60], they suffer from        local module; 2) belong to a global module; or 3) belong to a
+           the following issues: 1) some of the existing datasets contain            third-party library. To obtain this reuse information, we need to
+           code repositories that are already present in the training corpora        analyze the call relationships between functions among codes.
+           of popular LLMs, leading to an overestimation of the code                 However, existing code analysis tools like pycallgraph [66]
+           repository-aware code generation capabilities [61], [62]. 2) ex-          require code compilability to accurately generate call graphs for
+           isting benchmarks only evaluate class-level or small unit test            functions. Considering that it is impractical to set up running
+           cases, which is not suitable for our research goals. 3) Based on          environments for all these code repositories due to diverse re-
+           our literature review, none of existing code generation bench-            quirements and potential conflicts, and given that static analysis
+           mark datasets can evaluate whether A3 -CodGen can effectively             tools like pyan [67] have relatively lower accuracy and cannot
+           obtain, understand, and correctly reuse three distinct types of           meet our needs, we resort to manual annotation to extract the
+           code repository information. Therefore, to address the poten-             call information between functions.
+           tial risk of data leakage and accurately reflect the capability              Manual annotation for each function is resource-intensive
+           of A3 -CodGen, we created a new benchmark dataset, dubbed                 and time-consuming. To ensure experiment efficiency, we
+           RepoEval. This decision stems from our intention to verify                employ a statistical sampling method [68]. Specifically, we
+           that the model truly grasp A3 code generation after receiving             perform sampling on the 1,533 module functions obtained in
+           information we provide.                                                   Section IV-B1. We ensure that the estimated accuracy within the
+               1) Code Repository Collection: To construct a benchmark               sample remains within a 0.05 error range at a 95% confidence
+           dataset, we follow methodologies similar to those in previous             level while ensuring functions from each code repository are
+           works [63], [64], [65]. As we focus on Python code repositories,          included in the sample. Finally, we acquire 383 functions for
+           it is common to collect packages from the PyPI ecosystem, as              subsequent experiments.
+           mentioned in Alfadel et al. [65].
+               To ensure that the chosen repositories are not part of the
+                                                                                     C. Metrics
+           training data for the models used, we verify the release dates
+           of each repository to identify their first release date. If the              To comprehensively evaluate whether the three awareness are
+           first release date is after the training period of the model, it          effective, we employ the following metrics:
+           means that the repository was not included in the training data.             • Reuse Awareness: To assess the model’s ability to cor-
+           According to OpenAI’s official website, the training data for                  rectly reuse local, global, and third-party library informa-
+           GPT-3.5-Turbo-16k is cut off as of September 2021. Therefore,                  tion when necessary and avoid reuse when unnecessary,
+           we select projects with the earliest release date after October 1,             we computed the following awareness metrics:
+           2021, from PyPI. We further filter the GitHub repositories by                   – True Positive (TP): The model-generated code cor-
+           choosing those with more than 100 stars and 100 branches, as                       rectly reuses local, global, or third-party library in-
+           these metrics indicate repository quality [64]. Ultimately, we                     formation, consistent with the benchmark code. For
+           identify 29 code repositories to construct our benchmark, each                     instance, if the model-generated code reuses local func-
+           averaging 82.517 code files.                                                       tions and the benchmark code also reuses local func-
+               Then, we create 29 function bases and 29 third-party library                   tions, it is considered TP in the case of local reuse,
+           bases for the corresponding code repositories, following the                       as well as in the case of global reuse and third-party
+           method outlined in Section III-A. The function bases from these                    library reuse.
+           29 code repositories encompass a total of 13,784 functions. Out                 – False Positive (FP): The model-generated code in-
+           of these, 10,077 are class member functions, leaving 3,707 as                      correctly reuses local, global, or third-party library in-
+           module functions. Since class member functions often involve                       formation, where no reuse occurs in the benchmark
+           complex relationships related to inheritance and other classes,                    code.
+           it becomes highly labor-intensive to analyze the code invoca-                   – False Negative (FN): The model-generated code fails
+           tion relationships to construct the benchmark. Therefore, our                      to reuse local, global, or third-party library information,
+           benchmark dataset focuses solely on module functions. From                         but reuse occurs in the benchmark code.
+           these 3,707 module functions, we filter out functions that had                  – True Negative (TN): The model-generated code
+           comments and were non-empty, and finally, we obtain 1,533                          correctly does not reuse local, global, or third-party
+           functions.                                                                         library information, consistent with the benchmark
+               2) Benchmark Construction: Given the comments and the                          code.
+           definition of a function, the corresponding source code for                     – Precision: Calculated as T P/(T P + F P ), indicating
+           that function serves as the standard answer to be generated.                       the proportion of the model-generated code that is cor-
+           Simultaneously, we extract call information for the function to                    rectly reused.
+           determine the extent of code reuse within it, because a higher                  – Recall: Calculated as T P/(T P + F N ), indicating the
+           extent of function reuse reflects the framework learns better                      proportion of the code that actually needed to be reused
+           from three awareness.                                                              and is correctly reused by the model.
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                              3377
+
+
+
+                 – F1: The harmonic mean of Precision and Recall, pro-                                         TABLE I
+                    viding an overall measure of the model’s effective-                COMPARISON OF THE LOCAL REUSE AWARENESS RESULTS OBTAINED
+                                                                                                   WITH DIFFERENT LOCAL INFORMATION
+                    ness in reusing code, calculated as 2 ∗ (P recision ∗
+                    Recall)/(P recision + Recall).                                                Variant            Precision   Recall   F1      Accuracy
+                 – Accuracy: Calculated as (T P + T N )/(T P + F P +                    Vallina GPT-3.5-Turbo-16k      N/A        N/A     N/A      0.721
+                                                                                        GPT-3.5-Turbo-16k
+                    T N + F N ), representing the percentage of cases                                                 0.667      0.528    0.589    0.796
+                                                                                        +Local Functions
+                    where the model is correctly aware or unaware.                      GPT-3.5-Turbo-16k
+                                                                                        +Local Functions              0.720      0.632    0.673    0.830
+             • Reuse Correctness: After identifying local/global/third-                 +Class Instance Attributes
+                party library information, we assess the correctness of                 GPT-3.5-Turbo-16k
+                reuse. The metric is determined by the number of ex-                    +Local Functions
+                                                                                                                      0.728      0.557    0.631    0.820
+                                                                                        +Class Instance Attributes
+                act matches between the functions/libraries reused by the               +Module Variables
+                model and those in the benchmark, divided by the total                  GPT-3.5-Turbo-16k
+                                                                                        +Local Functions
+                number of functions/libraries reused by the model. For                  +Class Instance Attributes    0.759      0.566    0.649    0.830
+                instance, in local reuse, if the model reuses functions                 +Module Variables
+                                                                                        +Local Module FQN
+                locala , localb , and localc , and the benchmark reuses func-
+                tions localb , localc , and locald , there are 2 exact matches,
+                resulting in a correctness score of 2/3 = 0.667. It’s im-
+                portant to note that we do not use conventional metrics             Generation, and Which Types Are Most Effective in
+                                                                                    Improving Local Awareness?
+                like BLEU [69], ROUGE [70], or METEOR [71], as they
+                only evaluate token-level similarity between the model-                1) Motivation: Local information aids LLMs in code gener-
+                generated code and the benchmark code. These metrics                ation by offering awareness of local contextual details. We ex-
+                do not effectively measure the model’s ability to correctly         tract and organize four types of Local-Aware Knowledge from
+                reuse code components during generation.                            the local module: local functions, class instance attributes, local
+             • Library Coverage: This metric represents the proportion              module FQNs, and module variables. These knowledge types
+                of libraries used in the generated code that are already pre-       offer diverse perspectives on the context of the local module.
+                installed in the code repository’s environment.                     Our goal is to assess whether local-aware knowledge genuinely
+             • Lines of Code (LOC): This metric reflects code concise-              enhances LLMs’ ability to reuse local functions in code genera-
+                ness, determined by counting lines after removing com-              tion. Additionally, we aim to identify the optimal configuration,
+                ments. Lower LOC indicates more concise code.                       determining whether all four knowledge categories should be
+             To validate the call relationships between the extracted               available to the model’s awareness or only specific ones.
+          functions, we recruit two developers with over five years of                 2) Experiment Methodology: We use vanilla GPT-3.5-
+          Python programming experience. Each function in the bench-                Turbo-16k as a baseline, which does not have any local informa-
+          mark dataset is independently labeled by both developers. They            tion in its input. We define four variants of local-aware methods,
+          evaluate whether the function utilizes local functions within             as shown in Table I.
+          the current code file, assigning a score of 1 if it does and 0               • +Local Functions signifies the use of Local Functions
+          if it doesn’t. Similarly, they assess whether the function uti-                 knowledge from the current file context.
+          lizes global functions and third-party libraries, assigning scores           • +Class Instance Attributes indicates the use of Class In-
+          of 1 or 0 accordingly. These scores contribute to calculating                   stance Attributes Knoweldge
+          reuse awareness. For functions involving reuse, they identify                • +Module Variables involves using the module Variables
+          all reused functions/libraries to calculate reuse correctness.                  knowledge in the current file context.
+             After the independent labeling, discrepancies are discussed               • +Local Module FQN employs the fully qualified name
+          to reach a consensus. If any disagreements remain, the first au-                corresponding to the current file.
+          thor resolves them and makes the final decision. In subsequent               We run these five different configurations on the benchmark
+          experiments, we use this benchmark for evaluation and annotate            to obtain code generation results.
+          the model-generated code using the same method. To label the                 3) Result Analysis: Table I shows the reuse awareness re-
+          model-generated results, we recruit 4 master’s students and 8             sults for code generation using vanilla GPT-3.5-Turbo-16k and
+          undergraduate students, each with at least 2 years of Python              four types of Local-Aware Knowledge Configurations. Vanilla
+          programming experience. After a 1-hour training session on our            GPT-3.5-Turbo-16k exhibits a precision and recall of 0 as it
+          standardized method, tasks are evenly distributed among them.             does not recognize any local functions. Consequently, in its
+          We utilize Cohen’s kappa [72] to assess inter-rater agreement,            generated code, new functions are often defined to complete
+          with coefficients ranging from 86% to 95% for all annotated               certain logic, resulting in code redundancy.
+          data (including the benchmark dataset and model-generated                    When given knowledge of Local Functions, the model
+          results), indicating high agreement among assessments.                    achieves a precision of 0.667, recall of 0.528, F1 score of 0.589,
+                                                                                    and accuracy of 0.796. This is because Local Function knowl-
+                                    V. EVALUATION                                   edge allows the model to directly invoke these functions. Upon
+          A. RQ1: Does Local Module Aware Knowledge Indeed Help                     additionally providing knowledge of Class Instance Attributes,
+          LLMs Fully Utilize Local Module KnowledgeDuring Code                      the model’s precision, recall, and F1 score improve by 7.94%,
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3378                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           19.70%, and 14.26%, respectively, compared to providing only                                          TABLE II
+           knowledge of Local Functions. This improvement is attributed                 COMPARISON OF THE GLOBAL REUSE AWARENESS RESULTS OBTAINED
+                                                                                        FOR DIFFERENT TOP K NUMBERS OF RETRIEVED FUNCTIONS TO FIND
+           to the provision of Class Instance Attributes, which enables                                      THE BEST K VALUE
+           the model to better understand how local functions interact
+                                                                                             Global
+           with class variables in the project, leading to more accurate                   Functions of
+                                                                                                             Avg.
+           application of local functions.                                                                 Retrieved   Precision   Recall    F1     Accuracy
+                                                                                            Different
+                                                                                                           Functions
+              However, when we introduce the Module Variables, the                            Top k
+                                                                                         No Global-Aware
+           model’s performance drastically declines, particularly with a                                     N/A         N/A       N/A      N/A      0.843
+                                                                                             (k = 0)
+           11.87% drop in precision. This may be due to the increased in-                      k=1           1.757      0.372      0.533    0.438    0.786
+                                                                                               k=5           8.154      0.518      0.717    0.601    0.851
+           formation load resulting from knowledge of Module Variables,                       k=10          16.031      0.479      0.583    0.526    0.836
+           which impacts performance. Nevertheless, the model’s perfor-                       k=15          23.592      0.407      0.583    0.479    0.802
+           mance is restored and approaches the capabilities of providing
+           knowledge of Local Functions and Class Instance Attributes
+           when we subsequently add knowledge of Local Module FQN.                   5, 10, and 15. These values are chosen because larger projects
+           This suggests the existence of subtle interactions within the             with more complex call relationships require at least one global
+           knowledge configuration. When the model receives only one or              function. A single retrieved global function may not be suf-
+           two key knowledge types, its performance may be superior to               ficient, and some functions may need to call multiple global
+           when it receives more information. However, as the volume of              functions, so we increase the k value to 5, 10, and 15. This
+           knowledge increases to a certain extent, the model’s capabilities         selection ensures we cover a range of potential requirements,
+           strengthen, resulting in improved performance.                            balancing between too few and too many candidate functions
+              We ultimately choose the Local-Aware Knowledge setup,                  to maintain model performance and relevance. We run the total
+           including knowledge of Local Functions and Class Instance                 five different configurations on the benchmark to obtain code
+           Attributes. This configuration serves as default for the upcoming         generation results. Subsequently, we assess the generated code
+           experiments.                                                              using the same method as in section V-A, where each result is
+                                                                                     evaluated for whether it uses global functions.
+                  Finding 1: The Local-Aware Knowledge significantly                    To further evaluate the effectiveness of our What-if Code
+                  enhances the model’s ability to reuse local functions,             Generator Unit, we conduct an experiment using the bench-
+                  thereby reducing code redundancy. The best configura-              mark, focusing on test cases that call global functions (47 cases
+                  tion is the combination of Local Functions and Class               in total). We compare two retrieval methods:
+                  Instance Attributes.                                                  • FunDes: Uses only function descriptions for text similarity
+                                                                                           retrieval.
+                                                                                        • FunDes+FunCode: Uses function descriptions for text
+                                                                                           similarity retrieval and the What-If Code Generator to
+           B. RQ2: Is Global Module Aware Knowledge Effective in
+                                                                                           generate intermediate code snippets for code similarity
+           Assisting LLMs to Utilize Global Module Knowledge During                        retrieval.
+           Code Generation, and What Is the Optimal “k” Value for
+                                                                                        3) Result Analysis: Table II presents the results obtained
+           Retrieving Global Functions?
+                                                                                     using “No Global-Aware” and four different top-k values for
+              1) Motivation: In this RQ, our goal is to explore the effec-           retrieving global functions. The No Global-Aware has both
+           tiveness of global-aware information in aiding LLMs to reuse              precision and recall as 0 because of lacking of global-aware
+           global functions in code generation. When using global-aware              information as we expected. Consequently, the generated code
+           knowledge, a critical issue arises: if too few candidate func-            only utilizes local functions to accomplish tasks, and it resorts to
+           tions are retrieved, the model may lack the necessary func-               defining new functions for specific logic if local functions are
+           tions to generate code that correctly reuses global functions.            insufficient. When k=1, the model shows some awareness of
+           Conversely, retrieving too many candidate functions can lead              global functions to a certain extent, underlined by the precision
+           to the presence of irrelevant functions, making it difficult for          and recall as 0.372 and 0.533, respectively. At k=5, the model’s
+           the model to identify the required ones. Research shows that              performance significantly improves, indicating that the model
+           irrelevant context can decrease model efficiency, increase costs,         now has a more comprehensive understanding of global-aware
+           and potentially compromise performance [33]. Therefore, we                information. However, when k=10, the model’s F1 score drops
+           aim to identify the optimal top-k value for retrieving candidate          by 12.48%, indicating a substantial reduction in the model’s
+           functions to achieve the best global-aware configuration. Addi-           ability to reuse global functions. As k rises to 15, the effec-
+           tionally, we conduct an ablation study to evaluate the effective-         tiveness of the model decreases further. This is because the
+           ness of the What-if Code Generator Unit based on the optimal              overdosed amount (between 10 to 20 functions) of functions
+           k value.                                                                  is retrieved, introducing excessive interference and hindering
+              2) Experiment Methodology: We employ No Global-Aware                   accurate reusing.
+           as the baseline and this involves providing only Local-Aware                 To further assess the impact of the number of global functions
+           Knowledge without Global-Aware Knowledge input. To deter-                 presented to the model, we compute the average number of re-
+           mine the optimal top-k value, we pre-define four variants: k=1,           trieved functions, denoted as Avg. Retrieved Functions. We find
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                       3379
+
+
+
+                                     TABLE III                                      with Third-Party-Library Aware information outperform those
+             COMPARE THE DIFFERENCE BETWEEN HAVING THIRD-PARTY-LIBRARY              without such knowledge in the Library Coverage metric by
+               AWARE AND NOT HAVING IT ON THIRD-PARTY LIBRARY REUSE
+                         AWARENESS AND LIBRARY COVERAGE                             7.43%. However, library coverage does not reach 100% due
+                                                                                    to occasional instances where the model obstinately believes
+             3rd-Party-Lib                                            Library       that there are no viable libraries in the third-party repository
+                             Precision   Recall    F1     Accuracy
+              Awareness                                              Coverage
+                  No          0.716      0.429    0.536    0.715       0.875        to implement the code, which could be attributed to model
+                  Yes         0.935      0.585    0.720    0.825       0.940        hallucinations [73], [74], [75]. To mitigate these hallucinations,
+                                                                                    one potential approach is to use a reflective approach [51],
+          that providing the model with around 8 functions yields the best          [76], [77]. If the model uses a non-pre-installed library, we can
+          performance in terms of code reuse, striking a subtle balance.            inform the model that the library is not expected and prompt it
+          Thus, we select k=5 as optimal configuration for subsequent               to regenerate the code. This process is repeated until the model
+          experiments.                                                              uses a pre-installed library. Although we have not systemat-
+             To further evaluate the effectiveness of our What-if Code              ically validated this approach due to the high labeling effort
+          Generator Unit, we conduct an experiment using the bench-                 and API token costs, it represents a feasible method to mitigate
+          mark. The results showed that the FunDes method retrieved                 model hallucinations.
+          41.5% of global functions, while the FunDes+FunCode method
+          retrieved 60.6%, representing an almost 20% increase. This
+                                                                                        Finding 3: Third-Party-Library Aware information sig-
+          demonstrates that our What-if Code Generator Unit enhances
+                                                                                        nificantly improves the model’s ability to utilize avail-
+          the Global Function Retrieval Unit by providing intermediate
+                                                                                        able third-party libraries, reducing risk of potential
+          code for code similarity metrics, thus retrieving more relevant
+                                                                                        compatibility issue.
+          global functions.
+
+              Finding 2: Global-Aware Information significantly en-                 D. RQ4: What is the Overall Performance of Our
+              hances the model’s ability to reuse functions in other                A3 -CodGen Framework?
+              code files in the repository. The optimal configuration                  1) Motivation: In previous sections, we have individually
+              for retrieving global functions is k=5. The What-if                   verified the effectiveness of local-aware, global-aware, and
+              Code Generator Unit helps retrieve more relevant                      third-party-library-aware information. We also explored the
+              global functions, further enhancing the Global Func-                  optimal configurations. In this section, we aim to integrally
+              tion Retrieval Unit.                                                  validate the effectiveness of our A3 -CodGen framework from
+                                                                                    various perspectives. Therefore, we conduct an ablation study to
+                                                                                    evaluate A3 -CodGen in terms of local reuse, global reuse, and
+          C. RQ3: Does Third-Party Library Aware Knowledge                          third-party reuse. Additionally, as more powerful models are
+          Significantly Impact LLMs’ Awareness of Available
+                                                                                    released, we aim to compare the performance of A3 -CodGen
+          Third-Party Libraries During Code Generation?
+                                                                                    across different foundation models.
+             1) Motivation: In section III-B3, we delve into third-party-              2) Experiment Methodology: We first compare our A3 -
+          library aware information, which helps the model recognize                CodGen with three baselines using the GPT-3.5-Turbo-16k
+          pre-installed third-party libraries in the code repository. In this       model [45]: vanilla GPT-3.5-Turbo-16k, A1 Generation (local-
+          section, we aim to evaluate the effectiveness of third-party-             aware), and A2 Generation (local-aware and global-aware).
+          library knowledge.                                                        Then, to investigate whether performance improvements are
+             2) Experiment Methodology: To validate this point, we                  significant with enhanced model capabilities, we use the latest
+          compare code generation between with and without third-party-             LLM model, GPT-4o [78], as the foundation model for A3 -
+          library aware information. Only local-aware and global-aware              CodGen and compare its performance against GPT-3.5-Turbo-
+          information is fed into the model. Then, we run these two                 16k. We evaluate our framework using four metrics: reuse
+          different configurations on the benchmark to obtain code gener-           awareness, reuse correctness, library coverage, and lines of code
+          ation results. Notably, we introduce the Library Coverage, the            (LOC). The F1 score serves as a comprehensive measure of
+          percentage of third-party libraries used in the generated code            reuse awareness. Notably, a lower LOC signifies more concise
+          in the third-part-library base, to further elaborate the extent of        code.
+          reusing.                                                                     3) Result Analysis: Upon evaluating the awareness aspect,
+             3) Result Analysis: Table III demonstrates that after in-              as shown in Table IV, A3 -CodGen based on GPT-3.5-Turbo-
+          corporating Third-Party-Library Aware Knowledge, the model                16k demonstrates excellence in local reuse, global reuse, and
+          exhibits significant improvements in precision, recall, F1 score,         third-party library reuse. This underscores the effective as-
+          and accuracy, with increases of 30.59%, 36.36%, 34.33%, and               sistance provided by the three categories of repository-aware
+          15.38%, respectively. This enhancement can be attributed to               knowledge in enabling the model to be cognizant of repository
+          the fact that, with Third-Party-Library Aware information, the            information during code generation.
+          model is suggested to use a specific subset of libraries, narrow-            In terms of correctness, we observe that Local Reuse Cor-
+          ing down its choice range and making it more likely to generate           rectness is optimal for A1 Generation (local-aware), Global
+          desired code. Our finding is further proven by that methods               Reuse Correctness is best for A2 Generation (local-aware and
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3380                                                              IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+                                                                        TABLE IV
+                     COMPARISON OF THE OVERALL EFFECT OF THE FRAMEWORK WITH ABLATION BASELINES USING GPT-3.5-TURBO-16K FOR A1 -CODGEN,
+                          A -CODGEN, AND A -CODGEN CONFIGURATIONS, AND COMPARING A3 -CODGEN WITH GPT-3.5-TURBO-16K AND GPT-4O
+                            2               3
+
+
+                                                         Vanilla           A1 -CodGen            A2 -CodGen               A3 -CodGen           A3 -CodGen
+                               Metrics
+                                                    GPT-3.5-Turbo-16k   (GPT-3.5-Turbo-16k)   (GPT-3.5-Turbo-16k)      (GPT-3.5-Turbo-16k)      (GPT-4o)
+                       Local     Awareness (F1)            N/A                 0.673                 0.673                    0.694               0.718
+                      Reuse      Correctness (F1)          N/A                 0.675                 0.645                    0.632               0.879
+                      Global     Awareness (F1)            N/A                  N/A                  0.601                    0.606               0.701
+                      Reuse      Correctness (F1)          N/A                  N/A                  0.611                    0.591               0.676
+                     3rd-Party   Awareness (F1)           0.635                0.652                 0.536                    0.720               0.898
+                      Library    Correctness (F1)         0.644                0.734                 0.735                    0.852               0.894
+                      Reuse     Library Coverage          0.786                0.863                 0.875                    0.940               0.976
+                       Avg Line of Code (LOC)            16.308               16.507                12.598                   12.804              13.885
+
+           global-aware), and Third-Party Library Reuse Correctness is                 E. RQ5: How Does A3 -CodGen Framework Compare to
+           highest for A3 -CodGen. This suggests that increasing input                 GitHub Copilot?
+           knowledge may influence the model’s performance in specific
+                                                                                          1) Motivation: Given advancements in AI-driven code gen-
+           reuse scenarios. Nevertheless, A3 -CodGen exhibits only a slight
+                                                                                       eration, it is essential to compare our A3 -CodGen framework
+           difference from the baseline in local reuse and global reuse
+                                                                                       with leading tools like GitHub Copilot [9]. GitHub Copilot
+           correctness (0.003-0.015). Despite this minor difference in cor-
+                                                                                       generates code by leveraging local and global contextual in-
+           rectness metrics and its superior performance in other aspects,
+                                                                                       formation from neighboring tabs,2 similar to our context-aware
+           A3 -CodGen demonstrates robust overall performance in local
+                                                                                       mechanisms. If Copilot can outperform our approach, further
+           reuse, global reuse, and third-party library reuse.
+                                                                                       development of our method may be unnecessary. However, if it
+              Looking at the Library Coverage, A3 -CodGen achieves near-
+                                                                                       cannot, our goal is to identify the limitations in Copilot’s design
+           perfect performance with a score of 0.940, signifying its ability
+                                                                                       for collecting context and explore how to enhance its code reuse
+           to effectively reuse pre-installed libraries and avoid compatibil-
+                                                                                       capabilities using insights from our framework.
+           ity issues such as “ModuleNotFoundError: No module named
+                                                                                          2) Experiment Methodology: For each function in the
+           xxx.” Furthermore, the framework consistently generates code
+                                                                                       benchmark dataset, we locate the function within the repository
+           with an optimal number of lines (LOC), indicating its capability
+                                                                                       using the repository name and fully qualified name, then remove
+           to produce concise and efficient code.
+                                                                                       the function code and the corresponding import statements.
+              By examining the last two columns (Table IV) of A3 -CodGen
+                                                                                       We provide the function’s comment and definition to trigger
+           with GPT-3.5-Turbo-16k and GPT-4o, we observe significant
+                                                                                       GitHub Copilot to generate the code by pressing the ‘tab’ key.
+           improvements in local reuse, global reuse, and third-party li-
+                                                                                       To assist Copilot in generating third-party library imports, we
+           brary reuse for GPT-4o compared to GPT-3.5-Turbo-16k. This
+                                                                                       add a comment #generate import statements if necessary. If
+           demonstrates that the same prompts achieve better performance
+                                                                                       Copilot makes no suggestion, it indicates no import statements
+           as the foundation model’s capabilities improve. Thus, our A3 -
+                                                                                       are needed. We retain all necessary local functions that could
+           CodGen’s performance enhances with the increased ability of
+                                                                                       be reused within the function. Finally, we used the same label-
+           the foundation model. More powerful foundation models in
+                                                                                       ing method mentioned in Section IV-C to label the generated
+           future will lead to even better results. However, the code gen-
+                                                                                       code. The GitHub Copilot plugin version in this experiment
+           erated by A3 -CodGen based on GPT-4o is slightly more com-
+                                                                                       is 1.5.15.6094, and we disable the auto-update in settings. We
+           plex, with an average LOC increase of one line, compared to
+                                                                                       compare A3 -CodGen with GitHub CoPilot in terms of local
+           GPT-3.5-Turbo-16k. This is because GPT-4o considers more
+                                                                                       reuse, global reuse, and third-party library reuse. We use the
+           logical coherence between code segments, resulting in slightly
+                                                                                       RepoEval dataset mentioned in Section IV-B2.
+           more complex code. Nonetheless, the generated code remains
+                                                                                          3) Result Analysis: To evaluate the statistical significance of
+           more concise than that produced by Vanilla GPT-based code
+                                                                                       the differences between A3 -CodGen and CoPilot, we conduct
+           generation.
+                                                                                       Welch’s t-test [79] with a significance threshold of p < 0.05.
+                                                                                       The p-values for local reuse awareness and correctness are
+                                                                                       0.0696 and 0.5590, indicating no significant difference. For
+                                                                                       global reuse awareness and correctness, the p-values are 0.0144
+                  Finding 4: A3 -CodeGen framework excels in awaring
+                                                                                       and 1.46e-06, and for third-party library reuse awareness, cor-
+                  three types of code repository knowledge, resulting
+                                                                                       rectness, and coverage, the p-values are 1.39e-11, 0.0231, and
+                  in an excellent performance in terms of local reuse,
+                                                                                       0.0176, indicating significant differences.
+                  global reuse, and third-party library reuse. Thanks
+                                                                                          Fig. 5 compares GitHub Copilot and A3 -CodGen. For local
+                  to its outstanding reuse capabilities, our framework
+                                                                                       reuse, GitHub CoPilot performs excellently with an F1 score of
+                  can generate concise code that aligns with the code
+                                                                                       0.790 for local reuse awareness, while A3 -CodGen achieves an
+                  repository’s working environment. Additionally, A3 -
+                                                                                       F1 score of 0.718. This is because CoPilot reviews all working
+                  CodGen’s performance improves with the increased
+                  capabilities of the foundation model.                                  2 https://github.blog/ai-and-ml/github-copilot/how-github-copilot-is-getting-
+                                                                                       better-at-understanding-your-code/
+
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                       3381
+
+
+
+                                                                                                              VI. DISCUSSION
+                                                                                    A. New Paradigm for Code Generation Tasks
+                                                                                       Code generation tasks have traditionally focused on automat-
+                                                                                    ing code production for specific requirements, with advance-
+                                                                                    ments like GitHub CoPilot and ChatGPT mastering this task.
+                                                                                    However, real-world code generation extends beyond meeting
+                                                                                    requirements; it requires generating code aligned with project-
+                                                                                    specific needs and leveraging existing knowledge for improved
+                                                                                    readability, maintainability, and practicability. Therefore, we
+                                                                                    hope this work sheds a light on this emerging but significant
+                                                                                    code generation topic: generating context-aware code that is
+                                                                                    compatible with the working environment.
+          Fig. 5.   Comparison between GitHub CoPilot and A3 -CodGen.
+                                                                                    B. Knowledge Engineering for Code Generation
+          context details (including function definitions, function code,              LLMs are sensitive to prompts and well-designed prompts
+          and descriptions) when generating the code. In terms of local             are decisive in obtaining high-quality results [80], [81], [82].
+          reuse correctness, A3 -CodGen reaches an F1 score of 0.879,               Either unorganized or too lengthy prompts are impractical. In-
+          slightly better than GitHub CoPilot’s 0.857, due to our struc-            stead, it is advisable to extract semantic-enriched knowledge
+          tured approach to local knowledge.                                        from the code repository to guide the model to directional
+             However, for global reuse awareness and correctness, CoPi-             generate code. However, how to selectively fuse the different
+          lot’s performance is suboptimal, with F1 scores of 0.447 and              types of knowledge presents a challenge, potentially impacting
+          0.136, respectively. CoPilot’s workflow, although capable of              the model’s awareness of different knowledge types. In Sec-
+          utilizing neighboring tabs’ context, struggles with global func-          tion V-A3, we find that providing diverse information does not
+          tion calls as necessary global functions might exist in un-               necessarily improve model performance. Meanwhile, in section
+          opened tabs. Opening all repository tabs is impractical, and              V-D, we find that providing the model with global awareness
+          CoPilot does not structure information for completion, leading            and third-party library information unexpectedly enhances its
+          to chaotic context. In contrast, A3 -CodGen retrieves relevant            ability to reuse local functions. This underscores the interaction
+          global functions and structures them, facilitating easier and             of diverse code knowledge types and stresses the significance
+          more accurate reuse. For third-party library reuse, A3 -CodGen            of efficiently mining and utilizing code knowledge in future
+          outperforms CoPilot in awareness, correctness, and coverage.              studies.
+          A3 -CodGen helps the model to be aware of all pre-installed
+          libraries, whereas GitHub CoPilot randomly uses third-party               C. Dataset Construction for Context Aware Code Generation
+          libraries. While CoPilot excels in local information reuse, it               1) Benchmark Representativeness: Experiments use 29
+          lacks in global functions and third-party libraries reuse.                meticulously selected Python code repositories, emphasizing
+             Our method has potential to enhance Copilot by using knowl-            high quality indicated by stars and branches, while avoiding
+          edge retrieval to fetch relevant global functions and library in-         data leaks. These repositories collectively represent the Python
+          formation from the repository, enabling repository-aware code             programming ecosystem. Labeling all functions is highly labor-
+          generation. For instance, Copilot’s limitations can be mitigated          intensive. Therefore, as described in Section IV-B2, we perform
+          by incorporating interpreter information from the compiler to             sampling to ensure the estimated accuracy within the sample
+          help Copilot become aware of third-party libraries. Addition-             remains within a 0.05 error range while including functions
+          ally, using global function retrieval methods can assist Copi-            from each code repository to ensure representativeness, with
+          lot in reusing functions from other code files, not just from             an average of 13.2 functions per repository.
+          neighboring tabs. Structuring the information before passing it              2) Benchmark Construction for Different Contexts: In this
+          to Copilot, rather than providing all information together, may           paper, we validate the model’s awareness of local functions,
+          also improve performance.                                                 global functions, and third-party libraries. Future studies could
+                                                                                    include a more diverse range of repositories to test the frame-
+               Finding 5: GitHub CoPilot excels in local infor-                     work’s effectiveness in different contexts, such as awareness of
+               mation reuse, but its global and third-party library                 classes, inherited functions, and variables. The dataset construc-
+               reuse is suboptimal. A3 -CodGen performs comparably                  tion method can follow the approach in Section IV-B2, where
+               to CoPilot in local reuse while significantly outper-                we first label functions to create a benchmark, then evaluate the
+               forming in global and third-party library reuse due                  generated code by predicting labels, and finally calculate reuse
+               to structured knowledge retrieval. Our A3 -CodGen                    awareness and correctness.
+               can potentially enhance AI-assistant tools like GitHub                  In the future, we will maintain and update this dataset, pro-
+               CoPilot for better code generation.                                  viding the community with a valuable resource for evaluating
+                                                                                    repository-aware code generation.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3382                                                             IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           D. Threats to Validity                                                    retrieval to enhance the input of the generation model, aiming
+              The threats to validity of this paper lies in the following            to maximize the utilization of additional information. Drain
+           aspects.                                                                  et al. [86] retrieve template functions from GitHub and relevant
+                                                                                     answers from Stack Overflow to improve code generation. Zhou
+              1) Subjective Labeling: Our study involves manual labeling,
+           introducing subjectivity in annotations. We mitigate this by en-          et al. [88] proposed Docprompting, which retrieve relevant APIs
+                                                                                     from documents and add them into prompts to improve code
+           gaging two professional developers for labeling, resolving any
+                                                                                     generation. Zan et al. [89] proposed CodeGenAPI, which re-
+           instances with ambiguous labels to establish a reliable ground
+           truth. The dataset is public for community validation [19].               trieve private APIs from documents to improve code generation.
+                                                                                     The APIRetriever module of CodeGenAPI and our approach
+              2) Library Dependencies Control: Due to the complexity
+                                                                                     both focus on API recommendation. However, CodeGenAPI di-
+           of library dependencies, constructing all 29 repository library
+           dependencies is challenging. Thus, we do not consider the                 rectly retrieves APIs from documentation and cannot effectively
+                                                                                     handle high-level tasks that require combinations of APIs.
+           library version for A3 code generation in our experiments. How-
+           ever, users can feasibly extract third-party libraries and generate          Code Completion Evaluation. LLM-based code comple-
+           code using the ‘pip list’ command or by checking the Python               tion and program synthesis methods provide unprecedented
+           Interpreter in their environment to specify specific versions of          convenience, however researcher also question the actual per-
+           libraries, as mentioned in Section III-A2.                                formance under the mirage from different perspectives [16],
+              3) Generalizing the A3-CodGen Framework to Other Pro-                  [34], [58], [59], [60]. Yuan et al. evaluated 10 open-source
+           gramming Languages: While the experiments in this paper                   instructed LLMs on four representative code comprehension
+           are conducted on Python code repositories, our A3 -CodGen                 and generation tasks [58]. Liu et al. proposed EvalPlus, a code
+           framework is not limited to Python. To adapt it to another lan-           synthesis benchmarking framework, to rigorously evaluate the
+           guage, such as Java, developers need to use language-specific             functional correctness of LLM-synthesized code in function
+           program analysis tools (e.g., Spoon [83] for Java) for the Repos-         level [59]. In a more challenging code generation scenario,
+           itory Knowledge Base Construction. This involves extracting               i.e., class-level code generation, Du et al. manually constructed
+                                                                                     the first class-level code generation benchmark ClassEval of
+           relevant repository knowledge, such as signatures and source
+           code. Other steps, including repository-aware knowledge re-               100 class-level Python code generation tasks [34]. In addition,
+                                                                                     Ouyang et al. conducted an empirical study to demonstrate
+           trieval and A3 code generation, remain unchanged. Although
+                                                                                     that non-determinism in code generation tasks [60]. Yu et al.
+           constructing the knowledge base may require additional engi-
+           neering effort, it does not involve new scientific innovations.           proposed a benchmark named CoderEval, which can be used
+                                                                                     to assess the performance of models against pragmatic code
+           It simply requires following our outlined approach using the
+                                                                                     generation beyond just generating standalone functions [16].
+           appropriate program analysis tools for the specific language.
+                                                                                                  VIII. CONCLUSION AND FUTURE WORK
+                                  VII. RELATED WORK
+                                                                                        Code generation within code repositories often necessitates
+              Code generation tasks is about creating source code from
+                                                                                     comprehensive knowledge of the entire repository context. Ex-
+           provided natural language descriptions or requirements, which
+                                                                                     isting techniques often lack such a holistic understanding of
+           has been a longstanding focal point in SE research.
+                                                                                     code repository knowledge, which is crucial for effective code
+              Repository-Level Code Completion. Repository-level code
+                                                                                     generation. In this paper, we introduce the A3 -CodGen frame-
+           completion is gaining traction over traditional function-level
+                                                                                     work, which is designed to construct, mine, and unify three
+           completion [36], [38], [84], [85]. Shrivastava et al. generated
+                                                                                     essential types of code repository knowledge: local-aware,
+           example-specific prompts using a prompt proposal classifier
+                                                                                     global-aware, and third-party-library-aware knowledge. To val-
+           [84] and further proposed RepoFusion to incorporate relevant
+                                                                                     idate the effectiveness of these knowledge types, we conducted
+           repository context by training code models [38]. In addition,
+                                                                                     benchmark experiments and identified optimal configurations
+           Ding et al. [36] proposed a cross-file context finder tool, named
+                                                                                     for their utilization. The results demonstrate that the A3 -
+           CCFinder, which constructs a project context graph and re-
+                                                                                     CodGen framework significantly enhances the ability of LLMs
+           trieves the most relevant cross-file context based on local im-
+                                                                                     to fully utilize local, global, and third-party library information.
+           port statements. RepoCoder [85] retrieved similar code snippets
+                                                                                     This results in the generation of concise, high-quality code. In
+           from the repository as part of a prompt and proposes an itera-
+                                                                                     the future, we plan to expand the applicability of our framework
+           tive retrieval-generation paradigm. This novel strategy bridged
+                                                                                     to multiple programming languages. Furthermore, we aim to
+           the gap between the retrieved context and the intended target
+                                                                                     enhance our knowledge utilization methods to enable LLMs to
+           through an interactive process.
+                                                                                     become more aware of various types of code knowledge within
+              Retrieval Augmented Code Generation. Retrieval Aug-
+                                                                                     code repositories.
+           mented Code Generation (RACG) [82], [86], [87], [88] repre-
+           sents an emerging and promising area of research that combines
+                                                                                                             ACKNOWLEDGMENT
+           the strengths of retrieval-based methods with code generation
+           techniques. Hayati et al. [82] introduced RECODE, the first                  The authors would like to thank the anonymous reviewers
+           model to integrate information retrieval into code generation.            who have provided insightful and constructive comments on
+           Parvez et al. [87] proposed the REDCODER, which utilizes                  this paper.
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+          LIAO et al.: A3 -CODGEN: A REPOSITORY-LEVEL CODE GENERATION FRAMEWORK                                                                                     3383
+
+
+
+                                        REFERENCES                                        [30] “Code completion in pycharm,” 2023. Accessed: Oct. 10, 2024.
+                                                                                               [Online]. Available: https://www.jetbrains.com/help/pycharm/auto-
+           [1] A. Svyatkovskiy, S. K. Deng, S. Fu, and N. Sundaresan, “Intellicode             completing-code.html
+               compose: Code generation using transformer,” in Proc. 28th ACM Joint       [31] Y. Wang, W. Wang, S. R. Joty, and S. C. Hoi, “CodeT5: Identifier-aware
+               Meeting Eur. Softw. Eng. Conf. Symp. Found. Softw. Eng., 2020, pp.              unified pre-trained encoder-decoder models for code understanding and
+               1433–1443.
+                                                                                               generation,” 2021, arXiv:2109.00859.
+           [2] Y. Li et al., “Competition-level code generation with alphacode,” Sci-
+                                                                                          [32] “GPT-4 technical report,” OpenAI. 2023. Accessed: Oct. 10, 2024.
+               ence, vol. 378, no. 6624, pp. 1092–1097, 2022.
+           [3] M. Puschel et al., “SPIRAL: Code generation for DSP transforms,”                [Online]. Available: https://cdn.openai.com/papers/gpt-4.pdf
+               Proc. IEEE, vol. 93, no. 2, pp. 232–275, Feb. 2005.                        [33] F. Shi et al., “Large language models can be easily distracted by
+           [4] B. Chen et al., “CODET: Code generation with generated tests,” 2022,            irrelevant context,” 2023, arXiv:2302.00093.
+               arXiv:2207.10397.                                                          [34] X. Du et al., “ClassEval: A manually-crafted benchmark for evaluating
+           [5] Z. Sun, Q. Zhu, Y. Xiong, Y. Sun, L. Mou, and L. Zhang, “TreeGen: A             LLMS on class-level code generation,” 2023, arXiv:2308.01861.
+               tree-based transformer architecture for code generation,” in Proc. AAAI    [35] Y. Chang et al., “A survey on evaluation of large language models,”
+               Conf. Artif. Intell., vol. 34, 2020, pp. 8984–8991.                             2023, arXiv:2307.03109.
+           [6] M.N.M. García, I.R. Román, F. J. G. Peñalvo, and M. T. Bonilla, “An        [36] Y. Ding et al., “CoCoMIC: Code completion by jointly modeling in-file
+               association rule mining method for estimating the impact of project             and cross-file context,” 2022, arXiv:2212.10007.
+               management policies on software quality, development time and effort,”     [37] H. Pei, J. Zhao, L. Lausen, S. Zha, and G. Karypis, “Better context
+               Expert Syst. Appl., vol. 34, no. 1, pp. 522–529, 2008.                          makes better code language models: A case study on function call
+           [7] M. A. Cusumano and D. B. Yoffie, “Software development on internet              argument completion,” 2023, arXiv:2306.00381.
+               time,” Computer, vol. 32, no. 10, pp. 60–69, 1999.                         [38] D. Shrivastava, D. Kocetkov, H. Vries, D. Bahdanau, and T. Scholak,
+           [8] OpenAI, “ChatGPT,” 2023. [Online]. Available: https://openai.com/blog/          “RepoFusion: Training code models to understand your repository,”
+               chatgpt.                                                                        2023, arXiv:2306.10998.
+           [9] “GitHub copilot. your AI pair programmer,” [Online]. Available: https://   [39] H. Stefan et al., “Code reuse in open source software,” Manag. Sci.,
+               copilot.github.com/                                                             vol. 54, pp. 180–193, 2008.
+          [10] M. Chen et al., “Evaluating large language models trained on code,”
+                                                                                          [40] J. Turner, “The structure of modular program,” Commun. ACM, vol. 23,
+               2021, arXiv:2107.03374.
+                                                                                               no. 5, pp. 272–277, 1980.
+          [11] M. Ciniselli, L. Pascarella, E. Aghajani, S. Scalabrino, R. Oliveto, and
+               G. Bavota, “Source code recommender systems,” 2023, arXiv:2302.            [41] J. Zhang, X. Wang, H. Zhang, H. Sun, K. Wang, and X. Liu, “A novel
+               04098.                                                                          neural source code representation based on abstract syntax tree,” in
+          [12] M. Liu, T. Yang, Y. Lou, X. Du, Y. Wang, and X. Peng, “Codegen4libs:            Proc. IEEE/ACM 41st Int. Conf. Softw. Eng. (ICSE), Piscataway, NJ,
+               A two-stage approach for library-oriented code generation,”.                    USA: IEEE Press, 2019, pp. 783–794.
+          [13] D. Zan et al., “Cert: Continual pre-training on sketches for library-      [42] Q. Huang et al., “SE factual knowledge in frozen giant code model: A
+               oriented code generation,” 2022, arXiv:2206.06888.                              study on FQN and its retrieval,” 2022, arXiv:2212.08221.
+          [14] T. Li, E. B. Neundorfer, Y. Agarwal, and J. I. Hong, “Honeysuckle:         [43] T. B. Brown et al., “Language models are few-shot learners,” 2020,
+               Annotation-guided code generation of in-app privacy notices,” in Proc.          arXiv:2005.14165v4.
+               ACM Interact., Mobile, Wearable Ubiquitous Technol., vol. 5, no. 3, pp.    [44] S. Ye, H. Hwang, S. Yang, H. Yun, Y. Kim, and M. Seo, “In-context
+               1–27, 2021.                                                                     instruction learning,” 2023, arXiv:2302.14691.
+          [15] D. Zan et al., “Private-library-oriented code generation with large        [45] “GPT-3.5-turbo-16k,” OpenAI. 2023. Accessed: Sep. 2023. [Online].
+               language models,” 2023, arXiv:2307.15370.                                       Available: https://platform.openai.com/docs/models/gpt-3-5
+          [16] H. Yu et al., “CoderEval: A benchmark of pragmatic code generation         [46] Q. Huang, Y. Sun, Z. Xing, M. Yu, X. Xu, and Q. Lu, “API entity and
+               with generative pre-trained models,” 2023, arXiv:2302.00288.                    relation joint extraction from text via dynamic prompt-tuned language
+          [17] Y. Zhuang et al., “Efficiently measuring the cognitive ability of LLMS:         model,” ACM Trans. Softw. Eng. Methodol., vol. 33, no. 1, pp. 1–25,
+               An adaptive testing perspective,” 2023, arXiv:2306.10512.                       2023.
+          [18] D. Gifany, I. Amiri, M. Ranjbar, and J. Ali, “Logic codes generation       [47] Q. Huang, Z. Yuan, Z. Xing, X. Xu, L. Zhu, and Q. Lu, “Prompt-tuned
+               and transmission using an encoding-decoding system,” Int. J. Adv. Eng.          code language model as a neural knowledge base for type inference
+               & Technol., vol. 5, no. 2, pp. 37–45, 2013.                                     in statically-typed partial code,” in Proc. 37th IEEE/ACM Int. Conf.
+          [19] “Our dataset and repository,” Accessed: Oct. 10, 2024. [Online].                Automated Softw. Eng., 2022, pp. 1–13.
+               Available:     https://github.com/Dianshu-Liao/AAA-Code-Generation-        [48] D. Zan et al., “CERT: Continual pre-training on sketches for library-
+               Framework-for-Code-Repository-Local-Aware-Global-Aware-Third-                   oriented code generation,” in Proc. Int. Joint Conf. Artif. Intell., 2022,
+               Party-Aware                                                                     pp. 2369–2375.
+          [20] Y. Wang, W. Wang, S. Joty, and S. C. Hoi, “CodeT5: Identifier-aware        [49] M. Liu, T. Yang, Y. Lou, X. Du, Y. Wang, and X. Peng, “CodeGen4Libs:
+               unified pre-trained encoder-decoder models for code understanding and           A two-stage approach for library-oriented code generation,” in Proc.
+               generation,” 2021, arXiv:2109.00859.                                            38th IEEE/ACM Int. Conf. Automated Softw. Eng. (ASE), 2023, pp. 434–
+          [21] Z. Feng et al., “CodeBERT: A pre-trained model for programming and              445.
+               natural languages,” 2020, arXiv:2002.08155.
+                                                                                          [50] Z. Ma, S. An, B. Xie, and Z. Lin, “Compositional API recommendation
+          [22] D. Guo et al., “Graphcodebert: Pre-training code representations with
+                                                                                               for library-oriented code generation,” in Proc. IEEE/ACM 32nd Int.
+               data flow,” 2020. arXiv:2009.08366.
+                                                                                               Conf. Program Comprehension (ICPC), 2024, pp. 87–98.
+          [23] E. Nijkamp et al., “CodeGen: An open large language model for
+                                                                                          [51] X. Ren, X. Ye, D. Zhao, Z. Xing, and X. Yang, “From misuse to mastery:
+               code with multi-turn program synthesis,” in Proc. Int. Conf. Learn.
+               Representations, 2022.                                                          Enhancing code generation with knowledge-driven AI chaining,” in
+          [24] D. Fried et al., “InCoder: A generative model for code infilling and            Proc. 38th IEEE/ACM Int. Conf. Automated Softw. Eng. (ASE), 2023,
+               synthesis,” 2022, arXiv:2204.05999.                                             pp. 976–987.
+          [25] S. Lu et al., “CodeXGLUE: A machine learning benchmark dataset for         [52] J. Wei et al., “Chain-of-thought prompting elicits reasoning in large
+               code understanding and generation,” 2021, arXiv:2102.04664.                     language models,” in Proc. Adv. Neural Inf. Process. Syst., vol. 35, 2022,
+          [26] W. Takerngsaksiri, C. K. Tantithamthavorn, and Y. Li, “Syntax-aware             pp. 24824–24837.
+               on-the-fly code completion,” 2022, arXiv:2211.04673.                       [53] X. Wang, J. Wei, and D. Schuurmans, “Quoc le,” in Self-Consistency
+          [27] F. F. Xu, U. Alon, G. Neubig, and V. J. Hellendoorn, “A systematic              Improves Chain of Thought Reasoning in Language Models, E. Chi, S.
+               evaluation of large language models of code,” in Proc. 6th ACM                  Narang, A. Chowdhery, and D. Zhou Eds., 2022, arXiv:2203.11171.
+               SIGPLAN Int. Symp. Mach. Program., 2022.                                   [54] Q. Lyu et al., “Faithful chain-of-thought reasoning,” 2023, arXiv:2301.
+          [28] Q. Zheng et al., “CodeGeeX: A pre-trained model for code                        13379.
+               generation with multilingual evaluations on HumanEval-X,” 2023,            [55] OpenAI. Accessed: Sep. 2023. [Online]. Available: https://platform.
+               arXiv:2303.17568.                                                               openai.com/docs/guides/embeddings/what-are-embeddings
+          [29] P. Vaithilingam, T. Zhang, and E. L. Glassman, “Expectation vs. ex-        [56] A. Gao, “Vec2Vec: A compact neural network approach for transforming
+               perience: Evaluating the usability of code generation tools powered by          text embeddings with high fidelity,” 2023, arXiv:2306.12689.
+               large language models,” in Proc. Chi Conf. Human Factors Comput.           [57] M. Gü et al., “Jina embeddings 2: 8192-token general-purpose text
+               Syst. Extended Abstracts, 2022, pp. 1–7.                                        embeddings for long documents,” 2023, arXiv:2310.19923.
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+           3384                                                                  IEEE TRANSACTIONS ON SOFTWARE ENGINEERING, VOL. 50, NO. 12, DECEMBER 2024
+
+
+
+           [58] Z. Yuan, J. Liu, Q. Zi, M. Liu, X. Peng, and Y. Lou, “Evaluating           [74] M. Zhang, O. Press, W. Merrill, A. Liu, and N. A. Smith, “How language
+                instruction-tuned large language models on code comprehension and               model hallucinations can snowball,” 2023, arXiv:2305.13534.
+                generation,” 2023, arXiv:2308.01240.                                       [75] S. Roller et al., “Recipes for building an open-domain chatbot,” in
+           [59] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by            Proc. 16th Conf. Eur. Chapter Assoc. Comput. Linguistics: Main Volume,
+                chatgpt really correct? Rigorous evaluation of large language models for        Association for Computational Linguistics, Apr. 2021, pp. 300–325.
+                code generation,” 2023, arXiv:2305.01210.                                  [76] M. Si et al., “A solution toward transparent and practical AI regulation:
+           [60] S. Ouyang, J. M. Zhang, M. Harman, and M. Wang, “LLM is like a                  Privacy nutrition labels for open-source generative AI-based applica-
+                box of chocolates: the non-determinism of chatGPT in code generation,”          tions,” 2024, arXiv:2407.15407.
+                2023, arXiv:2308.02828.                                                    [77] N. Shinn, F. Cassano, B. Labash, A. Gopinath, K. Narasimhan, and S.
+           [61] A. Matton et al., “On leakage of code generation evaluation datasets,”          Yao, “Reflexion: language agents with verbal reinforcement learning,”
+                2024, arXiv:2407.07565.                                                         in Proc. Neural Inf. Process. Syst., 2023.
+           [62] Z. Yang, Z. Zhao, C. Wang, J. Shi, D. Kim, D. Han, and D. Lo,              [78] “Gpt-4o,” OpenAI. 2024. Accessed: Oct. 10, 2024. Accessed: Oct. 10,
+                “Unveiling memorization in code models,” in Proc. IEEE/ACM 46th                 2024. [Online]. Available: https://openai.com/index/hello-gpt-4o/
+                Int. Conf. Softw. Eng. (ICSE), 2023, pp. 867–879.                          [79] W. Bl, “The generalization of ‘student’s’ problem when several different
+           [63] R. Tufano, S. Masiero, A. Mastropaolo, L. Pascarella, D. Poshyvanyk,            population varlances are involved,” Biometrika, vol. 34, no. 1–2, pp. 28–
+                and G. Bavota, “Using pre-trained models to boost code review automa-           35, Jan. 1947.
+                tion,” in Proc. IEEE/ACM 44th Int. Conf. Softw. Eng. (ICSE), 2022, pp.     [80] C. Yang, Y. Liu, and C. Yin, “Recent advances in intelligent source code
+                2291–2302.                                                                      generation: A survey on natural language based studies,” Entropy, vol.
+           [64] A. Mastropaolo, L. Pascarella, and G. Bavota, “Using deep learning to           23, no. 9, pp. 1–27, 2021.
+                generate complete log statements,” in Proc. IEEE/ACM 44th Int. Conf.       [81] J. Shin and J. Nam, “A survey of automatic code generation fromnatural
+                Softw. Eng. (ICSE), 2022, pp. 2279–2290.                                        language,” J. Inf. Process. Syst., vol. 17, no. 3, pp. 537–555, 2021.
+           [65] M. Alfadel, D. E. Costa, and E. Shihab, “Empirical analysis of security    [82] S. A. Hayati, l. O. Raphaë, P. Avvaru, P. Yin, A. Tomasic, and G. Neubig,
+                vulnerabilities in python packages,” Empirical Softw. Eng., vol. 28,            “Retrieval-based neural code generation,” 2018, arXiv:1808.10025.
+                2021, pp. 1–37.                                                            [83] R. Pawlak, M. Monperrus, N. Petitprez, C. Noguera, and L. Seinturier,
+           [66] “Pycallgraph,” 2023. Accessed: Sep. 2023. [Online]. Available: https://         “Spoon: A library for implementing analyses and transformations of
+                github.com/gak/pycallgraph                                                      Java source code,” Softw.: Pract. Exp., vol. 46, no. 9, pp. 1155–1179,
+           [67] “Pyan,” 2023. Accessed: Sep. 2023. [Online]. Available: https://github.         2015.
+                com/davidfraser/pyan                                                       [84] H. Disha Shrivastava and D. Tarlow, Repository-level prompt generation
+           [68] R. P. Singh and N. S. Mangat, “Elements of survey sampling,” vol. 15,           for large language models of code. ArXiv:abs/2206.12839, 2022.
+                Springer Science & Business Media, 2013.                                   [85] B. Fengji Zhang et al., “RepoCoder: Repository-level code comple-
+           [69] K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu, “BLEU: A method for             tion through iterative retrieval and generation,” 2023, arXiv:2303.
+                automatic evaluation of machine translation,” in Proc. Annu. Meeting            12570.
+                Assoc. Comput. Linguistics, 2002, pp. 311–318.                             [86] D. Drain, C. Hu, C. Wu, M. Breslav, and N. Sundaresan, “Generating
+           [70] C.-Y. Lin, “Rouge: A package for automatic evaluation of sum-                   code with the help of retrieved template functions and stack overflow
+                maries,” in Proc. Annu. Meeting Assoc. Comput. Linguistics, 2004,               answers,” 2021, arXiv:2104.05310.
+                pp. 74–81.                                                                 [87] M. R. Parvez, W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W.
+           [71] S. Banerjee and A. Lavie, “METEOR: An automatic metric for mt                   Chang, “Retrieval augmented code generation and summarization,”
+                evaluation with improved correlation with human judgments,” in Proc.            2021, arXiv:2108.11601.
+                ACL Workshop Intrinsic Extrinsic Eval., 2005, pp. 228–231.                 [88] S. Zhou, U. Alon, F. F. Xu, Z. Wang, Z. Jiang, and G. Neubig,
+           [72] J. Landis and G. G. Koch, “An application of hierarchical kappa-                “DocPrompting: Generating code by retrieving the docs,” in Proc. Int.
+                type statistics in the assessment of majority agreement among multiple          Conf. Learn. Representations, 2022.
+                observers,” Biometrics, vol. 33, no. 2, 1977, pp. 363–74.                  [89] D. Zan, B. Chen, Z. Lin, B. Guan, Y. Wang, and J.-G. Lou, “When
+           [73] Z. Ji et al., “Survey of hallucination in natural language generation,”         language model meets private library,” in Proc. Conf. Empirical Methods
+                ACM Comput. Surveys, vol. 55, no. 12, pp. 1–38, 2023.                           Natural Lang. Process., 2022.
+
+
+
+
+licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:15:55 UTC from IEEE Xplore. Restricti
+

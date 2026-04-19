@@ -1,0 +1,849 @@
+                                        Dependency-Guided Repository-Level C-to-Rust Translation with
+                                                        Reinforcement Alignment
+                                                                  Jia Feng∗                                                  Wenjie Gan∗                                     Cuiyun Gao†
+                                                  Harbin Institute of Technology                                        Southeast University                        Harbin Institute of Technology
+                                                        Shenzhen, China                                                   Nanjing, China                                  Shenzhen, China
+                                                     jiafeng@stu.hit.edu.cn                                            wenjiegan@seu.edu.cn                            gaocuiyun@hit.edu.cn
+
+                                                         Chaozheng Wang                                                         Feng Luo                                         Xin Xia
+                                            The Chinese University of Hong Kong                                  Harbin Institute of Technology                           Zhejiang University
+                                                    Hong Kong, China                                                   Shenzhen, China                                     Hangzhou, China
+arXiv:2604.02852v1 [cs.SE] 3 Apr 2026
+
+
+
+
+                                                  adf111178@gmail.com                                             hitszluofeng@foxmail.com                                 xin.xia@acm.org
+
+                                                                                                    Ge Li                                               Kui Liu
+                                                                                           Peking University                                           Huawei
+                                                                                             Beijing, China                                      Shenzhen, China
+                                                                                           lige@pku.edu.cn                                      kui.liu@huawei.com
+
+                                        Abstract                                                                                        model, the Dependency-Guided Iterative Refinement module iden-
+                                        Automating C-to-Rust migration is critical for enhancing software                               tifies the fine-grained cross-file dependencies as enriched context
+                                        security without compromising performance. Traditional rule-based                               for the initial translation, and further iteratively refines the gener-
+                                        methods often struggle with diverse C idioms, yielding unidiomatic                              ated Rust code to ensure the syntactic correctness and functional
+                                        and rigid Rust translations. In contrast, Large Language Models                                 equivalence. To facilitate the model training and repository-level
+                                        (LLMs), enriched by massive code corpora, offer a superior alterna-                             evaluation, we construct a large-scale corpus of 85k training sam-
+                                        tive due to their cross-language generalization, enabling the gener-                            ples and a specialized benchmark of 145 repository-level instances.
+                                        ation of idiomatic and maintainable Rust code. However, applying                                Experimental results show that DepTrans achieves a compilation
+                                        LLMs to C-to-Rust migration still poses several challenges. First,                              success rate of 60.7% and a computational accuracy of 43.5%, out-
+                                        existing LLM-based approaches fail to adequately handle cross-file                              performing the strongest baseline by 22.8% and 17.3%, respectively.
+                                        references. They either overlook the dependencies or incorporate                                Moreover, DepTrans successfully builds 7 out of 15 industrial-scale
+                                        entire files as context, thereby hindering the model’s ability to ac-                           C projects from Huawei’s internal codebase, demonstrating its po-
+                                        curately capture dependency information for translation. Second,                                tential in enterprise-level C-to-Rust migration.
+                                        the complex dependencies and structured inputs/outputs make it
+                                        difficult to validate the syntactic correctness and functional equiva-                          Keywords
+                                        lence of repository-level translations. Furthermore, the scarcity of                            C-to-Rust Translation, Dependency-Guided, Reinforcement Learn-
+                                        large-scale C-Rust parallel data constrains the inherent generation                             ing, Large Language Models
+                                        capabilities of LLMs, resulting in limited performance.
+                                           To address these challenges, we propose DepTrans, which syn-
+                                                                                                                                        ACM Reference Format:
+                                        ergizes model-level capability enhancement with a structured infer-                             Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia,
+                                        ence framework. DepTrans first employs the Reinforcement-Aligned                                Ge Li, and Kui Liu. 2026. Dependency-Guided Repository-Level C-to-Rust
+                                        Syntax Training module to bolster the model’s intrinsic generation                              Translation with Reinforcement Alignment. In 34th ACM Joint European
+                                        capabilities through multi-task fine-tuning and feedback-driven                                 Software Engineering Conference and Symposium on the Foundations of Soft-
+                                        reinforcement learning. Building upon this enhanced foundation                                  ware Engineering (FSE Companion ’26), July 5–9, 2026, Montreal, QC, Canada.
+                                                                                                                                        ACM, New York, NY, USA, 12 pages. https://doi.org/10.1145/3803437.3805266
+                                        ∗ Equal contribution.
+                                        † Corresponding author
+
+
+                                                                                                                                        1    Introduction
+                                        Permission to make digital or hard copies of all or part of this work for personal or
+                                        classroom use is granted without fee provided that copies are not made or distributed           System-level development demands a rigorous balance between
+                                        for profit or commercial advantage and that copies bear this notice and the full citation       performance and memory safety [7]. While C provides the neces-
+                                        on the first page. Copyrights for components of this work owned by others than the              sary low-level control, its inherent lack of memory safety remains a
+                                        author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+                                        republish, to post on servers or to redistribute to lists, requires prior specific permission   primary source of critical vulnerabilities [32]. Rust has emerged as
+                                        and/or a fee. Request permissions from permissions@acm.org.                                     a compelling alternative, offering C-equivalent performance while
+                                        FSE Companion ’26, Montreal, QC, Canada                                                         enforcing memory safety via its static ownership system [1, 26].
+                                        © 2026 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                        ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM                                                              Consequently, migrating legacy C codebases to Rust is now a strate-
+                                        https://doi.org/10.1145/3803437.3805266                                                         gic priority for enhancing software security [8, 25]. However, the
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada               Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+manual migration process is prohibitively labor-intensive and error-        fine-grained context. Furthermore, a Consistency-Guided Refinement
+prone, necessitating the development of robust, automated C-to-             strategy iteratively optimizes the translation by integrating com-
+Rust translation solutions [28].                                            piler diagnostics with LLM-based self-consistency checks, ensuring
+   In recent years, tools like C2Rust [22] have automated C-to-Rust         the output is both syntactically valid and functionally aligned.
+migration by mapping C syntax to Rust constructs. However, these               To facilitate both training and evaluation, we construct a large-
+rule-based methods often produce Rust code that retains C-style de-         scale corpus of 85k instances, comprising 82.5k instances for multi-
+sign [19], such as raw pointers and unsafe blocks [14, 18]. Although        task fine-tuning and 2.5k high-quality instances for reinforcement
+the output is typically compilable, it is frequently unidiomatic [13],      learning. For evaluation, we curate a specialized benchmark of
+requiring developers to invest manual efforts in post-translation           145 repository-level instances with complex cross-file dependen-
+refactoring. With the rapid development of large language models            cies to rigorously assess contextual reasoning. Experimental re-
+(LLMs), they have demonstrated impressive performance in various            sults demonstrate that even without RAST’s task-specific adapta-
+code-related tasks [20, 29, 39, 47]. Previous studies [31, 42, 48] have     tion, DGIR alone enables Qwen2.5-Coder-32B to achieve a 57.2%
+shown that compared to rule-based tools such as C2Rust, LLMs                compilation success rate and 41.4% computational accuracy, out-
+offer clear advantages in producing Rust code that better aligns            performing the strongest baseline by 19.3 and 15.2 percentage
+with the idiomatic practices of the language, significantly reduc-          points, respectively. Remarkably, after applying our RAST, a smaller
+ing the manual refactoring [5, 33, 48]. Despite the effectiveness of        Qwen2.5-Coder-7B reaches 60.7% compilation success and 43.5%
+LLMs, existing LLM-based approaches also face critical challenges.          accuracy, surpassing the untrained 32B model. Finally, validation on
+First, LLMs frequently struggle with the fine-grained dependencies          15 industrial-scale projects from Huawei’s database system shows
+of large-scale repositories, leading to fragmented and inconsistent         that our model successfully migrates 7 projects to a buildable state,
+translations [11, 27, 45]. Simply translating functions in isolation        demonstrating the potential of DepTrans for enterprise-level C-to-
+or cramming entire files into the prompt typically yields subopti-          Rust migration.
+mal results, as the model fails to maintain a coherent global view             The main contributions of this paper are as follows.
+across file boundaries, resulting in broken references and incon-               1) We introduce a two-stage training paradigm combining multi-
+sistent program logic [34, 40]. Second, the complex dependencies                    task fine-tuning with compiler-feedback reinforcement learn-
+and structured inputs/outputs of repository-level software make it                  ing, enhancing the model’s cross-file dependency awareness
+exceptionally difficult to validate syntactic correctness and func-                 and task-specific adaptation.
+tional equivalence. The reliance on intricate data structures defined           2) We propose a dependency-guided framework that integrates
+across multiple modules hinders the generation of standalone test                   fine-grained dependency with consistency-driven iterative
+cases, thereby depriving the model of the high-quality diagnos-                     refinement to ensure syntactic and functional correctness in
+tic feedback—such as compiler diagnostics or execution traces—                      repository-level translation.
+essential for driving effective iterative self-refinement [12, 37, 43].         3) We construct a large-scale corpus of 85k training samples
+Finally, the scarcity of parallel C-Rust repositories in training cor-              and a dependency-intensive benchmark of 145 repository-
+pora hinders models from learning the complex mappings required                     level samples, providing a foundation for both training and
+for cross-file coherence. Without sufficient exposure to diverse                    evaluating C-to-Rust translation.
+repository-level patterns, LLMs frequently generate code with un-               4) Extensive experiments demonstrate our approach’s effective-
+resolved references or fragmented logic. This lack of architectural                 ness in dependency comprehension and its practical poten-
+awareness leads to significantly degraded compilation success rates                 tial for enterprise-level migration.
+and functional accuracy in large-scale migrations [4, 27, 30].                 Our source code and experimental data are publicly available at
+   To address these challenges, we propose DepTrans, a dependency-          https://github.com/2726fj/C2RustRep.
+guided approach for repository-level C-to-Rust translation. The core
+of DepTrans lies in its synergy between model-level capability
+enhancement and a structured inference framework. First, we intro-
+duce Reinforcement-Aligned Syntax Training (RAST) to bolster the             2     Methodology
+model’s intrinsic dependency awareness and task-specific adapta-            This section details the architecture of DepTrans, which inte-
+tion. This two-stage scheme employs multi-task fine-tuning to cap-          grates model-level training with a structured inference framework.
+ture distant structural correlations, followed by compiler-feedback         We first present the Reinforcement-Aligned Syntax Training in Sec-
+reinforcement learning to further enforce syntactic correctness and         tion 2.1, designed to bolster the model’s intrinsic dependency aware-
+functional equivalence. By optimizing the model’s fundamental               ness and self-correction capabilities. Building upon this foundation,
+translation and repair capabilities, RAST provides a robust founda-         Section 2.2 introduces the Dependency-Guided Iterative Refinement
+tion for handling complex repository structures. Second, building           framework, which serves as the inference engine to orchestrate
+upon the enhanced model, we develop a Dependency-Guided Itera-              repository-level translation and compiler-driven refinement.
+tive Refinement (DGIR) framework to orchestrate the translation
+process. This involves a Cross-Language Dependency Alignment
+strategy that decomposes C projects into manageable units and
+performs incremental, bottom-up translation following topological            2.1     Reinforcement-Aligned Syntax Training
+orders. By mapping extracted C dependencies to a semantically               While the inference framework provides structural guidance, the
+aligned Rust dependency pool, the framework provides precise,               model’s intrinsic ability to handle repository-level nuances often
+Dependency-Guided Repository-Level C-to-Rust Translation with Reinforcement Alignment                                        FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada
+
+
+
+                 (A) Reinforcement-Aligned Syntax Training (RAST)                                     (B) Dependency-Guided Iterative Refinement (DGIR)
+                                                                             Trained Model
+                TRANS
+                                                                             Frozen Model                       Call Graph
+                Dataset
+                                                                                                                 Analysis
+                                                                                                C Repo                              Semantic Mapping
+                CHECK                 Base                                      MFT                                                                            Aligned Context &
+                                                         Multi-Task Loss                                                             & Dependency
+                Dataset               Model                                     Model                                                                            Dependencies
+                                                                                                                                       Alignment
+
+                REPAIR                                                       Initial
+                Dataset                                                      Policy                           Rust Units
+                                                                 Generated
+                                                                                                Rust Repo
+                                                                 Rust Code                                                          Build Input
+           Reward Calculation                 Test
+             𝑅𝑐𝑜𝑚𝑝       𝑅𝑎𝑙𝑖𝑔𝑛                                                           Weight           Generate            Compile
+          (Compilation (Alignment        Rust     Unit                          Policy Initialization RAST Rust Code            Check                            Compilation
+            Reward)     Reward)                                                 Model                  -7B
+                                                                     .
+                                        Compiler Tests                                                                                                             Error？
+
+                                          Reference                                                                               Compile Repair                 Yes
+                                                                                                                                                                        No
+                                           Model                                                                              error message and context
+                                                                                       Update
+               GRPO Loss                                                                                      Consistency Repair Yes                                Consistency
+                                                 KL Divergence                                                                             Inconsistent？
+                                                                                                                                                                      Check
+                                                                                                            inconsistent description
+                                                                                                                                                    No
+
+                                                                                                                                                   Rust Code
+
+
+
+
+                                                                       Figure 1: Overview of DepTrans.
+
+
+remains a bottleneck. LLMs frequently struggle with cross-file struc-                             2.1.2 Compiler-Feedback Reinforcement Learning. While multi-
+tural dependencies and lack a specialized “translation-detection-                                 task fine-tuning establishes a foundational mapping, the maximum
+repair” synergy. To bridge this gap, we propose Reinforcement-                                    likelihood objective often prioritizes token-level probability over
+Aligned Syntax Training (RAST), a two-stage paradigm designed                                     the rigorous, binary requirements of a compiler. To bridge the gap
+to bolster the model’s fundamental awareness of global repository                                 between "plausible" and "executable" code, we introduce a rein-
+logic and its adaptive capacity for the migration task, as shown in                               forcement learning stage using Group Relative Policy Optimization
+Figure 1 (part A).                                                                                (GRPO) [15]. This stage aligns the model with the strict type sys-
+                                                                                                  tem of Rust by treating the compiler and test suite as an interactive
+2.1.1 Multi-Task Fine-Tuning. While the inference framework pro-                                  environment for policy optimization.
+vides structural guidance, the model’s intrinsic ability to handle
+repository-level nuances often remains a bottleneck. LLMs fre-                                       Optimization Objective. For each question 𝑞, GRPO samples a
+quently struggle with cross-file structural dependencies and lack a                               group of outputs {𝑜 1, 𝑜 2, . . . , 𝑜𝐺 } from the old policy 𝜋𝜃𝑜𝑙𝑑 and opti-
+specialized synergy between translation, detection, and repair. To                                mizes the policy model 𝜋𝜃 by maximizing the following objective:
+bridge this gap, we formulate the initial training stage as a multi-                                              h                                        i
+task learning problem. This approach forces the model to internalize                               J𝐺𝑅𝑃𝑂 (𝜃 ) = E 𝑞 ∼ 𝑃 (𝑄), {𝑜𝑖 }𝐺   𝑖=1 ∼ 𝜋𝜃𝑜𝑙𝑑 (𝑂 |𝑞)
+the relationship between C logic and Rust syntax while developing
+                                                                                                         𝐺                                                                
+an acute sensitivity to migration pitfalls.                                                           1 ∑︁           𝜋𝜃 (𝑜𝑖 |𝑞)                𝜋𝜃 (𝑜𝑖 |𝑞)
+   Specifically, the model simultaneously learns three interlinked                                            min                  𝐴𝑖 , clip                 , 1 − 𝜀, 1 + 𝜀 𝐴𝑖
+                                                                                                      𝐺 𝑖=1          𝜋𝜃𝑜𝑙𝑑 (𝑜𝑖 |𝑞)             𝜋𝜃𝑜𝑙𝑑 (𝑜𝑖 |𝑞)
+tasks: (1) C-to-Rust Translation, where the model generates seman-                                                                         
+tically equivalent Rust code given a C source and its dependency                                                  − 𝛽D𝐾𝐿 (𝜋𝜃 ||𝜋𝑟𝑒 𝑓 )
+context; (2) Syntax Error Detection, where the model assesses Rust                                                                                                             (2)
+code integrity and provides diagnostic feedback; and (3) Code Re-                                    where the advantage 𝐴𝑖 is computed by normalizing the rewards
+pair, where the model corrects erroneous Rust snippets based on                                   within each group to emphasize relative quality, thereby eliminating
+error descriptions. To enable task-specific adaptation, each train-                               the need for a separate value network:
+ing sample is prepended with a distinct [TaskTag]. We employ a
+                                                                                                                                  𝑟𝑖 − mean({𝑟 1, 𝑟 2, . . . , 𝑟𝐺 })
+unified autoregressive language modeling objective:                                                                        𝐴𝑖 =                                                    (3)
+                                                                                                                                      std({𝑟 1, 𝑟 2, . . . , 𝑟𝐺 })
+                             𝑇
+                            ∑︁                                                                       The KL divergence term is efficiently estimated as:
+             LMTL = −               log 𝑃𝜃 (𝑦𝑖 | 𝑦 <𝑖 , 𝑥, [TaskTag])                   (1)
+                                                                                                                                       𝜋𝑟𝑒 𝑓 (𝑜𝑖 |𝑞)       𝜋𝑟𝑒 𝑓 (𝑜𝑖 |𝑞)
+                            𝑖=1                                                                             D𝐾𝐿 (𝜋𝜃 ||𝜋𝑟𝑒 𝑓 ) =                      − log               −1        (4)
+                                                                                                                                        𝜋𝜃 (𝑜𝑖 |𝑞)          𝜋𝜃 (𝑜𝑖 |𝑞)
+where 𝑥 is the input prompt, 𝑦 is the target output sequence, and
+                                                                                                  where 𝜋𝑟𝑒 𝑓 is the SFT-tuned reference policy. This objective en-
+𝜃 is the model parameters. By jointly optimizing these objectives,
+                                                                                                  sures training stability by preventing the policy from deviating
+the model acquires the requisite “inner logic” to effectively power
+                                                                                                  excessively from the reference.
+the Dependency-Guided Iterative Refinement framework, as detailed
+in Section 2.2. This synergistic training transforms the model from                                  Reward Design. To reinforce both syntactic and semantic in-
+a passive generator into an active, self-correcting agent capable of                              tegrity, we design a hybrid reward function 𝑅(𝑎) = 𝛼𝑅comp +
+autonomous architectural reasoning.                                                               𝛽𝑅align .
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada                  Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+    • Syntactic Validity (𝑅comp ): To penalize invalid syntax, we              provides the "available resources." To facilitate precise mapping,
+       define 𝑅comp = 1+𝑁1 err , where 𝑁 err is the count of diagnos-          we build a structured Rust-side dependency pool by extracting and
+       tic errors from the Rust compiler. This forces the model to             categorizing elements into ten syntactic types, including struct,
+       prioritize compilability.                                               enum, function, and trait. Critically, for types such as struct
+    • Functional Alignment (𝑅align ): For function-level samples               and trait, we explicitly link their associated impl blocks. This
+      with test cases, 𝑅align is the pass rate of the unit tests. For          categorization is essential because Rust’s modularity and method
+       repository-level samples where execution is infeasible, 𝑅align          implementation patterns differ significantly from C’s procedural
+       is the CodeBLEU score against the reference, which ensures              structure, requiring a more granular organization of target-side
+       structural and data-flow consistency in complex migration               assets.
+       scenarios.                                                                  3. Semantic Alignment and Augmentation. The final step
+   Guided by the need for computational efficiency, we implement               is to resolve the cross-language mapping between C requirements
+the RAST paradigm on Qwen2.5-Coder-7B [21]. By assigning bal-                  and Rust implementations. We employ BGE-M3 [6] to vectorize
+anced reward weights (𝛼 = 1, 𝛽 = 1), we prioritize syntactic and               all Rust structures, leveraging its superior cross-lingual semantic
+functional integrity equally, demonstrating that RAST can elicit               representation to overcome syntactic divergence. For each C de-
+expert-level capabilities even from smaller-scale models. We de-               pendency, we perform a cosine similarity-based retrieval from the
+note this optimized version as RAST-7B, an efficient engine for                Rust pool to find its semantically equivalent counterpart. To ensure
+repository-level translation. The sensitivity of reward weights is             semantic completeness, if a retrieved Rust function resides within
+further discussed in Section 5.2.2.                                            an impl block, we automatically augment the context with the cor-
+                                                                               responding parent structure. This look-ahead mechanism prevents
+2.2     Dependency-Guided Iterative Refinement                                 the generation of "orphaned" methods and ensures that the LLM
+                                                                               receives a logically complete context for translation.
+To address the complexities of repository-scale migration, we de-
+sign the Dependency-Guided Iterative Refinement (DGIR) framework                2.2.2 Consistency-Guided Translation Refinement. Direct LLM trans-
+as the core inference engine of DepTrans. As illustrated in Figure 1            lation at the repository level often produces "hallucinated" syntax or
+(part B), the framework operates through two synergistic modules:               logic shifts that violate cross-file invariants. To bridge this gap, we
+First, the Cross-Language Dependency Alignment Module ensures                   propose a two-stage refinement module designed to maximize the
+structural consistency by performing an incremental, bottom-up                  LLM’s self-refinement potential. By providing structured contextual
+translation following the topological order of dependencies. It ex-             grounding and multi-dimensional feedback, the module empowers
+tracts precise context from both C call graphs and a categorized                the model to iteratively identify and rectify its own translation
+Rust dependency pool to guide the LLM’s initial generation. Second,             errors.
+the Consistency-Guided Translation Refinement Module capitalizes                   1. Dependency-Aware Context Construction. To provide
+on the LLM’s self-refinement potential. It utilizes the aligned depen-          the necessary "knowledge base" for effective self-refinement, we
+dencies alongside compiler diagnostics and self-consistency checks              transform aligned dependencies into a granularity-adaptive prompt.
+to iteratively repair errors, ensuring that the final output achieves           Following the topological order from Section 2.2.1, we process func-
+high syntactic validity even in the absence of extensive test suites.           tional units incrementally. To avoid distracting the model with ex-
+Each component is described in detail in the following sections.                cessive noise, large structural dependencies (e.g., extensive structs)
+2.2.1 Cross-Language Dependency Alignment. Repository-level trans-              are abstracted into concise docstrings, while smaller, pivotal code
+lation is hindered by the fragmentation of semantic context across              segments are provided verbatim. Furthermore, the LLM is prompted
+file boundaries. Without explicit dependency modeling, LLMs of-                 to generate a cross-language bridge docstring that maps C logic
+ten generate code that references undefined symbols or violates                 to Rust-idiomatic intent. This hybrid context ensures the model
+target-language module structures. To mitigate this, we propose                 has a clear semantic blueprint to guide its initial generation and
+a Cross-Language Dependency Alignment module that bridges the                   subsequent refinement iterations.
+semantic gap between the source C repository and the target Rust                   2. Iterative Repair via Multi-Dimensional Feedback. Rec-
+environment through three steps.                                                ognizing that LLMs perform best when given explicit "hints" about
+    1. Dependency Graph Construction in C. To determine the                     their mistakes, we implement a feedback-driven repair loop that
+optimal translation sequence and capture the logical scope of each              acts as the primary engine for self-refinement.
+function, we first model the structural dependencies of the C project.               • Diagnostic-Driven Repair: Upon compilation, hardware-level
+Using Tree-Sitter [2], we construct a global call graph by travers-                    syntax or type errors are fed back to the LLM. This provides
+ing all source files and mapping inter-function relationships. The                     a precise corrective signal, allowing the model to refine the
+motivation behind this graph is twofold: it allows us to identify                      Rust code until it satisfies the rigorous constraints of the
+the topological order for incremental bottom-up translation, and                       Rust compiler.
+it enables the extraction of a comprehensive dependency set for                      • Consistency-Guided Verification: In the absence of executable
+each function. This set includes not only invoked functions but also                   test suites, we utilize semantic consistency checks [41] to
+critical global context such as headers, global variables, structs, and                provide a high-level refinement signal. By acting as a dual-
+macro definitions.                                                                     language auditor, the LLM compares the C source with its
+    2. Categorized Dependency Pooling in Rust. While C de-                             Rust translation to uncover logical discrepancies. These iden-
+pendencies provide the "requirement," the target Rust environment                      tified mismatches serve as a heuristic guide for self-correction,
+Dependency-Guided Repository-Level C-to-Rust Translation with Reinforcement Alignment                        FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada
+
+
+       enabling the model to iteratively align the functional behav-                Table 1: Statistical summary of the datasets across different
+       ior of the two languages without requiring external test                     stages. "Max", "Min", and "Average" refer to the maximum,
+       oracles.                                                                     minimum and average token counts per sample, respectively.
+
+3     Training and Evaluation Data Construction                                               Type     Dataset Name        #Samples       Max      Min     Average
+To address the data scarcity issue and bolster the inherent genera-                                            Multi-task Fine-tuning
+tion capabilities of LLMs, we curated a multi-granularity dataset for
+C-to-Rust migration, including the repository-level and function-                                       SyntaxCheck          32,066      1,030      66        182
+level corpora.                                                                            Function       CodeTrans           32,066      1,030      66        182
+                                                                                                          CodeFix            18,743      1,033      80        242
+3.1    Repository-Level Dataset Construction                                                                  Reinforcement Learning
+To capture authentic cross-file dependencies, we curate a high-                           Function       FucnTrans           2,370       1,921      30        305
+quality repository-level dataset through a three-phase pipeline,                         Repository      RepoTrans            310        1,717      16        257
+focusing on real-world migration logic.
+                                                                                                                      Evaluation
+    Phase 1: Project Selection and Structural Parsing. We iden-
+tify candidate repository pairs by searching GitHub for keywords                                          DCBench             125        4,769      31        316
+                                                                                         Repository
+such as “migration,” “rewrite,” and “C to Rust.” We specifically                                         IMCBench              20         453       31        157
+select projects where both versions are maintained by the same
+organization to ensure functional alignment. Following common
+practice [27], we filter for projects with > 10 stars and verified                         Phase 2: Compiler-Guided Synthesis. To obtain high-quality
+buildability. Beyond file parsing, we use Tree-Sitter [2] and call                      C-Rust pairs, we employ an automated translation-and-refinement
+graph analysis to retain only functions with active cross-function                      pipeline. Each C function is initially translated by an LLM, followed
+dependencies, ensuring the dataset captures true repository-level                       by an iterative optimization process guided strictly by Rust compiler
+complexity.                                                                             diagnostics. This strategy ensures that the ground-truth authority
+    Phase 2: Hybrid Semantic Alignment. To identify equiva-                             rests on the rigorous compiler rather than the generative model,
+lent functions, we employ a three-step filtering process: (1) Coarse                    resulting in syntactically valid and idiomatic Rust counterparts.
+Retrieval: We utilize BGE-M3 [6], a widely-used model for cross-                           Phase 3: Multi-Task Label Generation. Based on the syn-
+lingual code retrieval, to efficiently retrieve top candidates via co-                  thesis trajectories, we derive labels for three synergistic tasks: (1)
+sine similarity. (2) Model-based Re-ranking: We leverage Qwen2.5-                       Translation, using successfully compiled C-Rust pairs as ground
+Coder-32B to perform semantic verification, exploiting its reason-                      truth; (2) Detection, using both successful and failed attempts to
+ing capabilities to filter out false positives. (3) Manual Audit: The                   train the model on error identification; and (3) Repair, using the
+first and second authors conduct a final review of the aligned pairs                    logs of the refinement process to provide realistic error-correction
+within the full repository context to resolve any subtle discrepancies                  trajectories for supervised fine-tuning.
+and ensure high-fidelity ground truth.
+    Phase 3: Test-based Coverage Identification. To determine                           3.3    Dataset Statistics
+which functions are verifiable via execution, we employ a straight-                 Following the construction pipelines detailed in Section 3.1 and
+forward function-level deletion strategy. For each Rust function,                   Section 3.2, we curate a multi-stage dataset to support RAST and
+we temporarily remove its body and execute cargo test. If this                      rigorous evaluation. Table 1 provides a comprehensive breakdown
+leads to a test failure, we interpret it as a definitive signal that the            of the sample counts and token distributions.
+function’s logic is covered by the existing test suite, marking it as a                Multi-task Fine-tuning Dataset. To equip the model with fun-
+“test-verifiable” sample.                                                           damental translation and self-repair capabilities, we construct three
+                                                                                    specialized tasks under the function-level category: (1) CodeTrans
+3.2    Function-Level Dataset Construction                                          for C-to-Rust translation, (2) SyntaxCheck for error detection and
+To overcome the scarcity of parallel repositories, we construct a                   analysis, and (3) CodeFix for iterative code repair. These tasks, to-
+large-scale synthetic dataset to bolster the model’s fundamental                    taling over 82k samples, provide a balanced coverage of syntactic
+translation and self-correction capabilities.                                       and functional patterns required for cross-language migration.
+   Phase 1: Seed Selection and Diversity Filtering. We utilize                         Reinforcement Learning Dataset. To further align the model
+xCodeEval [23] as our primary source, as it provides a vast collec-                 with compilation and functional requirements, we utilize a hybrid
+tion of C functions with associated test cases. We filter for functions             RL dataset. This includes 2,370 function-level samples (Function)
+with token counts between 64 and 2,048 to exclude trivial boiler-                   and 310 repository-level samples (Repository). The latter specifi-
+plate code while ensuring samples fit within standard LLM context                   cally incorporates cross-file dependencies to bolster the model’s
+windows. Inspired by prior work on data deduplication [3], we en-                   ability to navigate architectural constraints during the alignment
+sure semantic diversity by generating embeddings with BGE-M3 [6]                    process.
+and applying 𝐾-means clustering. This process allows us to sample                      Evaluation Benchmarks. For a robust assessment of repository-
+representative functions across diverse C idioms, preventing the                    level migration, we establish two benchmarks under the Repository
+model from over-fitting on repetitive logic patterns.                               category derived from parallel C/Rust projects. DCBench, sourced
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada                   Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+from the deltachat-core repository, comprises 125 samples with an                scales. All candidates are integrated into the same DGIR framework
+average of 316 tokens. Its complex dependencies and 175-file scale               to isolate the impact of our RAST paradigm from inference-level
+provide a highly challenging testbed for contextual reasoning. In                optimizations, thereby ensuring a controlled and fair assessment of
+contrast, IMCBench, derived from incubator-milagro-crypto, con-                  the model’s intrinsic migration capabilities.
+tains 20 samples from a 121-file codebase, serving as an additional
+                                                                                4.3.2 Ablation Studies for RQ2. To quantify the individual contribu-
+setting to evaluate basic dependency handling.
+                                                                                tion of each component within DGIR, we evaluate four variants: (1)
+                                                                                Plain Deps, which provides raw dependencies without fine-grained
+4 Experimental setup                                                            structure rewriting or import recovery; (2) w/o Compile, which dis-
+4.1 Selected LCMs                                                               ables compiler-guided repair; (3) w/o Consistency, which removes
+We evaluate our framework across two state-of-the-art Large Code                semantic consistency checking; and (4) w/o Repair, which disables
+Model families. DeepSeek-Coder (DSC) [16] represents a LLaMA-                   all iterative refinement. This systematic ablation allows us to disen-
+based decoder-only architecture, for which we select the 6.7B and               tangle the performance gains attributed to structured dependency
+33B instruction-tuned variants. Qwen2.5-Coder (QWC) [21] provides               modeling versus iterative self-correction. For RAST-7B, we investi-
+extensive long-context support (128K tokens), and we utilize its                gate the impact of different reward weighting strategies by varying
+7B, 14B, and 32B versions. This diverse configuration allows for                the ratio 𝛼 : 𝛽: Comp-Only (1:0), focusing exclusively on syntactic
+a comprehensive analysis of how model scale and architectural                   validity; Align-Only (0:1), prioritizing functional consistency; Bal-
+capabilities influence syntactic validity and semantic fidelity in              anced (1:1), our default setting treating both signals equally; and
+complex C-to-Rust migration.                                                    Align-Heavy (1:2), which emphasizes semantic correctness.
+                                                                                 4.3.3 Evaluation for RQ3. To evaluate practical effectiveness in
+4.2     Research Questions                                                       real-world scenarios, we compare DepTrans against two project-
+In this work, we conduct comprehensive experiments to answer                     level strategies: (1) Base, which translates all C files simultaneously
+the following research questions:                                                following previous work’s setting [24]; and (2) Sactor [48], a two-
+      • RQ1: How does DepTrans perform in C-to-Rust transla-                     stage pipeline combining C2Rust [22] static translation with LLM-
+        tion when faced with intricate, repository-level dependency              based refinement. This comparison demonstrates that DepTrans’s
+        structures?                                                              integrated dependency modeling handles complex module rela-
+      • RQ2: How do the individual components of the DGIR frame-                 tionships more effectively than naive global prompting or rigid
+        work and the reward configurations of RAST-7B contribute                 multi-stage pipelines.
+        to the overall migration quality?
+      • RQ3: Can DepTrans effectively handle real-world, large-
+                                                                                 4.4     Performance Metrics
+        scale industrial projects with stringent reliability require-           We adopt three metrics: (1) Compilation Success Rate (CSR) [31],
+        ments?                                                                  the proportion of compilable translations; (2) Computational Ac-
+                                                                                curacy (CA) [31, 44], functional equivalence with reference out-
+   To address RQ1, we evaluate both our DGIR and RAST-7B on
+                                                                                puts; and (3) CodeBLEU [35], structural and lexical similarity to
+DCBench and IMCBench, which feature varying degrees of rich,
+                                                                                reference Rust code. For HWBench, we report Num Build [24]
+cross-file dependencies ranging from standalone modules to intri-
+                                                                                (projects compiled), since these industrial projects lack Rust test
+cate architectures. To answer RQ2, we perform a series of ablation
+                                                                                cases.
+studies, systematically decoupling the DGIR’s components and
+varying the RAST reward signals to quantify their respective im-
+                                                                                 4.5     Implementation Details
+pacts on syntactic and semantic performance. For RQ3, we assess
+the practical utility of DepTrans on HWBench, a benchmark com-                  Experiments are run on four NVIDIA A100 (40GB) GPUs. For multi-
+prising 15 industrial C projects from Huawei’s database systems.                task fine-tuning, we use a learning rate of 1e-4 with cosine decay;
+With codebases ranging from 1,000 to 3,000 lines.                               for reinforcement alignment, 5e-5. The per-device batch size is 2
+                                                                                with gradient accumulation of 8, and all models are trained for 3
+4.3     Compared Methods                                                        epochs. We apply sequence packing, gradient checkpointing, and
+                                                                                LoRA (𝑟 = 16, scaling=32, dropout=0.1) for efficiency, and adopt
+4.3.1 Baselines in RQ1. We compare DGIR with three baselines                    ZeRO-3 in DeepSpeed for memory optimization. Inference uses
+to evaluate the effectiveness of context capture and utilization: (1)           greedy decoding with temperature=0, top_p=1, and a maximum
+Base, which translates C to Rust without auxiliary context; (2) RAG,            of 4096 tokens.
+which uses retrieval-augmented generation via fine-tuned BGE-M3
+(𝑘 = 1, 3, 5); and (3) File Context, which provides the complete C/Rust          5 Evaluation Result
+file pairs (excluding target functions) as input. By focusing on these
+baselines, we isolate the impact of structured dependency guidance               5.1 RQ1: Effectiveness Evaluation
+from raw or retrieved context. This setup is chosen because exist-               5.1.1 Effectiveness of DGIR in C-to-Rust Translation. We evaluate
+ing C-to-Rust tools are primarily designed for function-level tasks              the effectiveness of DGIR on the C-to-Rust translation task using
+and lack the architectural capacity to handle the repository-scale               two benchmark datasets: DCBench and IMCBench. These datasets
+dependencies our framework addresses. To evaluate model-level en-                are derived from real-world open-source projects, representing
+hancements, we compare RAST-7B with baseline models of varying                   diverse levels of complexity. The detailed results are presented
+Dependency-Guided Repository-Level C-to-Rust Translation with Reinforcement Alignment                  FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada
+
+
+Table 2: Evaluation results of DGIR compared with baselines on the DCBench and IMCBench datasets. Under each metric, the
+best performance is highlighted in bold. The ↑/↓ represents the performance of the DGIR compared with the best-performing
+baseline on computational accuracy (CA) and compilation success rate (CSR).
+
+                                                         DSC-6.7B        DSC-33B          QWC-7B       QWC-14B         QWC-32B
+                        Dataset          Method
+                                                        CSR CA          CSR CA           CSR CA        CSR  CA         CSR CA
+                                          Base           4.0   2.4       8.0  4.8         8.8  4.8     9.6   5.6        8.8  4.8
+                                       RAG (k=1)         6.4   3.2       8.8  6.4         8.0  3.2     12.0  5.6       10.4  4.8
+                                       RAG (k=3)        10.4   4.8       8.0  5.6         8.8  3.2     12.0  5.6       10.4  4.8
+                       DCBench         RAG (k=5)         7.2   3.2       7.2  4.0         8.0  4.8     15.2  8.0       12.0  6.4
+                                      File Context      21.6 15.2       18.4 16.0        20.8 13.6     32.0 22.4       30.4 22.4
+                                          DGIR          34.4 26.4       34.4 27.2        42.4 28.0    44.5 27.7        51.2 36.8
+                                          Base          50.0   5.0      50.0  5.0        50.0  5.0     55.0 10.0       50.0  5.0
+                                       RAG (k=1)        60.0 25.0       55.0 20.0        50.0  5.0     60.0 25.0       50.0  5.0
+                                       RAG (k=3)        55.0 10.0       55.0 20.0        55.0  5.0     60.0 25.0       50.0 10.0
+                      IMCBench         RAG (k=5)        60.0 25.0       60.0 35.0        55.0 10.0     60.0 40.0       55.0 20.0
+                                      File Context      85.0 40.0       70.0 35.0        80.0 45.0     80.0 55.0       85.0 50.0
+                                          DGIR          95.0 65.0       85.0 45.0        80.0 30.0    100.0 70.0       95.0 70.0
+                                          Base          10.3   2.8      13.8  4.8        14.5  4.8     15.9  6.2       14.5  4.8
+                                       RAG (k=1)        13.8   6.2      15.2  8.3        13.8  3.4     18.6  8.3       15.9  4.8
+                                       RAG (k=3)        16.6   5.5      14.5  7.6        15.2  3.4     18.6  8.3       15.9  5.5
+                        TOTAL          RAG (k=5)        14.5   6.2      14.5  8.3        14.5  5.5     21.4 12.4       17.9  8.3
+                                      File Context      30.3 18.6       25.5 18.6        29.0 17.9     38.6 26.9       37.9 26.2
+                                          DGIR          42.8 31.7       41.4 29.7        47.6 28.3    52.2 33.6        57.2 41.4
+
+Table 3: Evaluation results of RAST-7B compared with baseline models on the DCBench and IMCBench datasets. The best
+result under each metric is highlighted in bold.
+
+                                                DCBench                          IMCBench                      TOTAL
+                          Model
+                                       CSR      CA      CodeBLEU         CSR       CA    CodeBLEU     CSR     CA      CodeBLEU
+                        DSC-6.7B        34.4    26.4        55.8         95.0     65.0      54.4      42.8    31.7        55.6
+                        DSC-33B         34.4    27.2        60.1         85.0     45.0      57.1      41.4    29.7        59.7
+                        QWC-7B          42.4    28.0        59.0         80.0     30.0      52.7      47.6    28.3        58.2
+                        QWC-14B         44.5    27.7        61.2        100.0     70.0      56.5      52.2    33.6        60.6
+                        QWC-32B         51.2    36.8        61.8         95.0     70.0      58.9      57.2    41.4        61.4
+                         RAST-7B       56.0     40.8        65.9         90.0     60.0      62.2      60.7   43.5         65.4
+
+
+in Table 2. Based on the experimental results, we make the following                by modeling global project structures and integrating feedback-
+key observations:                                                                   driven repair, DGIR not only facilitates syntactic correctness but
+   (1)DGIR achieves superior overall performance by effec-                          also enhances the preservation of semantic equivalence.
+tively resolving repository-level dependencies. On the struc-                          (2) DGIR exhibits strong generalization across varying
+turally complex DCBench, DGIR consistently outperforms all base-                    model capacities. For example, with DSC-6.7B, the compilation
+lines across all model sizes. For instance, with Qwen2.5-Coder-32B,                 success rate increases from 30.3% (File Context) to 42.8%, and the
+DGIR achieves a compilation success rate of 51.2% and a computa-                    computational accuracy from 18.6% to 31.7%. Similar trends are
+tional accuracy of 36.8%, outperforming the best-performing base-                   observed for larger models: under Qwen2.5-Coder-32B, the compi-
+line File Context by 20.8% and 14.4%, respectively. This gap under-                 lation success rate reaches 57.2% and the computational accuracy
+scores that merely providing file context is insufficient for capturing             41.4%, showing absolute improvements of 19.3% and 15.2% over
+the global dependency information necessary for repository-level                    File Context, respectively. These results confirm that DGIR not
+consistency. On IMCBench, while reduced complexity benefits                         only benefits from large models but also substantially boosts the
+most methods, DGIR remains superior in functional correctness.                      performance of smaller, more resource-efficient models.
+With Qwen2.5-Coder-14B and 32B, DGIR achieves a computational
+accuracy of 70.0%, exceeding the best baseline by up to 20%. Even
+with DSC-6.7B, the computational accuracy improves from 40.0%
+(File Context) to 65.0% with DGIR. These results underscore that
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada                  Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+ Finding 1: DGIR improves translation quality across diverse                    example, the CSR on DCBench (QWC-7B) plummets from 42.4% to
+ benchmarks and model scales, achieving absolute gains of up to                 29.6%, validating that the iterative refinement process is the core en-
+ 15.2% in CA and 19.3% in CSR compared to the strongest baselines.              gine for bridging the gap between initial translation and executable,
+ The framework demonstrates strong generalization, effectively                  correct code.
+ empowering both large-scale and resource-efficient models.
+                                                                               5.2.2 Ablation Study of RAST-7B. We further analyze the impact of
+5.1.2 Effectiveness of RAST-7B in C-to-Rust translation. As shown              different reward weighting strategies in the reinforcement learning
+in Table 3, RAST-7B demonstrates the effectiveness of our two-stage            phase. As shown in Table 5, we evaluate four RAST-7B variants
+training methodology across both datasets. Based on the results,               with distinct reward configurations.
+we make the following observations:                                               A balanced reward configuration is critical for achieving
+   (1) RAST-7B achieves state-of-the-art overall performance                   robust translation. Specifically, the Compilation-Only (1:0) strat-
+across all evaluated metrics. In total, RAST-7B delivers the best              egy causes performance degradation, evidenced by a near-perfect
+aggregate results with 60.7% CSR, 43.5% CA, and a 65.4 CodeBLEU                Total CSR (97.9%) but a complete failure in functional correctness
+score, outperforming all baseline models. On IMCBench, it achieves             (0.0% Total CA), as the model learns to exploit the reward mech-
+a 90.0% CSR and the highest CodeBLEU of 62.2, showcasing its su-               anism by generating trivial, safe outputs (e.g., panic!) to satisfy
+perior ability to maintain semantic equivalence during translation.            compilation constraints without implementing actual logic. Con-
+Compared to its base model QWC-7B, RAST-7B improves CA from                    versely, exclusively prioritizing or over-emphasizing alignment
+30.0% to 60.0%, effectively doubling the functional correctness.               rewards (Test-Only 0:1 and Test-Heavy 1:2) compromises syntactic
+   (2) RAST-7B outperforms baseline models with larger pa-                     reliability; for instance, while the 1:2 variant achieves the highest
+rameter scales. For example, on the DCBench, RAST-7B achieves                  semantic similarity (Total CodeBLEU 66.5%), it suffers a decline in
+a 56.0% CSR and 40.8% CA, notably outperforming the much larger                computational accuracy compared to the balanced setting (40.8% vs.
+QWC-32B (51.2% CSR, 36.8% CA). This confirms that our RAST par-                43.5%). Ultimately, the Balanced (1:1) configuration demonstrates su-
+adigm allows smaller models to capture intricate repository-level              perior robustness, achieving the highest Total CA of 43.5% alongside
+logic more effectively than general-purpose larger models.                     a competitive compilation rate, confirming that the joint optimiza-
+                                                                               tion of syntactic validity and functional alignment is requisite for
+ Finding 2: RAST-7B markedly outperforms baseline models                       high-fidelity migration.
+ across all metrics, achieving comparable performance to much
+ larger models through our two-stage training approach, demon-                   Finding 3: The ablation studies indicate that both the modular
+ strating the practical effectiveness of integrating multi-task learn-           components of DGIR and the balanced reward configuration in
+ ing with compiler feedback.                                                     RAST-7B are important. Structural guidance and iterative repair
+                                                                                 contribute complementary benefits, while reward balancing be-
+5.2     RQ2: Ablation Studies                                                    tween compilation and test execution helps mitigate degenerate
+                                                                                 behaviors and improves translation quality.
+5.2.1 Ablation Study of DGIR. To evaluate the contribution of each
+component in DGIR, we design four ablated variants: Plain Deps
+(removing structural rewriting and import recovery), w/o Compile                5.3     RQ3: Industrial Project-level Migration
+(removing compiler feedback), w/o Consistency (removing semantic               To evaluate DepTrans in industrial contexts, we introduce HW-
+consistency checking), and w/o Repair (removing the iterative repair           Bench, a dataset of 15 Huawei C projects with code sizes ranging
+loop). Experimental results are presented in Table 4.                          from 1,000 to 3,000 lines. The evaluation metric is the number of
+   Experimental results confirm that every component of                        projects that can be successfully built (Build), reflecting practical
+DGIR is indispensable. First, removing structural rewriting (Plain             applicability in real-world enterprise settings. The results are sum-
+Deps) causes a clear decline in overall accuracy; for instance, the            marized in Table 6.
+Total CA on QWC-32B drops from 41.4% to 35.9%, indicating that                    DepTrans demonstrates superior robustness and practical
+fine-grained structural alignment is fundamental for capturing ef-             effectiveness in industrial-scale migration. On HWBench, the
+fective repository context. Second, removing compiler feedback                 Base strategy nearly fails across all configurations, while Sactor
+(w/o Compile) directly impacts syntactic validity; specifically, the           achieves only modest improvements (e.g., 5 builds on QWC-32B).
+compilation success rate (CSR) on DCBench with QWC-14B de-                     In contrast, DGIR independently attains superior performance, with
+creases from 44.5% to 34.4%, proving that compiler-driven repair is            6 and 7 successful builds on QWC-14B and QWC-32B, respectively,
+essential for guaranteeing high compilation rates. Third, excluding            even without RAST adaptation. When RAST is integrated, RAST-
+semantic consistency checks (w/o Consistency) significantly com-               7B’s successful builds increase from 3 to 7, effectively matching the
+promises functional correctness. Notably, the functional accuracy              performance of the much larger QWC-32B model. This underscores
+on IMCBench (QWC-32B) drops sharply from 70.0% to 45.0%. In-                   both the robustness of our inference framework and the efficiency
+terestingly, this performance decay is negligible on smaller-scale             of our task-specific tuning.
+models, suggesting that consistency guidance is more effective for
+models with stronger reasoning capabilities, whereas it may be                   Finding 4: DepTrans demonstrates strong robustness and prac-
+considered optional for smaller models with limited self-correction              tical effectiveness in industrial-scale C-to-Rust migration, notably
+potential. Finally, removing the entire iterative repair loop (w/o               improving build success rates and supporting enterprise-level
+Repair) results in the most severe degradation across metrics; for               code translation.
+Dependency-Guided Repository-Level C-to-Rust Translation with Reinforcement Alignment                              FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada
+
+
+                 Table 4: Ablation study on DGIR. Under each metric, the best performance is highlighted in bold.
+                                                             DSC-6.7B                 DSC-33B       QWC-7B           QWC-14B          QWC-32B
+                     Dataset             Method
+                                                             CSR         CA          CSR    CA     CSR        CA    CSR       CA      CSR      CA
+                                       Plain Deps           22.4         19.2        24.8   20.2   23.2   15.2      40.7     30.1     42.4    33.6
+                                      w/o Compile           28.8         20.0        22.4   19.2   36.8   26.4      34.4     26.4     36.0    28.8
+                    DCBench          w/o Consistency        34.4         23.2        34.4   28.0   39.2   28.0      45.5     33.3     44.0    35.2
+                                       w/o Repair           20.8         17.6        28.8   27.2   29.6   23.2      42.4     33.6     36.8    28.8
+                                          DGIR              34.4         26.4        34.4   27.2   42.4   28.0      44.5     27.7     51.2    36.8
+                                       Plain Deps           95.0         55.0        90.0   60.0   70.0   35.0      85.0     45.0     85.0    50.0
+                                      w/o Compile           80.0         50.0        70.0   45.0   65.0   30.0      70.0     35.0     80.0    45.0
+                    IMCBench         w/o Consistency        95.0         60.0        85.0   60.0   65.0   30.0      80.0     40.0     80.0    45.0
+                                       w/o Repair           75.0         50.0        70.0   40.0   75.0   25.0      85.0     55.0     80.0    65.0
+                                          DGIR              95.0         65.0        85.0   45.0   80.0   30.0     100.0     70.0     95.0    70.0
+                                       Plain Deps           32.4         24.1        33.8   25.7   29.7   17.9      46.8     32.1     48.3    35.9
+                                      w/o Compile           35.9         24.1        29.0   22.8   40.7   26.9      39.3     27.6     42.1    31.0
+                      TOTAL          w/o Consistency        42.8         28.3        41.4   32.4   42.8   28.3      50.3     34.3     49.0    36.6
+                                       w/o Repair           28.3         22.1        34.5   29.0   35.9   23.4      48.3     36.6     42.8    33.8
+                                          DGIR              42.8         31.7        41.4   29.7   47.6   28.3      52.2     33.6     57.2    41.4
+
+Table 5: Ablation study on different reward weighting strategies during training. All models are based on the RAST-7B variant.
+RAST-7B-𝛼:𝛽 denotes a model trained with compilation and test rewards weighted by 𝛼 and 𝛽, respectively. The best result
+under each metric is highlighted in bold.
+                                                    DCBench                                 IMCBench                        TOTAL
+                             Model
+                                         CSR        CA      CodeBLEU                CSR     CA     CodeBLEU        CSR     CA       CodeBLEU
+                       RAST-7B-1:0       97.6        0.0          47.2              100.0    0.0       37.8        97.9     0.0        45.9
+                       RAST-7B-0:1       53.6       38.2          66.0               90.0   50.0       64.6        58.6    39.8        65.8
+                       RAST-7B-1:1       56.0       40.8          65.9               90.0   60.0       62.2        60.7    43.5        65.4
+                       RAST-7B-1:2       56.1       39.3          66.8               90.0   50.0       64.4        60.8    40.8        66.5
+Table 6: Results of DepTrans compared with baselines on                                      ensures functional integrity. This demonstrates DepTrans’s supe-
+HWBench. The best performance is highlighted in bold.                                        rior ability to navigate the structural complexities of repository-
+                                                                                             scale C-to-Rust migration.
+Method   DSC-6.7B    DSC-33B    QWC-7B     QWC-14B         QWC-32B       RAST-7B
+ Base        0           0           0          0             1                 -
+Sactor       1           3           2          2             5                 -
+                                                                                             6.2    Impact of Repair Iterations in DGIR
+ DGIR        2           3           3          6             7               7
+                                                                                             We evaluate the impact of repair iteration counts on Qwen2.5-
+                                                                                             Coder-7B by varying compiler repair (1–5) with fixed consistency
+                                                                                             repair (2), and varying consistency repair (1–5) with fixed compiler
+6 Discussion                                                                                 repair (3). As shown in Figure 3, we report the compilation rate,
+                                                                                             accuracy, and token consumption for each configuration.
+6.1 Case Study                                                                                  Increasing repair iterations improves performance but in-
+We present a case study on the authenticate_stream function to                               curs higher costs. For compiler-guided repair, computational
+illustrate the effectiveness of DepTrans (Figure 2). This function                           accuracy rises from 31.03% at iteration 1 to a peak of 35.17% at
+relies on implicit buffer and cryptographic dependencies defined in                          iteration 4, yet this comes with a sharp increase in token consump-
+external modules, which pose a significant challenge for translation                         tion exceeding 100k at iteration 5. Similarly, consistency-guided
+approaches lacking project-wide context. As shown in Figure 2,                               repair shows marginal improvements, where iteration 5 achieves
+baseline methods exhibit critical failures: direct translation pro-                          the highest compilation rate of 53.10% but consumes substantially
+duces scope errors (e.g., error[E0425]) and ownership violations                             more tokens than iteration 1 which attains identical computational
+such as use of moved value, as it fails to recognize external                                accuracy.
+module interfaces and Rust’s strict borrowing rules. In contrast,                               To balance translation performance with inference overhead, we
+DepTrans generates a syntactically valid and idiomatic translation.                          recommend setting the compiler-guided repair iteration count to
+By explicitly modeling cross-module dependencies and mapping                                 2–3 and the consistency repair iteration count to 1 or 3. This con-
+them to a semantically aligned Rust dependency pool, DepTrans                                figuration maximizes computational efficiency while maintaining
+correctly resolves module-qualified calls (e.g., crypto::hash) and                           robust migration quality in real-world pipelines.
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada                                                                                         Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+                                                                                                                                                      Table 7: Evaluation results of DepTrans compared with base-
+       int authenticate_stream(...) {
+          ...
+                                                                                                                                                      lines on CRust-Bench. “Build” indicates the number of suc-
+          // ① implicit buffer dependency (defined in another module)                                                                                 cessfully compiled projects, and “Test” represents the num-
+          size_t n = buffer_append(ctx->buf, ...);                                                                                                    ber of projects passing all test cases. The best performance
+          ...                                                                                                                                         under each metric is highlighted in bold.
+          // ② implicit crypto dependency
+          if (crypto_hash(ctx->algo, ..., hash) != 0)
+              return ERR_CRYPTO;                                                                                                                                                   Build                            Test
+          ...                                                                                                                                            Model
+       }                                                   Original C Code                                                                                              Base      Sactor       DGIR      Base      Sactor      DGIR
+    pub fn authenticate_stream(...) -> Result<AuthResult, AuthError> {                                                                                 DSC-6.7B           0          4           6         0          0            0
+      ...                                                                                                                                              DSC-33B            1         12          10         0          2            1
+      // ① buffer dependency not aware
+      let n = buffer_append(ctx.buf, ...); // ×                                                                                                        QWC-7B             0          5          11         0          2            2
+      // error[E0425]: cannot find function `buffer_append` in this scope                                                                              QWC-14B            1          8          20         0          2            4
+      // error[E0382]: use of moved value `ctx.buf`                                                                                                    QWC-32B            6         12          26         0          4            5
+      ...
+                                                                                                                                                       RAST-7B            -          -          27         -          -            5
+            // ② crypto dependency not imported / not aware
+            crypto_hash(ctx.algo, buffer_data(ctx.buf), ..., &mut hash)?; // ×
+            // error[E0425]: cannot find function `crypto_hash` in this scope
+            // error[E0106]: missing lifetime specifier                                                                                               Table 8: Evaluation of unsafe code ratio (%) in translated Rust
+            ...
+                                                                                                    Direct Translating
+    }
+                                                                                                                                                         Model         DCBench        IMCBench        CRustBench          HWBench
+       pub fn authenticate_stream(...) -> Result<AuthResult, AuthError> {
+         ...                                                                                                                                           DSC-6.7B          0.98              0               3.39             2.58
+         // ① buffer dependency explicitly modeled modules                                                                                             DSC-13B           0.55              0               0.1              1.72
+         ctx.buf.append(...)?; // √                                                                                                                    QWC-7B            1.015             0               1.26             2.35
+         let data = ctx.buf.read_exact(...)?; ...                                                                                                      QWC-14B           0.44              0               0.24             1.46
+                                                                                                                                                       QWC-32B             0               0               0.25             0.76
+                // ② crypto dependency explicitly modeled
+                let hash = crypto::hash(ctx.algo, &data)?; // √                                                                                         RAST-7B           0.32             0               0.54             1.11
+                ...
+
+                Ok(AuthResult { ... })                                                         DepTrans Translating
+       }                                                                                                                                               6.3     How does DepTrans perform in
+                                                                                                                                                               open-source benchmarks?
+Figure 2: Case study of authenticate_stream translation gen-
+                                                                                                                                                      We further evaluate DepTrans on CRust-Bench [24], which com-
+erated by Qwen2.5-Coder-7B.
+                                                                                                                                                      prises 100 open-source C projects with manually written Rust test
+                                                                                                                                                      cases.
+                                                                                                                                                         DepTrans demonstrates superior generalization and ro-
+            Compile Repair Iteration                                             Consistency Repair Iteration
+                                                                                                                                                      bustness on open-source benchmarks. As shown in Table 7,
+                                               110000                                                                   86000                         DepTrans consistently outperforms baselines across all metrics.
+           60                                                                         60                                                              Specifically, with QWC-32B, it compiles 26 projects, doubling the 12
+                                                       Token Consumption
+
+
+
+
+                                                                                                                            Token Consumption
+
+
+
+
+                                               90000                                                                    80000
+                                                                                                                                                      builds by Sactor, and increases test-passing projects to 5. Integrating
+                                                                                                                                                      RAST-7B yields state-of-the-art results with 27 builds and 5 passes,
+Rate (%)
+
+
+
+
+                                                                           Rate (%)
+
+
+
+
+           50                                                                         50
+
+                                                                                                                                                      confirming the system’s robustness on complex repositories.
+                                               70000
+           40                                                                         40                                74000
+
+
+
+                                               50000
+                                                                                                                                                       6.4     How safe is the Rust code generated by
+           30                                                                         30                                68000
+                                                                                                                                                               DepTrans?
+                 1    2       3       4    5                                               1    2       3       4   5
+                          Iteration                                                                 Iteration                                         To assess the safety of Rust code produced by DepTrans, we mea-
+                            Compile Rate           Pass Rate                                   Token Consumption
+                                                                                                                                                      sure the proportion of “unsafe” lines in translated projects, as sum-
+                                                                                                                                                      marized in Table 8. Lower values indicate safer code, i.e., fewer
+                                                                                                                                                      instances requiring explicit “unsafe” blocks.
+Figure 3: Impact of compilation repair and consistency repair                                                                                            DepTrans consistently minimizes unsafe code ratios across
+iterations on translation performance and average token                                                                                               all benchmarks. For instance, the unsafe code ratio remains below
+consumption.                                                                                                                                          3% for all models on DCBench and HWBench. Even on the com-
+                                                                                                                                                      plex CRustBench, the ratio stays remarkably low, exemplified by
+                                                                                                                                                      3.39% for DSC-6.7B, which confirms the framework’s capability to
+                                                                                                                                                      effectively reduce memory safety risks and ensure maintainability.
+Dependency-Guided Repository-Level C-to-Rust Translation with Reinforcement Alignment                             FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada
+
+
+6.5     Threats To Validity                                                              [4] Yannick Assogba and Donghao Ren. [n. d.]. Evaluating Long Range Dependency
+                                                                                             Handling in Code Generation LLMs. Transactions on Machine Learning Research
+Limited LCMs. We reduce selection bias by evaluating five di-                                ([n. d.]).
+verse LCMs with different sizes. Moreover, our core contributions,                       [5] Xuemeng Cai, Jiakun Liu, Xiping Huang, Yijun Yu, Haitao Wu, Chunmiao Li, Bo
+                                                                                             Wang, Imam Nur Bani Yusuf, and Lingxiao Jiang. 2025. RustMap: Towards Project-
+including dependency enhancement and iterative repair, are model-                            Scale C-to-Rust Migration via Program Analysis and LLM. CoRR abs/2503.17741
+agnostic and can be easily applied to other architectures.                                   (2025). arXiv:2503.17741 doi:10.48550/ARXIV.2503.17741
+   Potential Data Leakage. Since pretraining data is not public,                         [6] Jianlyu Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, and Zheng Liu.
+                                                                                             2024. M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity
+we cannot fully rule out leakage. However, the poor performance of                           Text Embeddings Through Self-Knowledge Distillation. In Findings of the Asso-
+simple prompting suggests this is not a major issue. The significant                         ciation for Computational Linguistics, ACL 2024, Bangkok, Thailand and virtual
+gains from our framework confirm that the improvements come                                  meeting, August 11-16, 2024, Lun-Wei Ku, Andre Martins, and Vivek Srikumar
+                                                                                             (Eds.). Association for Computational Linguistics, 2318–2335. doi:10.18653/V1/
+from our method rather than the model just memorizing the data.                              2024.FINDINGS-ACL.137
+                                                                                         [7] John Criswell, Nicolas Geoffray, and Vikram S. Adve. 2009. Memory Safety for
+                                                                                             Low-Level Software/Hardware Interactions. In 18th USENIX Security Symposium,
+7     Related Work                                                                           Montreal, Canada, August 10-14, 2009, Proceedings, Fabian Monrose (Ed.). USENIX
+Existing C-to-Rust migration approaches follow two primary paradigms:                        Association, 83–100.
+                                                                                         [8] DARPA. [n. d.]. TRACTOR: Translating All C to Rust. https://www.darpa.mil/
+rule-based and LLM-based. Rule-based approaches, such as C2Rust [22],                        research/programs/translating-all-c-to-rust.
+leverage compiler infrastructures to ensure structural equivalence,                      [9] Mehmet Emre, Peter Boyland, Aesha Parekh, Ryan Schroeder, Kyle Dewey, and
+                                                                                             Ben Hardekopf. 2023. Aliasing Limits on Translating C to Safe Rust. Proc. ACM
+while subsequent works incorporate static analysis [17, 46] and                              Program. Lang. 7, OOPSLA1 (2023), 551–579. doi:10.1145/3586046
+alias emulation [9, 10] to enhance safety. Although these tools pro-                    [10] Mehmet Emre, Ryan Schroeder, Kyle Dewey, and Ben Hardekopf. 2021. Trans-
+vide high functional fidelity, the resulting code is often unidiomatic                       lating C to safer Rust. Proc. ACM Program. Lang. 5, OOPSLA (2021), 1–29.
+                                                                                             doi:10.1145/3485498
+and fails to fully utilize Rust’s safety guarantees.                                    [11] Jia Feng, Jiachen Liu, Cuiyun Gao, Chun Yong Chong, Chaozheng Wang, Shan
+   LLM-based approaches aim to bridge this gap by learning id-                               Gao, and Xin Xia. 2024. Complexcodeeval: A benchmark for evaluating large code
+iomatic patterns from large-scale corpora. Recent studies have ex-                           models on more complex code. In Proceedings of the 39th IEEE/ACM International
+                                                                                             Conference on Automated Software Engineering. 1895–1906.
+plored direct translation with feedback loops [36, 42, 48] or hybrid                    [12] Pietro Ferrara, Vincenzo Arceri, and Agostino Cortesi. 2024. Challenges of
+refinement strategies that post-process rule-based outputs [33, 38].                         software verification: the past, the present, the future. International Journal on
+                                                                                             Software Tools for Technology Transfer 26, 4 (2024), 421–430.
+These diverse explorations have collectively highlighted two per-                       [13] Aymeric Fromherz and Jonathan Protzenko. 2024. Compiling C to Safe Rust,
+sistent, open challenges in the field: the difficulty of maintaining                         Formalized. CoRR abs/2412.15042 (2024). arXiv:2412.15042 doi:10.48550/ARXIV.
+coherence across complex repository-level dependencies and the                               2412.15042
+                                                                                        [14] Yifei Gao, Chengpeng Wang, Pengxiang Huang, Xuwei Liu, Mingwei Zheng,
+scarcity of high-quality parallel data. Our work, DepTrans, specifi-                         and Xiangyu Zhang. 2025. PR2: Peephole Raw Pointer Rewriting with LLMs
+cally addresses these architectural and data-level bottlenecks.                              for Translating C to Safer Rust. CoRR abs/2505.04852 (2025). arXiv:2505.04852
+                                                                                             doi:10.48550/ARXIV.2505.04852
+                                                                                        [15] Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu,
+8     Conclusion                                                                             Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. 2025. DeepSeek-R1 in-
+                                                                                             centivizes reasoning in LLMs through reinforcement learning. Nature 645, 8081
+In this paper, We propose a novel approach for repository-level C-to-                        (2025), 633–638.
+Rust translation. It consists of two key components: a dependency-                      [16] Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai Dong, Wentao Zhang,
+guided translation framework and a two-stage training paradigm.                              Guanting Chen, Xiao Bi, Yu Wu, YK Li, et al. 2024. DeepSeek-Coder: When the
+                                                                                             Large Language Model Meets Programming–The Rise of Code Intelligence. arXiv
+The framework extracts fine-grained dependencies from C code,                                preprint arXiv:2401.14196 (2024).
+maps them to their Rust equivalents, and constructs precise trans-                      [17] Jaemin Hong and Sukyoung Ryu. 2023. Concrat: An Automatic C-to-Rust Lock
+lation context to guide LLM-based generation. It further applies                             API Translator for Concurrent Programs. In 45th IEEE/ACM International Confer-
+                                                                                             ence on Software Engineering, ICSE 2023, Melbourne, Australia, May 14-20, 2023.
+compiler diagnostics and LLM-based consistency checks for itera-                             IEEE, 716–728. doi:10.1109/ICSE48619.2023.00069
+tive error repair. The training paradigm combines multi-task fine-                      [18] Jaemin Hong and Sukyoung Ryu. 2024. To Tag, or Not to Tag: Translating C’s
+                                                                                             Unions to Rust’s Tagged Unions. In Proceedings of the 39th IEEE/ACM International
+tuning with compiler-feedback reinforcement learning, supported                              Conference on Automated Software Engineering, ASE 2024, Sacramento, CA, USA,
+by our constructed dataset of function-level and repository-level                            October 27 - November 1, 2024, Vladimir Filkov, Baishakhi Ray, and Minghui Zhou
+C-Rust pairs. Extensive experiments show that our approach con-                              (Eds.). ACM, 40–52. doi:10.1145/3691620.3694985
+                                                                                        [19] Jaemin Hong and Sukyoung Ryu. 2025. Forcrat: Automatic I/O API Translation
+sistently improves compilation success and functional correctness                            from C to Rust via Origin and Capability Analysis. arXiv:2506.01427 [cs.SE]
+over strong baselines, demonstrating its effectiveness for practical                         https://arxiv.org/abs/2506.01427
+migration scenarios.                                                                    [20] Baizhou Huang, Shuai Lu, Xiaojun Wan, and Nan Duan. 2024. Enhancing Large
+                                                                                             Language Models in Coding Through Multi-Perspective Self-Consistency. In
+                                                                                             Proceedings of the 62nd Annual Meeting of the Association for Computational
+Acknowledgment                                                                               Linguistics (Volume 1: Long Papers), ACL 2024, Bangkok, Thailand, August 11-16,
+                                                                                             2024, Lun-Wei Ku, Andre Martins, and Vivek Srikumar (Eds.). Association for
+This research is supported by National Natural Science Foundation                            Computational Linguistics, 1429–1450. doi:10.18653/V1/2024.ACL-LONG.78
+of China under project (No. 62472126) and CCF-Huawei Populus                            [21] Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Dayiheng Liu, Lei Zhang, Tianyu
+                                                                                             Liu, Jiajun Zhang, Bowen Yu, Keming Lu, et al. 2024. Qwen2. 5-coder technical
+Grove Fund.                                                                                  report. arXiv preprint arXiv:2409.12186 (2024).
+                                                                                        [22] Immunant, Inc. [n. d.]. C2Rust: Source-to-Source C-to-Rust Transpiler. https:
+                                                                                             //c2rust.com.
+References                                                                              [23] Mohammad Abdullah Matin Khan, M. Saiful Bari, Xuan Do Long, Weishi Wang,
+ [1] [n. d.]. Rust (programming language). https://en.wikipedia.org/wiki/Rust_               Md. Rizwan Parvez, and Shafiq Joty. 2024. XCodeEval: An Execution-based
+     (programming_language).                                                                 Large Scale Multilingual Multitask Benchmark for Code Understanding, Gen-
+ [2] [n. d.]. tree-sitter. 2023. https://github.com/tree-sitter/tree-sitter.                 eration, Translation and Retrieval. In Proceedings of the 62nd Annual Meeting
+ [3] Amro Abbas, Kushal Tirumala, Dániel Simig, Surya Ganguli, and Ari S Mor-                of the Association for Computational Linguistics (Volume 1: Long Papers), ACL
+     cos. 2023. Semdedup: Data-efficient learning at web-scale through semantic              2024, Bangkok, Thailand, August 11-16, 2024, Lun-Wei Ku, Andre Martins, and
+     deduplication. arXiv preprint arXiv:2303.09540 (2023).                                  Vivek Srikumar (Eds.). Association for Computational Linguistics, 6766–6805.
+FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada                                  Jia Feng, Wenjie Gan, Cuiyun Gao, Chaozheng Wang, Feng Luo, Xin Xia, Ge Li, and Kui Liu
+
+
+     doi:10.18653/V1/2024.ACL-LONG.367                                                          [46] Hanliang Zhang, Cristina David, Yijun Yu, and Meng Wang. 2023. Ownership
+[24] Anirudh Khatry, Robert Zhang, Jia Pan, Ziteng Wang, Qiaochu Chen, Greg                          Guided C to Rust Translation. In Computer Aided Verification - 35th International
+     Durrett, and Isil Dillig. 2025. CRUST-Bench: A Comprehensive Benchmark for                      Conference, CAV 2023, Paris, France, July 17-22, 2023, Proceedings, Part III (Lecture
+     C-to-safe-Rust Transpilation. CoRR abs/2504.15254 (2025). arXiv:2504.15254                      Notes in Computer Science, Vol. 13966), Constantin Enea and Akash Lal (Eds.).
+     doi:10.48550/ARXIV.2504.15254                                                                   Springer, 459–482. doi:10.1007/978-3-031-37709-9_22
+[25] Per Larsen. 2024. Migrating C to Rust for Memory Safety. IEEE Secur. Priv. 22, 4           [47] Ziyin Zhang, Chaoyu Chen, Bingchang Liu, Cong Liao, Zi Gong, Hang Yu, Jian-
+     (2024), 22–29. doi:10.1109/MSEC.2024.3385357                                                    guo Li, and Rui Wang. 2024. Unifying the Perspectives of NLP and Software
+[26] Kornel Lesiński. [n. d.]. Speed of Rust vs C. https://kornel.ski/rust-c-speed.                  Engineering: A Survey on Language Models for Code. Trans. Mach. Learn. Res.
+[27] Jia Li, Hao Zhu, Huanyu Liu, Xianjie Shi, He Zong, Yihong Dong, Kechi Zhang,                    2024 (2024). https://openreview.net/forum?id=hkNnGqZnpa
+     Siyuan Jiang, Zhi Jin, and Ge Li. 2025. aiXcoder-7B-v2: Training LLMs to Fully             [48] Tianyang Zhou, Haowen Lin, Somesh Jha, Mihai Christodorescu, Kirill Levchenko,
+     Utilize the Long Context in Repository-level Code Completion. arXiv preprint                    and Varun Chandrasekaran. 2025. LLM-Driven Multi-step Translation from C
+     arXiv:2503.15301 (2025).                                                                        to Rust using Static Analysis. CoRR abs/2503.12511 (2025). arXiv:2503.12511
+[28] Ruishi Li, Bo Wang, Tianyu Li, Prateek Saxena, and Ashish Kundu. 2025. Translat-                doi:10.48550/ARXIV.2503.12511
+     ing C To Rust: Lessons from a User Study. In 32nd Annual Network and Distributed
+     System Security Symposium, NDSS 2025, San Diego, California, USA, February 24-28,
+     2025. The Internet Society.
+[29] Shuqing Li, Qisheng Zheng, Cuiyun Gao, Jia Feng, and Michael R. Lyu. 2025.
+     Extended Reality Cybersickness Assessment via User Review Analysis. Proc. ACM
+     Softw. Eng. 2, ISSTA, Article ISSTA058 (June 2025), 23 pages. doi:10.1145/3728933
+[30] Jiaheng Liu, Dawei Zhu, Zhiqi Bai, Yancheng He, Huanxuan Liao, Haoran Que,
+     Zekun Wang, Chenchen Zhang, Ge Zhang, Jiebin Zhang, et al. 2025. A comprehen-
+     sive survey on long context language modeling. arXiv preprint arXiv:2503.17407
+     (2025).
+[31] Feng Luo, Kexing Ji, Cuiyun Gao, Shuzheng Gao, Jia Feng, Kui Liu, Xin Xia, and
+     Michael R Lyu. 2025. Integrating Rules and Semantics for LLM-Based C-to-Rust
+     Translation. arXiv preprint arXiv:2508.06926 (2025).
+[32] Microsoft Security Response Center. 2019. A Proactive Approach to More Secure
+     Code. https://msrc.microsoft.com/blog/2019/07/a-proactive-approach-to-more-
+     secure-code/.
+[33] Vikram Nitin, Rahul Krishna, Luiz Lemos do Valle, and Baishakhi Ray. 2025.
+     C2SaferRust: Transforming C Projects into Safer Rust with NeuroSymbolic Tech-
+     niques. CoRR abs/2501.14257 (2025). arXiv:2501.14257 doi:10.48550/ARXIV.2501.
+     14257
+[34] Rangeet Pan, Ali Reza Ibrahimzada, Rahul Krishna, Divya Sankar, Lam-
+     bert Pouguem Wassi, Michele Merler, Boris Sobolev, Raju Pavuluri, Saurabh
+     Sinha, and Reyhaneh Jabbarvand. 2024. Lost in translation: A study of bugs
+     introduced by large language models while translating code. In Proceedings of
+     the IEEE/ACM 46th International Conference on Software Engineering. 1–13.
+[35] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sundare-
+     san, Ming Zhou, Ambrosio Blanco, and Shuai Ma. 2020. Codebleu: a method for
+     automatic evaluation of code synthesis. arXiv preprint arXiv:2009.10297 (2020).
+[36] Manish Shetty, Naman Jain, Adwait Godbole, Sanjit A. Seshia, and Koushik Sen.
+     2024. Syzygy: Dual Code-Test C to (safe) Rust Translation using LLMs and
+     Dynamic Analysis. CoRR abs/2412.14234 (2024). arXiv:2412.14234 doi:10.48550/
+     ARXIV.2412.14234
+[37] HoHyun Sim, Hyeonjoong Cho, Yeonghyeon Go, Zhoulai Fu, Ali Shokri, and
+     Binoy Ravindran. 2025. Large Language Model-Powered Agent for C to Rust
+     Code Translation. arXiv preprint arXiv:2505.15858 (2025).
+[38] HoHyun Sim, Hyeonjoong Cho, Yeonghyeon Go, Zhoulai Fu, Ali Shokri, and
+     Binoy Ravindran. 2025. Large Language Model-Powered Agent for C to Rust
+     Code Translation. CoRR abs/2505.15858 (2025). arXiv:2505.15858 doi:10.48550/
+     ARXIV.2505.15858
+[39] Chaozheng Wang, Jia Feng, Shuzheng Gao, Cuiyun Gao, Zongjie Li, Ting Peng,
+     Hailiang Huang, Yuetang Deng, and Michael Lyu. 2025. Beyond PEFT: Layer-Wise
+     Optimization for More Effective and Efficient Large Code Model Tuning. Proc.
+     ACM Softw. Eng. 2, FSE, Article FSE071 (June 2025), 24 pages. doi:10.1145/3729341
+[40] Chaofan Wang, Guanjie Qiu, Xiaodong Gu, and Beijun Shen. 2025. APIRAT:
+     Integrating Multi-source API Knowledge for Enhanced Code Translation with
+     LLMs. arXiv preprint arXiv:2504.14852 (2025).
+[41] Ruiqi Wang, Jiyu Guo, Cuiyun Gao, Guodong Fan, Chun Yong Chong, and Xin
+     Xia. 2025. Can llms replace human evaluators? an empirical study of llm-as-a-
+     judge in software engineering. Proceedings of the ACM on Software Engineering
+     2, ISSTA (2025), 1955–1977.
+[42] Aidan Z. H. Yang, Yoshiki Takashima, Brandon Paulsen, Josiah Dodds, and
+     Daniel Kroening. 2024. VERT: Verified Equivalent Rust Transpilation with
+     Large Language Models as Few-Shot Learners. arXiv:2404.18852 [cs.PL] https:
+     //arxiv.org/abs/2404.18852
+[43] Shiyu YANG, Yusheng GUO, Akihiro TABATA, and Yoshiki HIGO. 2025. Con-
+     structing a Dataset of Functionally Equivalent Python Methods Using Test Gen-
+     eration Techniques. IEICE Transactions on Information and Systems (2025).
+[44] Zhen Yang, Fang Liu, Zhongxing Yu, Jacky Wai Keung, Jia Li, Shuo Liu, Yifan
+     Hong, Xiaoxue Ma, Zhi Jin, and Ge Li. 2024. Exploring and Unleashing the Power
+     of Large Language Models in Automated Code Translation. Proc. ACM Softw.
+     Eng. 1, FSE (2024), 1585–1608. doi:10.1145/3660778
+[45] Shangbo Yun, Shuhuai Lin, Xiaodong Gu, and Beijun Shen. 2024. Project-specific
+     code summarization with in-context learning. Journal of Systems and Software
+     216 (2024), 112149.
+

@@ -1,0 +1,986 @@
+                                                                                                                                                                                          2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)
+
+
+
+
+                                                                                                                                                                                  Aligning LLMs to Fully Utilize the Cross-file
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) | 979-8-3503-5733-2/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASE63991.2025.00125
+
+
+
+
+                                                                                                                                                                                  Context in Repository-level Code Completion
+                                                                                                                                                                                        Jia Li ♂∗                             Hao Zhu∗                   Huanyu Liu∗                        Xianjie Shi
+                                                                                                                                                                                    Peking University                       Peking University           Peking University                Peking University
+                                                                                                                                                                                     Beijing, China                          Beijing, China              Beijing, China                   Beijing, China
+                                                                                                                                                                              jia li@mail.tsinghua.edu.cn                zhuhao@stu.pku.edu.cn      huanyuliu@stu.pku.edu.cn        2100013180@stu.pku.edu.cn
+
+                                                                                                                                                                                He Zong                      Yihong Dong, Kechi Zhang                      Siyuan Jiang                  Zhi Jin, Ge Li†
+                                                                                                                                                                               aiXcoder                          Peking University                            aiXcoder                  Peking University
+                                                                                                                                                                            Beijing, China                        Beijing, China                           Beijing, China                 Beijing, China
+                                                                                                                                                                         zonghe@aixcoder.com           {dongyh, zhangkechi}@[stu.]pku.edu.cn         jiangsiyuan@aixcoder.com       {zhijin, lige}@pku.edu.cn
+
+
+
+                                                                                                                                                                           Abstract—Large Language Models (LLMs) have shown                      Large Language Models (LLMs) have achieved State-Of-The-
+                                                                                                                                                                       promising results in repository-level code completion, which              Art (SOTA) performance in repo-level code completion [5]–
+                                                                                                                                                                       completes code based on the in-file and cross-file context of             [7]. To process the long cross-file context, the context windows
+                                                                                                                                                                       a repository. The cross-file context typically contains different
+                                                                                                                                                                       types of information (e.g., relevant APIs and similar code) and           of LLMs are often large, e.g., 16,384 tokens.
+                                                                                                                                                                       is lengthy. In this paper, we found that LLMs struggle to fully              However, we found that existing LLMs struggle to fully
+                                                                                                                                                                       utilize the information in the cross-file context. We hypothesize         utilize information within the cross-file context in repo-level
+                                                                                                                                                                       that one of the root causes of the limitation is the misalignment         code completion. Our motivation stems from two observations.
+                                                                                                                                                                       between pre-training (i.e., relying on nearby context) and repo-          First, recent studies [8], [9] revealed that LLMs fail to pass
+                                                                                                                                                                       level code completion (i.e., frequently attending to long-range
+                                                                                                                                                                       cross-file context).                                                      simple probing tasks such as Needle-in-the-Haystack, which
+                                                                                                                                                                           To address the above misalignment, we propose Code Long-              asks LLMs to recall specific text segments in long contexts.
+                                                                                                                                                                       context Alignment - C O LA, a purely data-driven approach to              Second, we conducted a preliminary experiment and found
+                                                                                                                                                                       explicitly teach LLMs to focus on the cross-file context. Specifi-        similar problems in repo-level code completion. For example,
+                                                                                                                                                                       cally, C O LA constructs a large-scale repo-level code completion         LLMs fail to utilize relevant APIs and similar code presented
+                                                                                                                                                                       dataset - C O LA-132K, where each sample contains the long cross-
+                                                                                                                                                                       file context (up to 128K tokens) and requires generating context-
+                                                                                                                                                                                                                                                 in the cross-file context. Section II shows two examples and
+                                                                                                                                                                       aware code (i.e., cross-file API invocations and code spans similar       detailed analyses. However, recent studies [2], [3], [10] focus
+                                                                                                                                                                       to cross-file context). Through a two-stage training pipeline             on how to extract relevant context and ignore this severe
+                                                                                                                                                                       upon C O LA-132K, LLMs learn the capability of finding relevant           limitation. Consequently, a pressing research question arises:
+                                                                                                                                                                       information in the cross-file context, thus aligning LLMs with            How to make LLMs fully utilize the information in the cross-
+                                                                                                                                                                       repo-level code completion. We apply C O LA to multiple popular
+                                                                                                                                                                       LLMs (e.g., aiXcoder-7B) and extensive experiments on C O LA-             file context?
+                                                                                                                                                                       132K and a public benchmark - CrossCodeEval. Our experiments                 We hypothesize that one of the root causes of the above
+                                                                                                                                                                       yield the following results. ❶ Effectiveness. C O LA substantially        limitation is the misalignment between pre-training and repo-
+                                                                                                                                                                       improves the performance of multiple LLMs in repo-level code              level code completion. The pre-training data typically contains
+                                                                                                                                                                       completion. For example, it improves aiXcoder-7B by up to 19.7%           extensive files (e.g., over 300 million files [11]) from different
+                                                                                                                                                                       in exact match. ❷ Generalizability. The capability learned by
+                                                                                                                                                                       C O LA can generalize to new languages (i.e., languages not in            sources, and the correlation between files is often sparse.
+                                                                                                                                                                       training data). ❸ Enhanced Context Utilization Capability. We             In auto-regressive pre-training, the loss on predicting the
+                                                                                                                                                                       design two probing experiments, which show C O LA improves                next token is more likely to be influenced by a few nearby
+                                                                                                                                                                       the capability of LLMs in utilizing the information (i.e., relevant       pre-tokens rather than long-distance tokens [12], [13]. This
+                                                                                                                                                                       APIs and similar code) in cross-file context. Our datasets and            training may lead LLMs to focus mainly on the nearby context
+                                                                                                                                                                       model weights are released in [1].
+                                                                                                                                                                                                                                                 and ignore the long-distance context. In contrast, in repo-level
+                                                                                                                                                                                                I. I NTRODUCTION                                 code completion, the cross-file context is typically lengthy,
+                                                                                                                                                                          Repository-level (Repo-level) code completion aims to com-             and LLMs need to frequently attend to the long-distance
+                                                                                                                                                                       plete an unfinished code file based on the in-file context and            context. As a result, the misalignment between pre-training
+                                                                                                                                                                       cross-file context within the current repository [2]–[4]. The             and repo-level code completion limits the capabilities of LLMs
+                                                                                                                                                                       cross-file context typically contains different types of informa-         in utilizing the cross-file context.
+                                                                                                                                                                       tion across files (e.g., relevant APIs [4] and similar code [2],             Based on this hypothesis, this paper proposes Code Long-
+                                                                                                                                                                       [3]) and is lengthy (up to thousands of tokens). In recent years,         context Alignment - C O LA, which explicitly teaches LLMs
+                                                                                                                                                                                                                                                 that the crucial information can be presented in the cross-file
+                                                                                                                                                                         * Equal contribution. † Corresponding author.                           context, not just in the nearby context. C O LA is a purely data-
+
+
+                                                                                                                                                                    2643-1572/25/$31.00 ©2025 IEEE                                           1477
+                                                                                                                                                                    DOI 10.1109/ASE63991.2025.00125
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                 driven solution that constructs a repo-level code completion                 def assert_shape(x: torch.Tensor, shape: Tuple[int, ...]):
+                 dataset - C O LA-132K. Each sample in the dataset is equipped                  """ Helper function to assert the shape of a tensor.
+                                                                                                Args:
+                 with the long cross-file context (up to 128K tokens), and                      x: Input tensor.
+                 asks LLMs to generate context-aware code. In this paper, we                    shape: Expected shape of the input tensor.
+                                                                                                """
+                 focus on two types of crucial information (i.e., relevant APIs                 assert x.shape == shape, f"expected shape {shape}, got {x.shape}”
+                                                                                              . . . . .
+                 and similar code) in the cross-file context, which are widely                def _hash_naive(x):
+                 used in related works [2], [3], [10]. Thus, C O LA asks LLMs                   # Compute the hash of a integer x using the naive algorithm
+                                                                                                x = ((x >> 16) ^ x) * 0x45D9F3B
+                 to generate two types of context-aware code, i.e., cross-file                  x = ((x >> 16) ^ x) * 0x45D9F3B
+                                                                                                 = (x >> 16) ^ x
+                 API invocations and code spans similar to cross-file context.                  return x
+                 Intuitively, to predict both types of code, LLMs need to master              . . . . .
+                                                                                              def process_data(data):
+                 the capability of finding relevant information in the cross-file               # Calculate the hash value of the input data
+                                                                                                hashed_data = []
+                 context, thus aligning LLMs with repo-level code completion.                   for i in range(len(data)):
+                    To achieve the above goal, we construct C O LA-132K
+                                                                                                            (a) In-file + cross-file context (about 16K tokens)
+                 from 2,000 high-quality open-source repositories, obtaining
+                 120,000 training samples and 12,000 testing samples. Besides,                Qwen2.5-Coder-7B: hashed_value += data[i] * 31 ** i
+                 C O LA-132K covers four popular programming languages                        aiXcoder-7B: hashed_value += data[i] * i
+
+                 (i.e., Python, Java, C++, and Go). We further propose a two-                 aiXcoder-7B-v2 (Ours): hashed_value += _hash_naive(data[i])
+
+                 stage pipeline to train LLMs on C O LA-132K. The training                    Ground-truth (Human): hashed_value += _hash_naive(data[i])
+
+                 pipeline consists of a supervised fine-tuning stage and a                                      (b) Outputs of LLMs and ground truth
+                 reinforcement learning stage. More details are in Section III.             Fig. 1: Motivating Example ❶. LLMs fail to invoke a relevant
+                    To highlight the effectiveness of C O LA, we apply C O LA               API in the cross-file context, leading to suboptimal comple-
+                 to multiple popular LLMs, including aiXcoder-7B [5],                       tions.
+                 DeepSeek-Coder-6.7B [6], and Code Llama-7B [7]. The model
+                 trained from aiXcoder-7B is named aiXcoder-7B-v2. The                           generate context-aware code (i.e., cross-file API invoca-
+                 training details are in Section IV.                                             tions and code spans similar to the cross-file context).
+                    To evaluate C O LA, we conduct a large-scale study on                      • We apply C O LA to multiple popular LLMs and conduct
+                 C O LA-132K (test set) and a public benchmark - CrossCodeE-                     extensive experiments. Results show that C O LA substan-
+                 val [14]. Evaluation metrics are Exact Match (EM) and BLEU                      tially improves the performance of LLMs on repo-level
+                 [15]. Our study yields the following results. ❶ Effectiveness.                  code completion.
+                 C O LA substantially improves the performance of multiple
+                 LLMs in repo-level code completion. For example, it improves                                  II. M OTIVATING E XAMPLES
+                 aiXcoder-7B by up to 19.7% in EM. aiXcoder-7B-v2 even                         In this section, we conduct a case study to show our
+                 surpasses larger models (e.g., DeepSeek-Coder-33B). We also                motivation, i.e., existing LLMs struggle to fully utilize the
+                 exclude the impact of additional training data. ❷ General-                 information within the cross-file context.
+                 izability. From the perspective of languages, the capability                  Motivating Example ❶: LLMs fail to invoke the rele-
+                 learned by C O LA can generalize to new languages (i.e.,                   vantdefAPI    in the cross-file
+                                                                                                     is_in_bounds(points:           context, leading
+                                                                                                                                 torch.Tensor)              to suboptimal
+                                                                                                                                                 -> torch.BoolTensor:
+                 languages not in C O LA-132K), such as C# and TypeScript.                         """
+                                                                                            results.   Figure    1  shows       a  real-world    example
+                                                                                                   Check if the points are within the bounds of [-1, 1] in all
+                                                                                                                                                               of repo-level
+                 From the perspective of models, C O LA is model-agnostic and               codedimensions.
+                                                                                                   completion. In this example, LLMs need to complete
+                                                                                                   """
+                 effectively improves multiple LLMs, e.g., DeepSeek-Coder                   an unfinished       Python function
+                                                                                                   return (points.abs()                   - process_data,
+                                                                                                                              <= 1.0).all(-1,    keepdim=True)         which
+                 and Code Llama. ❸ Enhanced Context Utilization Capabil-                        .  . . . the
+                                                                                            calculates    .   hash   value     of  input  data. There    is  a  relevant API
+                                                                                                def get_user_logging_config_file():
+                 ity. C O LA significantly improves the capability of LLMs in               - _hash_naive            in the= f"{constants.USER_FOLDER}/logging_config.txt"
+                                                                                                   logging_config_path         cross-file context, which provides a
+                                                                                                   if not os.path.exists(logging_config_path):
+                 utilizing two types of information (e.g., APIs and similar code)           developer-customized           approach to computing the hash value.
+                                                                                                     os.makedirs(logging_config_path)
+                 within the cross-file contexts. For example, in more than 90%              Figurereturn
+                                                                                                      1 (b)logging_config_path
+                                                                                                              shows the outputs of existing LLMs and the
+                                                                                                . . . . .
+                 of test samples, aiXcoder-7B-v2 can accurately locate and                  ground-truth     code. Qwen2.5-Coder-7B [16] and aiXcoder-7B
+                                                                                                def get_user_data_storage_path():
+                 invoke the relevant APIs. ❹ Ablation Study. The results of                 [5] aretry:
+                                                                                                     two popular LLMs for code and achieve SOTA results
+                 the ablation study show that two training stages and two types             in code completion.(a) In-file
+                                                                                                                       We+ cross-file
+                                                                                                                             can seecontext   (about 16K
+                                                                                                                                        that human        tokens)
+                                                                                                                                                       developers     invoke
+                 of context-aware code contribute to C O LA.                                the API    - _hash_naive              to compute     hash   values.    However,
+                                                                                                 Qwen2.5-Coder-7B: data_storage_path = "/user/data/data_storage.db"
+                    The key contributions of this paper are listed as follows:              Qwen2.5-Coder-7B           and aiXcoder-7B struggle to invoke the
+                                                                                                 aiXcoder-7B: data_storage_path = os.environ['DATA_STORAGE_PATH']
+                     • We find that LLMs struggle to fully utilize the cross-               relevant
+                                                                                                 aiXcoder-7B-v2 (Ours): suboptimal completions.
+                                                                                                       API   and   output
+                        file context in repo-level code completion. To address                 Motivating      Example
+                                                                                                 data_storage_path            ❷: LLMs struggle to utilize similar
+                                                                                                                       = f"{constants.USER_FOLDER}/data_storage.db"
+                        this limitation, we propose Code Long-context Alignment             codeGround
+                                                                                                    in the
+                                                                                                         truthcross-file
+                                                                                                                (Human): context, outputting wrong results.
+                        - C O LA, which is a data-driven solution and explicitly            Figure    2 shows a =real-world
+                                                                                                 data_storage_path                       example of repo-level code
+                                                                                                                           f"{constants.USER_FOLDER}/data_storage.db"
+
+                        trains LLMs to find relevant information in the cross-file          completion. LLMs require             completing
+                                                                                                                       (b) Outputs  of LLMs andan  unfinished
+                                                                                                                                                ground truth       function -
+                        context.                                                            get_user_data_storage_path, which returns the path
+                     • To support C O LA, we collect and release a repo-level               of the user’s data storage. The cross-file context contains
+                        code completion dataset - C O LA-132K. It asks LLMs to              a function - get_user_logging_config_path with a
+
+
+
+
+                                                                                     1478
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                  def is_in_bounds(points: torch.Tensor) -> torch.BoolTensor:                    A. Dataset - C O LA-132K
+                    """
+                    Check if the points are within the bounds of [-1, 1] in all
+                  dimensions.                                                                       The idea of C O LA is to train LLMs to generate context-
+                    """
+                    return (points.abs() <= 1.0).all(-1, keepdim=True)
+                                                                                                 aware code and push LLMs to utilize information in the cross-
+                  . . . . .                                                                      file context. Considering existing repo-level code completion
+                  def get_user_logging_config_file():
+                    logging_config_path = f"{constants.USER_FOLDER}/logging_config.txt"          datasets (e.g., RepoEval [2]) are small-scale and lack context-
+                    if not os.path.exists(logging_config_path):
+                      os.makedirs(logging_config_path)                                           aware code, we construct a new dataset - C O LA-132K.
+                    return logging_config_path
+                  . . . . .                                                                         1) Data Statistics: C O LA-132K is a multilingual repo-level
+                  def get_user_data_storage_path():
+                    try:
+                                                                                                 code completion dataset, covering four popular programming
+                                                                                                 languages (i.e., Python, Java, C++, and Go). It is collected
+                              (a) In-file + cross-file context (about 16K tokens)
+                                                                                                 from 2,000 high-quality open-source repositories and consists
+                  Qwen2.5-Coder-7B: data_storage_path = "/user/data/data_storage.db"             of 120,000 training and 12,000 testing samples. C O LA-132K
+                  aiXcoder-7B: data_storage_path = os.environ['DATA_STORAGE_PATH']
+                                                                                                 has two features:
+                  aiXcoder-7B-v2 (Ours):
+                  data_storage_path = f"{constants.USER_FOLDER}/data_storage.db"                 • Long Cross-file Context. Besides the in-file context, each
+                  Ground truth (Human):                                                            sample is equipped with the long cross-file context. The
+                  data_storage_path = f"{constants.USER_FOLDER}/data_storage.db"
+                                                                                                   average length of the cross-file context is about 12,000
+                                    (b) Outputs of LLMs and ground truth                           tokens, and the maximum length is over 128,000 tokens. For
+                Fig. 2: Motivating Example ❷. LLMs struggle to utilize similar                     comparison, a popular repo-level code completion bench-
+                code in the cross-file context, outputting wrong results.                          mark - CrossCodeEval’s context average 3390 tokens [14].
+                                                                                                 • Context-aware Code Completion. To explicitly train
+                similar purpose, which returns the path of the user’s logging                      LLMs to utilize the cross-file context, the code to be
+                config file. The similar function shows how to access the user’s                   completed is highly context-aware. According to related
+                folder (i.e., constants.USER_FOLDER) and is helpful to                             works [2], [3], [10], we focus on two types of crucial
+                complete code. Figure 2 (b) shows the outputs of existing                          information (i.e., relevant APIs and similar code) in the
+                LLMs and the ground-truth code. Human developers refer to                          cross-file context and ask LLMs to generate two types of
+                the similar function and write the correct path to the user’s data                 context-aware code: (1) cross-file API invocations; (2) code
+                storage. However, both LLMs do not utilize the information                         spans similar to cross-file context. Figure 3 shows some
+                in the similar function and output wrong completions.                              code examples in C O LA-132K. Intuitively, to predict both
+                   The above two examples show that existing LLMs struggle                         types of code, LLMs need to master the capability of finding
+                to fully utilize the cross-file context in repo-level code com-                    relevant information in the cross-file context, thus aligning
+                pletion. Recent studies [8], [9] also found similar phenomena                      LLMs with repo-level code completion.
+                in natural language understanding tasks.
+                   As stated in Section I, we hypothesize that one root cause of                    2) Data Collection Pipeline: The data collection pipeline
+                the above limitation is the misalignment between pre-training                    of C O LA-132K consists of four stages:
+                and repo-level code completion. To address this misalignment,                       Stage 1: Code Repository Crawling. In this stage, we
+                our idea is to train LLMs to generate context-aware code and                     crawl code repositories from GitHub. We design the following
+                push LLMs to actively utilize the information in the cross-file                  rules to ensure the quality and diversity of repositories:
+                context. For example, similar to Figure 1, we train LLMs to                      • Multilingual Data. Python, Java, C++, and Go are four
+                predict a cross-file API invocation. To minimize the generation                    popular programming languages in modern software de-
+                loss, LLMs must learn to find relevant APIs from the lengthy                       velopment [17]. Thus, we prioritize repositories in these
+                cross-file context, thus naturally aligning to repo-level code                     languages to establish a representative corpus.
+                completion. Similarly, we train LLMs to generate code similar                    • License Compliance. Repositories must adopt permissive
+                to the cross-file context and teach LLMs to refer to similar                       open-source licenses (e.g., MIT) to avoid legal issues. We
+                code in the cross-file context. We further propose a two-stage                     use GHArchive [18] to cross-check the license type and
+                training pipeline to implement the alignment. We apply C O LA                      ensure compliance with permissive standards.
+                to a SOTA LLM - aiXcoder-7B and present aiXcoder-7B-                             • Popularity. We retain popular repositories that have at least
+                v2. Figure 1 & 2 (b) show the outputs of aiXcoder-7B-v2.                           10 stars and updates within the last two years. Then we sort
+                aiXcoder-7B-v2 successfully utilizes the information in the                        repositories based on the number of stars, commit frequency,
+                cross-file context and outputs correct completions.                                and the presence of test files. The lowest 10% of repositories
+                                                III. C O LA                                        are removed as they are considered low-quality.
+                   In this section, we propose Code Long-context Alignment                         To avoid data leakage, we exclude repositories in existing
+                - C O LA for aligning LLMs to repo-level code completion.                        evaluation benchmarks (i.e., CrossCodeEval in our experi-
+                Because C O LA is purely a data-driven solution, we first                        ments). For the test set of C O LA-132K, we only consider
+                present a dataset - C O LA-132K and describe a two-stage                         repositories created after March 2024, since the training data
+                training pipeline.                                                               of the latest studied LLM is cut off at March 2024.
+
+
+
+
+                                                                                          1479
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                  . . . . .
+                                                                          Cross-file
+                                                                                             built in stage 3, we identify code lines that contain cross-
+                  </s><s># the file path is: model.py
+                  # the code file is written by Python                     + In-file         file API invocations. These lines are then extracted as the
+                  def convert_to_custom_text_state_dict(state_dict: dict): Context           ground-truth code.
+                  </s><s># the file path is: model.py
+                  # the code file is written by Python                                     • Code spans similar to cross-file context. Following previous
+                  def convert_weights_to_lp(model: nn.Module, dtype=torch.float16):          work [5], we sample structured spans from repositories,
+                  . . . . .
+                  def load_checkpoint(model, checkpoint_path, model_key, strict):            ensuring they meet the following criteria: non-empty, not
+                  state_dict = load_state_dict(checkpoint_path,
+                  model_key=model_key, is_openai=False)
+                                                                                             comments. We only include code spans, whose maximum
+                  # detect old format and make compatible with new format                    similarity with retrieved code snippets in the cross-file
+                  if 'positional_embedding' in state_dict and not hasattr(model,
+                  'positional_embedding'):                                                   context exceeds a threshold. How to retrieve code snippets
+                                                             The Code to be Complete
+                                                                                             is described in Stage 5. We manually inspect some retrieved
+                     state_dict = convert_to_custom_text_state_dict(state_dict)              code candidates and empirically set the threshold to 0.3.
+                                      (a) Cross-file API Invocation                           To avoid data leakage, we exclude the ground-truth code
+                                                                                           appearing in our evaluation benchmarks (i.e., CrossCodeEval
+                  . . . . .                                              Cross-file
+                  </s><s># the file path is: fileLeak.py                  + In-file
+                                                                                           in our experiments).
+                  # the code file is written by Python
+                  for content in self.page404_content:
+                                                                          Context             Stage 5: Context Extraction. This stage is to extract the
+                    for location_404 in self.location404:                                  input context corresponding to the ground-truth code.
+                        if location_404 in page.location_url:
+                          return True                                                      • In-file context. Following previous work [5], we locate the
+                    if not page.location_url.endswith(page.url.payload + "/200"):
+                      self.location_404_url.add(page.location_url)                           current file (i.e., the source file of the ground-truth code)
+                      return True                                                            and extract the prefix and suffix as in-file context. The prefix
+                  . . . . .
+                  if "/." in page.url.url and page.status_code == 200:                       refers to the code preceding the ground-truth code, while the
+                    if len(page.content) == 0:
+                      return True
+                                                                                             suffix is the code following the ground-truth code.
+                                                                                           • Cross-file context: Extracting cross-file contexts is an open
+                                                              The Code to be Complete
+                    if not page.location_url.endswith(page.url.payload + "/"):               problem in repo-level code completion. Following previous
+                      self.location_404_url.add(page.location_url)                           works [2]–[4], we adopt two mainstream strategies for
+                      return True
+                                                                                             extracting cross-file context:
+                              (b) Code span similar to cross-file context
+                                                                                             1) Dependency-based strategy. The motivation is that im-
+                              Fig. 3: Two samples in C O LA-132K.                                ported files often contain elements used by the current
+                                                                                                 file, such as functions. Thus, based on the dependency
+                    Stage 2: Repo-level Deduplication. Duplicate training data                   graphs built in Stage 3, we extract external files imported
+                 will lead to model overfitting [19]. Thus, we conduct the repo-                 by the current file as cross-file context.
+                 level data deduplication, which consists of two steps:                      2) Retrieval-based strategy. The idea of this strategy is to
+                 • Exact deduplication. We remove repositories where all files                   retrieve similar code snippets across the repository as
+                    have the same content.                                                       cross-file context. Following previous works [2], [3], we
+                 • Near deduplication. Exact deduplication may cause false                       divide the entire repository into multiple code snippets
+                    negatives, so we further perform near deduplication. We                      by splitting it into code snippets of fixed size. The size is
+                    compute the MinHash [20] of all files with 256 permutations                  empirically set to 20 lines according to previous works
+                    and use Locality Sensitive Hashing (LSH) [21] to identify                    [2], [3]. These code snippets form a retrieval corpus.
+                    clusters of duplicates across repositories. We further reduce                From the end of the in-file prefix, we extract a code
+                    these clusters by ensuring that each file in the original cluster            snippet that serves as the query. We then calculate the
+                    is similar to at least one other file in the reduced cluster.                Jaccard similarity between the query and each snippet
+                    We consider two files near-duplicate when their Jaccard                      in the retrieval corpus at the token level, ranking the
+                    similarity [22] exceeds a threshold. We follow related work                  snippets based on similarity. Following previous work
+                    [5] and empirically set the threshold to 0.85.                               [2], we select the top 10 most similar code snippets as
+                    Stage 3: Dependency Graph Construction. We use SCIP                          cross-file contexts.
+                 [23] to parse these repositories. Repositories that fail to parse
+                 or exceed the time limit are excluded. The structured output of           B. A Two-Stage Training Pipeline
+                 SCIP contains the locations of various code elements within                  C O LA employs a two-stage training pipeline upon the
+                 the repository (e.g., classes and functions) and the dependen-            dataset, including Supervised Fine-Tuning (SFT) and Rein-
+                 cies between these elements (e.g., function invocations). This            forcement Learning (RL). We split the training data into two
+                 information can then support the subsequent stages.                       parts in a 5:5 ratio for two stages. An overview of the training
+                    Stage 4: Context-aware Code Extraction. In this stage,                 pipeline is shown in Algorithm 1.
+                 we extract the context-aware code as the ground-truth code                   1) Supervised Fine-Tuning (SFT, Line 1-6 in Algorithm 1):
+                 (i.e., code to be completed). As stated in Section III-A, we              SFT is a common approach to aligning LLMs to specific tasks
+                 focus on extracting two types of context-aware code:                      and is helpful to stabilize reinforcement learning. Through the
+                 • Cross-file API invocations. Based on the dependency graphs              SFT, models can know the repo-level code completion task
+
+
+
+
+                                                                                        1480
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                  Algorithm 1: The two-stage training pipeline in                        increases the generation probability of the chosen code and
+                  C O LA.                                                                decreases the generation probability of the rejected code. To
+                   Input: M: An LLM to be trained, DSFT : Training data                  obtain the rejected code, we use the SFT-tuned model to gen-
+                          for SFT, DRL : Training data for RL                            erate multiple candidate completions for each input context.
+                   Output: MCoLA : Trained model using C O LA                            We select high-quality rejected code from these candidate
+                                                                                         completions through rigorous filtration. The filtration excludes
+                 1 Supervised Fine-Tuning (SFT):                                         three types of completions: (i) empty completions, (ii) same
+                 2 Initialize model parameters MSFT with M;                              completions as ground truth code, and (iii) completions con-
+                 3 for each batch B from DSFT do                                         taining the ground-truth code.
+                 4      Compute the loss LSFT on the batch B using                          Based on the preference data, we optimize the models by
+                         Equation 1;                                                     minimizing the following loss function:
+                 5      Update MSFT by minimizing LSFT ;                                                          
+                                                                                                                            πθ (O∗ |I)        πθ (O− |I)
+                                                                                                                                                           
+                                                                                          LRL = −E log σ β log                          − log
+                 6 Preference Data Construction:                                                                           πref (O∗ |I)       πref (O− |I)
+                 7 // Create preference data for RL training;                                                                                               (2)
+                 8 DPre ← ∅ ;           // Initialize preference                         where I, O∗ , and O− denote the input context, chosen code,
+                     dataset                                                             and rejected code. πθ is the current model being optimized and
+                                                             ∗
+                 9 for each prompt I and ground truth Oi in DDPO do
+                                                                                         πref is the frozen reference model (i.e., the SFT-tuned model).
+                10     O ← Generate multiple candidate completions                       β is a scaling hyper-parameter, and σ is the common sigmoid
+                        using MSFT (Ii );                                                activation function.
+                11     Filter O− by removing empty, exact matches,                          The loss function encourages the model πθ to assign higher
+                        partial matches, and duplicates;                                 probabilities  ′
+                                                                                                             to O∗ and lower probabilities to O− . The term
+                       for each O−        −                                              log ππrefθ (O|I  )
+                                                                                                             represents the log-probability ratio between the
+                12                 j in O do                                                        (O|I′ )
+                           DPre ← DPre ∪ {(Ii , O∗i , O−                                 current model and the reference model. This ratio acts as a
+                13                                     j )};
+                                                                                         regularization term, ensuring that the optimized model does
+                                                                                         not deviate too far from the original SFT-tuned policy.
+                14 Reinforcement Learning (RL):
+                15 Initialize MRL with MSFT ;                                                                 IV. AI X CODER -7B- V 2
+                16 πref ← MSFT ;                                                           C O LA is general to existing LLMs. We take the SOTA
+                17 for each batch B in DPre do                                           LLM on code completion - aiXcoder-7B [5] as an example and
+                18      Compute the loss LRL on the batch B using                        present aiXcoder-7B-v2. This section describes the training
+                         Equation 2;                                                     details and the training curves.
+                19      Update MRL by minimizing LRL ;
+                                                                                         A. Training Details
+                20 MCoLA ← MRL ;
+                21 return MCoLA                                                             SFT (Line 1-6 in Algorithm 1). We initialize MSFT with
+                                                                                         aiXcoder-7B. Then, we fine-tune the model for 2 epochs. To
+                                                                                         prevent overfitting, we use a small learning rate of 2 × 10−6 ,
+                                                                                         a weight decay of 0.01, and a maximum gradient norm of 1.0.
+                 and generate plausible completions. Specifically, we fine-tune          The batch size is 128. These hyper-parameters are inspired by
+                 models by minimizing the following loss function:                       previous work [27]. For computational efficiency, we employ
+                                            1 X
+                                                N                                        the TRL framework [28] with DeepSpeed Zero-3 [29] and
+                                 LSFT = −         log P (O∗i |Ii ),             (1)      Flash Attention-2 [30]. SFT is conducted on 8 NVIDIA A100
+                                            N i=1
+                                                                                         (40GB) GPUs and costs 20 hours.
+                 where Ii and O∗i denote the input context and ground-truth                 Preference Data Construction (Line 7-14 in Algorithm
+                 code in the i-th training sample, respectively. N is the size of        1). For each sample, the SFT-tuned model MSFT generates 10
+                 the training data.                                                      candidate completions using Top-p sampling [31] with p =
+                    2) Reinforcement Learning (RL, Line 7-21 in Algorithm 1):            0.95 and temperature T = 1.5 to obtain diverse completions.
+                 This stage aims to leverage RL to further improve the model’s           To ensure training efficiency, we select up to three unique
+                 capability in utilizing cross-file context. We employ a popular         and incorrect completions for each sample as rejected code.
+                 offline RL approach - Direct Preference Optimization (DPO)              Finally, we obtain 75,169 triples as preference data.
+                 [24]. DPO can refine the model’s behavior without an explicit              DPO (Line 15-20 in Algorithm 1). We implement the
+                 reward model and has shown impressive results in many tasks             MDPO and reference model πref with the SFT-tuned model
+                 such as mathematical reasoning [25], [26].                              MSFT . To improve training efficiency, we use Low-Rank
+                    Specifically, DPO first collects lots of preference data,            Adaptation (LoRA) [32] to train MDPO . The rank and alpha
+                 which comprises triples - {input context, chosen code, rejected         values of LoRA are set to 32 and 16. We apply LoRA to all
+                 code}. The chosen code is the ground-truth code, and the                transformer modules, including all self-attention weights and
+                 rejected code is the incorrect code generated by models. DPO            feed-forward weights. We train MDPO for 1 epoch over the
+
+
+
+
+                                                                                      1481
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                        (a) Training Losses During SFT           (b) Reward Accuracy During DPO Training               (c) Rewards During DPO Training
+                  Fig. 4: Training curves in SFT and RL. (a) Training and validation losses during SFT. (b) Reward accuracy during RL training.
+                  (c) Chosen vs. rejected rewards during RL training.
+
+                 preference dataset with a batch size of 128. β is set to 0.9.             improvement in repo-level code completion performance when
+                 Existing work [33] found that LoRA’s best learning rates often            using C O LA. We apply C O LA to aiXcoder-7B and present
+                 in [1×10−5 , 5×10−4 ]. Thus, we use a learning rate of 1×10−4             aiXcoder-7B-v2. Then we compare it to existing SOTA LLMs
+                 with a linear scheduler and warm-up. DPO is conducted on 8                on multiple benchmarks.
+                 NVIDIA A100 (40GB) GPUs and costs 31 hours.                                  RQ2: How effectively does C O LA generalize across
+                                                                                           different programming languages? This RQ investigates
+                 B. Training Curves
+                                                                                           whether the context utilization capabilities learned by C O LA
+                    We show the training curves of aiXcoder-7B-v2, including               can generalize across languages. We train aiXcoder-7B-v2 on
+                 the training loss, reward accuracy, and the reward of chosen              C O LA-132K covering four languages and test the model on
+                 and rejected code.                                                        the other two languages.
+                    Training curves in SFT. During the SFT phase, we ran-                     RQ3: Does C O LA maintain its effectiveness across
+                 domly selected 5% of the training data for validation. As                 different LLMs? Besides the aiXcoder-7B, we apply C O LA
+                 shown in Figure 4a, both the training and validation losses               to other two popular LLMs (i.e., DeepSeek-Coder-6.7B and
+                 decrease steadily over the course of training, indicating that            Code Llama-7B) to evaluate whether C O LA can improve them
+                 the model is converging.                                                  in repo-level code completion.
+                    Training curves in RL. We monitor the RL training process                 RQ4: Does C O LA improve the capability of LLMs to
+                 using two metrics: reward accuracy and the reward of chosen               utilize the cross-file context? This RQ evaluates whether
+                 and rejected code. ❶ Reward accuracy reflects the model’s                 C O LA enhances the LLMs’ capability of utilizing APIs and
+                 ability to distinguish between chosen and rejected code. The              similar code in the cross-file context.
+                 curve of reward accuracy is shown in Figure 4b. We can see a                 RQ5: How do different types of context-aware code and
+                 rapid increase in reward accuracy during the initial 0.4 epochs,          training stages contribute to C O LA? This RQ conducts an
+                 where the accuracy rises from 0.2 to 0.8. Between 0.4 and 1.0             ablation study, which explores the contributions of two types
+                 epochs, the accuracy continues to improve, reaching a plateau             of context-aware code (i.e., cross-file API invocations and code
+                 around 0.9. ❷ Reward of chosen and rejected code means the                spans similar to cross-file context) and two training stages (i.e.,
+                 mean log probabilities of the model for the chosen and rejected           SFT and RL) to C O LA.
+                 code. Figure 4c shows the reward of the chosen and rejected
+                 code during RL training. We can see that the reward of the                B. Benchmarks
+                 chosen code consistently increases, and the reward of rejected
+                 completions declines. The two curves above show that the                     We conduct experiments on the following benchmarks:
+                 model effectively distinguishes between chosen and rejected                  CoLT-132K (Test) is the test set of C O LA-132K, consisting
+                 code and tends to generate chosen code.                                   of 12,000 samples. It covers four programming languages
+                                                                                           (i.e., Python, Java, C/C++, Go) and asks LLMs to generate
+                                       V. S TUDY D ESIGN                                   two types of context-aware code, including cross-file API
+                    To evaluate the effectiveness of C O LA, we conduct a large-           invocations and code spans similar to the cross-file context.
+                 scale study. In this section, we describe the design of our               Each language contains 3,000 samples. Notably, the test set
+                 study, including research questions, benchmarks, baselines,               was meticulously collected from repositories created after
+                 and evaluation metrics.                                                   March 2024 to prevent data leakage. For detailed information,
+                                                                                           please refer to Section III-A.
+                 A. Research Questions                                                        CrossCodeEval [14] is a multilingual repo-level code com-
+                   Our study aims to answer the following research questions               pletion benchmark, including 2,665 Python samples, 2,139
+                 (RQs):                                                                    Java samples, 3,356 TypeScript samples, and 1,768 C# sam-
+                   RQ1: How much improvement does C O LA achieve                           ples. We reuse the cross-file context retrieved by BM25
+                 in repo-level code completion? We aim to evaluate the                     provided in CrossCodeEval.
+
+
+
+
+                                                                                    1482
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                 C. Baseline Models                                                        research problems. Our approach focuses on improving the
+                    We selected 8 popular open-source LLMs for comparison,                 capability of LLMs in utilizing context. In contrast, existing
+                 which are widely used in code completion tasks. These models              repo-level code completion approaches [2]–[4], [10] focus on
+                 are categorized into two groups based on their scales.                    how to extract relevant context and treat LLMs as black-box
+                    ❶ LLMs with 7 billion parameters. These LLMs have a                    code generators. In practice, our work and these recent works
+                 comparable parameter scale to aiXcoder-7B-v2.                             are complementary. The experimental results in Section VII-B
+                 • aiXcoder-7B [5] is developed by aiXcoder company. With
+                                                                                           demonstrate the complementarity of our work and existing
+                    7 billion parameters, aiXcoder-7B achieves SOTA perfor-                repo-level code completion approaches.
+                    mance in coding tasks, particularly in code completion.
+                 • aiXcoder-7B-cont is a continually pre-trained model of                  D. Evaluation Metrics
+                    aiXcoder-7B. We randomly sample code files from reposito-                 Following previous works [2], [4], [5], [14], we use the
+                    ries in C O LA-132K and train aiXcoder-7B with its original            following two evaluation metrics:
+                    pre-training objective. The amount of training tokens is
+                    equal to that of aiXcoder-7B-v2. We contacted the devel-               • Exact Match (EM) quantifies the proportion of predictions
+                    opers of aiXcoder-7B and used the official code implemen-                that identically match ground truths.
+                                                                                           • BLEU [36] computes n-gram overlap between predictions
+                    tation they provided for pre-training.
+                 • Qwen2.5-Coder-7B [16], developed by Alibaba, is an en-
+                                                                                             and ground truths. n is empirically set to 4.
+                    hanced version of Qwen2.5 [27]. It is trained on an expan-                Following recent works [6], [14], we use greedy decoding
+                    sive dataset comprising source code, text-code alignment               during inference. When predicting API invocations, we extract
+                    data, and synthetic data, amounting to 5.5 trillion tokens.            the first non-empty line of LLMs’ completions for evaluation.
+                 • DeepSeek-Coder-6.7B [6], from DeepSeek AI, is trained                   When predicting code spans, we truncate the model outputs
+                    from scratch on 2 trillion tokens across 87 programming                at the special token and extract the rest code for evaluation.
+                    languages. It is designed to handle complex coding tasks.
+                 • Code Llama-7B [7], developed by Meta AI, is initialized                                VI. R ESULTS AND A NALYSES
+                    with Llama 2 [34] and trained on 500B tokens from a
+                    large-scale code corpus. It supports common programming                A. RQ1: Improvements in Repo-level Code Completion
+                    languages and has a default context length of 100K tokens.
+                                                                                              Setting. As stated in Section IV, we apply C O LA to
+                 • StarCoder2-7B [35], introduced by BigCode, is trained on
+                                                                                           aiXcoder-7B and present aiXcoder-7B-v2. To validate the
+                    The Stack v2 dataset following additional code fine-tuning
+                                                                                           effectiveness of C O LA, we compare aiXcoder-7B-v2 to eight
+                    stage. It supports multilingual code generation.
+                                                                                           LLMs on repo-level code completion.
+                    ❷ LLMs with larger sizes. We also add two LLMs with                       Results and Analyses. The results are shown in Table I and
+                 larger scales as baselines.                                               Table II. We show the relative improvements of aiXcoder-7B-
+                 • Code Llama-13B [7], the upgraded version of the Code                    v2 compared to aiXcoder-7B.
+                    Llama model, expands the parameter size to 13 billion.                    C O LA substantially improves the performance of
+                 • DeepSeek-Coder-33B [6] is the largest variant of the dense
+                                                                                           aiXcoder-7B on repo-level code completion. aiXcoder-7B-v2
+                    model of the DeepSeek-Coder series.                                    substantially outperforms aiXcoder-7B on C O LA-132K and
+                    We employ the official prompting formats of LLMs for fill-             CrossCodeEval. Especially when completing Python’s code
+                 in-the-middle (FIM) code completion. Specifically,                        spans, aiXcoder-7B-v2 outperforms aiXcoder-7B by 19.7% in
+                 • DeepSeek-Coder:[cross-file context]                                     EM and 14.3% in BLEU. aiXcoder-7B-v2 even outperforms
+                    <|fim_begin|>[prefix]<|fim_hole|>                                      larger models, including Code Llama-13B and DeepSeek-
+                    [suffix]<|fim_end|>                                                    Coder-33B. The results show that C O LA can effectively im-
+                 • aiXcoder:[cross-file context]<AIX-PRE>                                  prove the performance of LLMs in repo-level code completion.
+                    <AIX-POST>[suffix]<AIX-MIDDLE>[prefix]                                    The effectiveness of C O LA is not attributed to additional
+                 • Code       Llama:[cross-file context]<PRE>[pre-                         training data. aiXcoder-7B-cont is continually trained from
+                    fix]<SUF>[suffix]<MID>                                                 aiXcoder-7B with its original pre-training objectives. The
+                 • Qwen2.5-Coder:<|repo_name|>[name]<|file_                                amount of training tokens is equal to that of aiXcoder-7B-
+                    sep|>[path]<|fim_prefix|>[prefix]                                      v2. We can see that aiXcoder-7B-v2 substantially outper-
+                    <|fim_suffix|>[suffix]<|fim_middle|>                                   forms aiXcoder-7B-cont. It demonstrates that the superiority of
+                    When producing prompts, we first include the in-file prefix            C O LA is not caused by additional training data. We also notice
+                 and suffix. Then, we add cross-file context from dependency-              that aiXcoder-7B-cont is slightly weaker than aiXcoder-7B.
+                 based and retrieval-based methods in an alternating order, until          We speculate that this is because aiXcoder-7B has been fully
+                 reaching the maximum context window of LLMs. We employ                    trained on 1.2 trillion unique tokens. Further pre-training may
+                 the original maximum context window of each model.                        cause slight overfitting. We also contacted the development
+                    We omit some related repo-level code completion ap-                    team of aiXcoder-7B and confirmed the reliability of the
+                 proaches for comparison [2]–[4], [10], as we focus on different           experimental results.
+
+
+
+
+                                                                                    1483
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                                                                TABLE I: The performance of LLMs in C O LA-132K.
+                                                               Cross-file API Invocation                                                                    Code Span
+                    Model
+                                              Python                 Java                  C++                  Go                  Python          Java                 C++                   Go
+                                            EM       BLEU      EM      BLEU          EM       BLEU       EM      BLEU          EM       BLEU      EM     BLEU     EM       BLEU         EM       BLEU
+                                                                                                        7B Models
+                    Code Llama-7B           55.8      68.4     66.7     78.5         50.7        65.6    50.1        63.4      39.9      56.8    53.9     68.5    37.3         53.1     46.5         61.2
+                    StarCoder2-7B           46.9      61.3     64.8     78.4         37.8        52.9    51.2        69.6      25.5      37.5    40.3     50.2    24.8         36.8     34.8         47.2
+                    DeepSeek-Coder-6.7B     58.0      69.4     67.4     78.6         46.8        59.7    57.5        71.7      41.4      59.1    58.9     73.2    38.5         54.8     57.2         72.2
+                    Qwen2.5-Coder-7B        55.3      75.6     66.1     84.4         50.7        74.0    45.8        69.5      48.1      67.9    59.1     81.6    46.5         68.7     57.3         75.9
+                    aiXcoder-7B             62.5      78.5     73.3     88.7         56.0        79.2    62.3        83.2      48.6      67.1    68.8     83.4    52.9         70.1     65.2         79.0
+                    aiXcoder-7B-cont        61.6      73.7     73.5     84.6         56.0        71.3    61.7        76.8      42.9      59.2    67.1     80.6    47.2         62.8     47.1         59.7
+                    aiXcoder-7B-v2          69.7      83.8     78.5     89.6         64.1        80.6    68.2        84.1      58.2      76.7    74.8     89.2    61.1         79.9     73.8         87.4
+                     Relative Improve.     +11.5% +6.8% +7.1% +1.0% +14.5% +1.8% +9.5% +1.1% +19.7% +14.3% +8.8% +7.0% +15.5% +13.9% +13.2% +10.6%
+                                                                                                        >7B Models
+                    Code Llama-13B          56.4      69.8     67.2     79.2         52.1        67.5    45.4        55.9      46.1      63.1    61.6     76.6    45.8         62.7     49.6         66.5
+                    DeepSeek-Coder-33B      61.3      71.6     70.1     81.2         51.5        65.6    60.1        73.9      44.6      62.5    62.4     77.2    43.8         61.0     59.4         74.8
+
+
+
+                  TABLE II: The performance of LLMs on CrossCodeEval.                                                TABLE III: The generalization ability of aiXcoder-7B-v2.
+                                                      Python                        Java                                                                  TypeScript                    C#
+                      Model                                                                                                 Model
+                                                 EM          BLEU           EM             BLEU                                                         EM       BLEU            EM          BLEU
+                                                   7B Models                                                                                             7B Models
+                      Code Llama-7B            36.06         54.27          40.58          65.04                            Code Llama-7B               45.29    61.53          51.07        68.22
+                      StarCoder2-7B            11.97         37.04          34.32          56.71                            StarCoder2-7B               33.55    55.65          42.48        61.47
+                      DeepSeek-Coder-6.7B      13.32         35.00          36.65          59.38                            DeepSeek-Coder-6.7B         34.80    53.02          37.05        52.44
+                      Qwen2.5-Coder-7B         38.27         57.53          42.59          65.98                            Qwen2.5-Coder-7B            47.34    66.28          57.86        74.28
+                      aiXcoder-7B              31.22         52.69          42.50          66.59                            aiXcoder-7B                 46.96    66.65          46.32        68.97
+                      aiXcoder-7B-cont         32.26         52.86          43.19          66.72                            aiXcoder-7B-cont            47.19    67.24          47.16        69.62
+                      aiXcoder-7B-v2           40.52         63.40          51.43          74.95                            aiXcoder-7B-v2              55.96    75.74          55.88        76.17
+                       Relative Improve.      +29.8%         +20.3%     +21.0%         +12.6%                                Relative Improve.      +19.2%       +13.6%        +20.6%        +10.4%
+                                               >7B Models                                                                                               >7B Models
+                      Code Llama-13B           38.76         57.19          42.87          66.01                            Code Llama-13B              49.20    64.55          57.07        71.22
+                      DeepSeek-Coder-33B       18.46         39.39          37.21          59.57                            DeepSeek-Coder-33B          38.17    56.32          38.12        53.95
+
+
+
+
+                   Answer to RQ1: aiXcoder-7B-v2 substantially improves                                               Answer to RQ2: The capability learned by C O LA
+                   aiXcoder-7B on repo-level code completion, showing                                                 generalizes to new languages. In languages like C# and
+                   C O LA’s effectiveness. The improvements over aiXcoder-                                            TypeScript, aiXcoder-7B-v2 achieves significant improve-
+                   7B-cont exclude the impact of additional training data.                                            ments, with EM increasing by up to 19.17% and 20.64%.
+
+                                                                                                                 C. RQ3: Effectiveness Across Different LLMs
+                B. RQ2: Generalization Across Different Programming Lan-                                            This RQ validates that C O LA is general to different LLMs
+                guages                                                                                           and can bring stable improvements.
+                                                                                                                    Setting. We apply C O LA to DeepSeek-Coder-6.7B and
+                   Setting. We train aiXcoder-7B-v2 on C O LA-132K includ-                                       Code Llama-7B. The training details are consistent with
+                ing four programming languages (i.e., Python, Java, C++, and                                     aiXcoder-7B-v2 (Section IV). Then, we evaluate the improve-
+                Go). To evaluate generalization ability, we test it on the other                                 ments of C O LA upon both LLMs.
+                two languages (i.e., C# and TypeScript) in CrossCodeEval.                                           Results and Analyses. Table IV shows the results on
+                   Results and Analyses. The results are shown in Table III.                                     C O LA-132K.
+                   The context utilization ability learned by C O LA can                                            C O LA brings substantial improvements on both LLMs.
+                generalize to new languages. In languages not included in                                        The application of C O LA to both LLMs brings significant
+                C O LA-132K, such as C# and TypeScript, aiXcoder-7B-v2                                           improvements in both EM and BLEU. For DeepSeek-Coder-
+                demonstrates strong performance. In TypeScript, EM increases                                     6.7B, the EM is improved by up to 53.8% and BLEU is
+                from 46.96 to 55.96, a 19.17% improvement. In C#, EM                                             improved by up to 41.9%. For Code Llama-7B, the EM is
+                increases from 46.32 to 55.88, a boost of 20.64%. These                                          improved by up to 54% and BLEU is improved by up to
+                results show that the context utilization capability learned by                                  43.8%. These results show the effectiveness of C O LA across
+                C O LA has a good generalization ability.                                                        different LLMs.
+
+
+
+
+                                                                                                          1484
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                    TABLE IV: The performance of C O LA on DS-Coder-6.7B and Code Llama-7B upon C O LA-132K. “DS”: DeepSeek.
+                                                         Cross-file API Invocation                                              Code Span
+                  Model
+                                       Python              Java             C++           Go            Python           Java               C++           Go
+                                    EM     BLEU     EM        BLEU     EM     BLEU   EM    BLEU       EM    BLEU    EM      BLEU      EM      BLEU   EM    BLEU
+                  DS-Coder-6.7B      58.0   69.4   67.4   78.6   46.8   59.7   57.5   71.7   41.4   59.1   58.9   73.2   38.5   54.8   57.2   72.2
+                    +C O LA          70.7   84.3   77.0   88.7   63.3   78.9   68.2   84.1   57.6   75.6   73.6   87.6   59.2   77.8   73.4   87.0
+                  Relative Improve. +21.9% +21.5% +14.2% +12.9% +35.3% +32.1% +18.7% +17.3% +39.1% +27.9% +25.0% +19.7% +53.8% +41.9% +28.4% +20.4%
+                  Code Llama-7B      55.8   68.4   66.7   78.5   50.7   65.6   50.1   63.4   39.9   56.8   53.8   68.5   37.3   53.0   46.5   61.2
+                    +C O LA          67.8   84.5   75.7   87.1   60.3   77.2   66.1   82.7   53.2   72.4   72.2   87.3   57.1   76.2   71.6   85.8
+                  Relative Improve. +21.5% +23.5% +13.5% +10.9% +18.9% +17.7% +31.9% +30.4% +33.3% +27.5% +34.2% +27.4% +53.2% +43.8% +54.0% +40.2%
+
+
+
+                   TABLE V: The API accuracy of LLMs on C O LA-132K.                           categorize test samples in C O LA-132K (Code Spans) into
+                                                     API Accuracy (%)                          different groups based on the maximum similarity between
+                          Model
+                                                Python       Java    C++     Go                the retrieved code snippets and the ground-truth code. For
+                          Code Llama-7B           76.6       79.6    70.0    62.9              each group, we report the number of correct completions by
+                          StarCoder2-7B           71.0       81.3    57.6    69.1              aiXcoder-7B and aiXcoder-7B-v2.
+                          DeepSeek-Coder-6.7B     77.6       80.4    64.3    70.3                 Results and Analyses. The results are presented in Figure 5.
+                          Qwen2.5-Coder-7B        82.8       80.7    70.2    60.6
+                          Code Llama-13B          78.6       81.6    71.8    56.5              aiXcoder-7B-v2 substantially outperforms aiXcoder-7B across
+                          DeepSeek-Coder-33B      79.7       82.8    69.8    74.2              all groups. Figure 2 shows a real case, where aiXcoder-7B-
+                          aiXcoder-7B             83.4       86.5    76.6    76.4              v2 successfully utilizes the information in similar code and
+                          aiXcoder-7B-v2          94.4       92.4    87.7    81.3
+                                                                                               generates correct code. The results show that C O LA enhances
+                                                                                               the ability of LLMs to reuse knowledge (e.g., user-defined
+                   Answer to RQ3: Besides aiXcoder-7B, C O LA effec-                           paths) in similar code.
+                   tively improves different LLMs (e.g., DeepSeek-Coder-
+                   6.7B and Code Llama-7B). The EM is improved by up
+                   to 54% and BLEU is improved by up to 43.8%.
+
+                 D. RQ4: Improvements on Context Utilization Capability
+                    In this RQ, we design two probing experiments to evaluate
+                 whether C O LA enhances the model’s ability to utilize APIs
+                 and similar code in the cross-file context.
+                    ❶ The performance in utilizing APIs in the cross-file
+                 context.
+                    Setting. We expect LLMs can actively locate and invoke
+                 relevant APIs presented in the cross-file context. To quantify
+                 the model’s ability to invoke these APIs, we introduce a
+                 new metric: API Accuracy (API Acc). It only measures the
+                 accuracy of API names in the completion results. If the API
+                 name in LLMs’ completions matches the ground truth, it is                     Fig. 5: The performance of aiXcoder-7B and aiXcoder-7B-v2
+                 counted as 1; otherwise, it is 0. Different from traditional                  on different groups of test samples. The x-axis represents the
+                 evaluation metrics (e.g., EM), API Acc only cares whether                     maximum similarity between the ground truth code and the
+                 LLMs invoke correct APIs and excludes the impact of other                     code snippets.
+                 factors (e.g., arguments).
+                    Results and Analyses. As shown in Table V, across all                        Answer to RQ4: C O LA significantly improves the ca-
+                 four programming languages, C O LA substantially improves                       pability of aiXcoder-7B in utilizing relevant APIs and
+                 the API acc of aiXcoder-7B. Specifically, aiXcoder-7B-v2                        similar code in the cross-file context.
+                 surpasses aiXcoder-7B by 13.2% on Python, 6.8% on Java,
+                 14.5% on C++, and 6.4% on Go. Figure 1 shows a real case,                     E. RQ5: Ablation study
+                 where only aiXcoder-7B-v2 correctly invokes APIs among the                      In this RQ, we conduct an ablation study, which evaluates
+                 three LLMs. These results demonstrate that C O LA improves                    the contributions of two types of training data (i.e., cross-file
+                 the capability of LLMs in utilizing relevant APIs.                            API invocations and code spans similar to cross-file context)
+                    ❷ The performance in utilizing similar code in the cross-                  and two training stages (i.e., SFT and RL) to C O LA.
+                 file context.                                                                   Settings. To quantify the contributions of each component,
+                    Setting. In this experiment, we explore whether C O LA                     we remove different components from aiXcoder-7B-v2 and
+                 enhances the model’s ability to utilize similar code. We                      evaluate the model on C O LA-132K. We report the average
+
+
+
+
+                                                                                      1485
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                         TABLE VI: The results of the ablation study.                   TABLE VIII: The performance of C O LA when integrated with
+                         SFT       DPO             EM               BLEU                RepoCoder and GraphCoder.
+                          ✗          ✗             60.4               77.4
+                                                                                                                 C O LA + RepoCoder
+                          ✓          ✗       67.3 (↑ 11.39%)     83.3 (↑ 7.66%)
+                          ✓          ✓       68.0 (↑ 12.55%)     83.7 (↑ 8.14%)                                          Oracle           Iteration-2
+                                                                                             Model
+                         API     Code Span         EM               BLEU                                            EM        BLEU      EM       BLEU
+                          ✗          ✗              60.4               77.4                  aiXcoder-7B           48.11      58.41     38.56     49.28
+                          ✓          ✗        52.4 (↓ 13.2%)      72.1 (↓ 6.8%)              aiXcoder-7B-v2        53.94      64.77     45.06     56.76
+                          ✗          ✓         60.2 (↓ 0.3%)      76.7 (↓ 0.9%)              Relative Improve.    +12.1%     +10.9%    +16.9%    +15.2%
+                          ✓          ✓       68.0 (↑ 12.55%)     83.7 (↑ 8.14%)
+                                                                                                                 C O LA + GraphCoder
+
+                 EM and BLEU scores on the whole test set. Since DPO relies                                           Line-level          API-level
+                                                                                             Model
+                 on SFT for cold start, otherwise it cannot stabilize training, we                                  EM        BLEU      EM       BLEU
+                 do not show the experimental results of utilizing only DPO.                 aiXcoder-7B           10.50      16.57     6.72      15.06
+                    Results and Analyses. The results of the ablation study are              aiXcoder-7B-v2        13.63      20.61     9.11      20.09
+                                                                                             Relative Improve.    +29.7%     +24.4%    +35.6%    +33.4%
+                 shown in Table VI. From the perspective of training stages,
+                 both SFT and DPO contribute to C O LA’s performance. From
+                 the view of the training data, training only on cross-file API         B. Complementary to Existing Code Completion Methods
+                 invocations or code spans causes slight overfitting, resulting            To validate the complementarity between our work and ex-
+                 in decreased accuracy. Thus, two types of context-aware code           isting code completion approaches, we apply aiXcoder-7B and
+                 and two training stages all contribute to C O LA’s performance.        aiXcoder-7B-v2 (trained by our work) into two representative
+                                                                                        repo-level code completion approaches (i.e., RepoCoder [2]
+                   Answer to RQ5: Two types of context-aware code and                   and GraphCoder [3]). We conduct experiments on the original
+                   two training stages all contribute to the performance of             benchmarks in RepoCoder and GraphCoder. The results are
+                   C O LA.                                                              shown in Table VIII. RepoCoder / GraphCoder with aiXcoder-
+                                                                                        7B-v2 outperforms that with aiXcoder-7B. For example, Re-
+                                         VII. D ISCUSSION                               poCoder achieves an EM improvement from 38.56 to 45.06
+                                                                                        after Iteration-2, while GraphCoder improves from 10.50 to
+                 A. Performance on Single-file Code Completion and Code                 13.63 at the line level. These results indicate that our work
+                 Generation                                                             complements existing repo-level code completion approaches.
+                 TABLE VII: The performance of aiXcoder-7B and aiXcoder-
+                 7B-v2 upon single-file completion (EM and BLEU) and code                                VIII. T HREATS TO VALIDITY
+                 generation (Pass@1).                                                      There are four main threats to the validity of our work:
+                                                                                           Data leakage. It means that the test data is leaked to the
+                                                Single-file        HumanEval
+                         Model                                                          training data, resulting in unfair evaluations. Our experiments
+                                              EM        BLEU         Pass@1             are conducted on two benchmarks, i.e.,C O LA-132K (Test set)
+                         aiXcoder-7B          46.1       65.8         43.2              and CrossCodeEval. We take three measures to address the
+                         aiXcoder-7B-v2       53.1       74.6         51.8
+                         Relative Improve.   +15.2%     +13.8%       +20.0%
+                                                                                        data leakage threat. First, the training data of our studied
+                                                                                        LLMs is cut off as of March 2024. Thus, we only collect
+                    A natural concern is whether C O LA improves repo-level             repositories created after March 2024 to construct C O LA-
+                 code completion but hurts the performance on other tasks.              132K (Test set). Thus, the test data of C O LA-132K does not
+                 To address this concern, we evaluate the performance of                appear in the training data of LLMs. Second, when collecting
+                 aiXcoder-7B and aiXcoder-7B-v2 on single-file completion               C O LA-132K, we excluded repositories and the ground-truth
+                 and general code generation. For single-file completion, we            code in CrossCodeEval. Thus, CrossCodeEval is not leaked
+                 remove all cross-file contexts in C O LA-132K and evaluate             to the training data of C O LA-132K. Third, as stated in the
+                 models on the new data. For code generation, we evaluate               original paper of aiXcoder-7B [5], the developers of aiXcoder-
+                 models on a popular code generation benchmark - HumanEval              7B have excluded CrossCodeEval from the pre-training data.
+                 [37]. We report the average of EM and BLEU for single-file             Thus, the improvements of aiXcoder-7B-v2 on CrossCodeEval
+                 completion, and Pass@1 for code generation.                            are not impacted by data leakage.
+                    Results and Analyses. The results are shown in Table VII.              Limited types of context-aware code. Our C O LA-132K
+                 On single-file completion, the EM of aiXcoder-7B-v2 reaches            only considers two types of context-aware code (i.e., cross-file
+                 53.1, compared to 46.1 of aiXcoder-7B, with an improvement             API invocations and code spans similar to cross-file context).
+                 of 15.2%. On HumanEval, the Pass@1 of aiXcoder-7B-v2                   Our motivation is that these two types of code have explicit
+                 reaches 51.8, compared to 43.2 of aiXcoder-7B, with an                 and common relationships with cross-file context (e.g., calling,
+                 improvement of 20.0%. These results show that C O LA can               high code similarity). Thus, we can leverage parsers and code
+                 improve the code generation and completion capabilities of             retrievers to collect these types of code for training LLMs. We
+                 LLMs beyond repo-level code completion.                                also notice that there may be implicit relationships between
+
+
+
+
+                                                                                     1486
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                 code and the cross-file context, for example, providing back-           require modifications to the model architecture, making them
+                 ground of the current repository. However, it is hard to define         unsuitable for already pre-trained LLMs.
+                 implicit relationships and collect such type of code. Thus, we             Our work diverges from this retrieval-centric paradigm by
+                 leave other types of context-aware to future work.                      focusing on how to effectively assimilate and utilize the long
+                    The performance on generating code without similar                   cross-file context through a novel approach. In practice, our
+                 code. As stated in Section III-A2, C O LA-132K only retains             approach is complementary to the above related work.
+                 code spans whose maximum similarity with the cross-file con-               Repo-level Pre-training. Repo-level pre-training has be-
+                 text exceeds the threshold (i.e., 0.3). Thus, one threat is: how        come a popular approach to enhancing LLMs’ long-context
+                 well does the model perform when the code to be completed               code completion capability [6], [16], [42], [43], creating long-
+                 has low similarity to the cross-file context? To address this           context samples by co-locating relevant files within reposito-
+                 threat, we collect code spans whose maximum similarity with             ries and continually pre-training LLMs on these samples.
+                 the cross-file context is lower than the threshold. aiXcoder-              Compared with existing repo-level pre-training studies, our
+                 7B-v2 correctly completes 320 code spans, and aiXcoder-7B               work has the following advantages: (1) Data construction.
+                 correctly completes 217 code spans, demonstrating improved              Existing repo-level pre-training focuses on how to pack cross-
+                 performance on low-similarity cases.                                    file context, such as dependency graph-based packing and
+                    The impact of repository versions. Following standard                unit test-based lexical packing in CodeGemma [43]. How-
+                 practices [2]–[4], [14], we extract the in-file and cross-file          ever, the ground truths may be irrelevant to the cross-file
+                 context from the current version of the repositories. However,          context, making it difficult to effectively enhance long-context
+                 when developers write the ground-truth code, the repository in          code completion. In contrast, our work emphasizes context-
+                 a previous version, and the context may be slightly different.          aware code completion. The ground truths (e.g., cross-file
+                 This problem is unexplored and out of the scope of our                  API invocations) are highly relevant to the cross-file context,
+                 work. Besides, it is hard to precisely extract context due to           thus benefiting long-context code completion. (2) Training
+                 the tangled commits. To address this threat, we select 10               techniques. Existing studies mainly employ the next-token
+                 repositories from C O LA-132K, manually add an incomplete               prediction training, whereas we introduce reinforcement learn-
+                 function, and ask LLMs to complete the function. aiXcoder-              ing to explicitly penalize LLMs when they fail to utilize the
+                 7B-v2 correctly completes 6 functions, while aiXcoder-7B-v2             context effectively. (3) Further improvements. Models such
+                 only completes 3 functions. The results avoid the impact of             as aiXcoder-7B and DeepSeek-Coder already perform repo-
+                 repository versions and show the effectiveness of C O LA.               level pre-training. Our proposed approach can still further
+                                                                                         improve their performance, demonstrating the effectiveness
+                                                                                         and complementarity of our work.
+                                      IX. R ELATED W ORK
+                                                                                                     X. C ONCLUSION AND F UTURE W ORK
+                    Repo-level Code Completion. Repo-level code completion
+                                                                                            In this paper, we reveal a limitation of LLMs in repo-
+                 has emerged as a critical challenge in software engineering,
+                                                                                         level code completion, i.e., LLMs struggle to fully utilize
+                 aiming to enhance code completion accuracy by leveraging
+                                                                                         information (e.g., relevant APIs or similar code) in the cross-
+                 the broader repository context. Prior studies have predomi-
+                                                                                         file context. To address this limitation, we propose C O LA, a
+                 nantly focused on the retrieval of relevant context from the
+                                                                                         purely data-driven approach to explicitly teach LLMs to focus
+                 repository, with various strategies proposed to extract pertinent
+                                                                                         on the cross-file context. C O LA constructs a large-scale repo-
+                 code snippets [10], [38]–[40]. For instance, RepoCoder [2]
+                                                                                         level code completion dataset - C O LA-132K and trains LLMs
+                 introduces an iterative retrieval and generation approach. Sim-
+                                                                                         to generate context-aware code (i.e., cross-file API invocations
+                 ilarly, CrossCodeEval [14] proposes a straightforward retrieval
+                                                                                         and code spans similar to cross-file context). We apply C O LA
+                 method, using the lines preceding the cursor as a query to
+                                                                                         to multiple LLMs (e.g., aiXcoder-7B) and conduct extensive
+                 extract and append similar code snippets. GraphCoder [3]
+                                                                                         experiments on C O LA-132K and CrossCodeEval. Results
+                 advances this by constructing a Code Context Graph (CCG) to
+                                                                                         show that C O LA substantially improves the performance of
+                 represent the repository, enabling more sophisticated retrieval
+                                                                                         multiple LLMs in repo-level code completion.
+                 based on control flow, data flow, and dependencies. While
+                                                                                            In the future, we will further improve the ability of LLMs
+                 these approaches have made significant strides in context
+                                                                                         to process lengthy contexts. On the one hand, we plan to
+                 retrieval, how to effectively utilize the retrieved context re-
+                                                                                         explore effective approaches to expanding the context window
+                 mains underexplored. Most existing studies view LLMs as
+                                                                                         of LLMs. On the other hand, we will study new training
+                 a “perfect” generator and simply input long contexts into
+                                                                                         techniques to help LLMs learn long-range dependencies.
+                 LLMs. However, this simplistic approach may not fully exploit
+                 the potential of the retrieved information. To address this                                 ACKNOWLEDGMENT
+                 limitation, FT2Ra [41] integrates retrieval results into the              This research is supported by the National Key R&D Pro-
+                 generation process by modifying the model’s logits based on             gram under Grant No. 2023YFB4503801, the National Natural
+                 the retrieved content. Similarly, COCOMIC [4] fuses retrieved           Science Foundation of China under Grant No. 62192733,
+                 cross-file contexts with in-file contexts within the model’s self-      62192730, 62192731, the Major Program (JD) of Hubei
+                 attention mechanism. However, both FT2Ra and COCOMIC                    Province (No.2023BAA024).
+
+
+
+
+                                                                                      1487
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                                              R EFERENCES                                                codeeval: A diverse and multilingual benchmark for cross-file code
+                                                                                                         completion,” in NeurIPS, 2023.
+                  [1] “Replication package.” [Online]. Available: https://anonymous.4open.          [15] S. Ren, D. Guo, S. Lu, L. Zhou, S. Liu, D. Tang, N. Sundaresan,
+                      science/r/aiXcoder-7B-v2/README.md                                                 M. Zhou, A. Blanco, and S. Ma, “Codebleu: a method for automatic
+                  [2] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan, Y. Mao,                     evaluation of code synthesis,” CoRR, vol. abs/2009.10297, 2020.
+                      J. Lou, and W. Chen, “Repocoder: Repository-level code completion             [16] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu,
+                      through iterative retrieval and generation,” in EMNLP. Association for             J. Zhang, B. Yu, K. Dang, A. Yang, R. Men, F. Huang,
+                      Computational Linguistics, 2023, pp. 2471–2484.                                    X. Ren, X. Ren, J. Zhou, and J. Lin, “Qwen2.5-coder technical
+                  [3] W. Liu, A. Yu, D. Zan, B. Shen, W. Zhang, H. Zhao, Z. Jin, and Q. Wang,            report,” CoRR, vol. abs/2409.12186, 2024. [Online]. Available:
+                      “Graphcoder: Enhancing repository-level code completion via coarse-to-             https://doi.org/10.48550/arXiv.2409.12186
+                      fine retrieval based on code context graph,” in ASE. ACM, 2024, pp.           [17] GitHub Staff, “Octoverse: AI leads Python to top language as the number
+                      570–581.                                                                           of global developers surges - The GitHub Blog,” October 2024. [Online].
+                  [4] Y. Ding, Z. Wang, W. U. Ahmad, M. K. Ramanathan, R. Nallapati,                     Available: https://github.blog/news-insights/octoverse/octoverse-2024/
+                      P. Bhatia, D. Roth, and B. Xiang, “Cocomic: Code completion by jointly        [18] “Gharchive.” [Online]. Available: https://www.gharchive.org/
+                      modeling in-file and cross-file context,” in LREC/COLING. ELRA and            [19] G. Penedo, Q. Malartic, D. Hesslow, R. Cojocaru, H. Alobeidli,
+                      ICCL, 2024, pp. 3433–3445.                                                         A. Cappelli, B. Pannier, E. Almazrouei, and J. Launay, “The refinedweb
+                  [5] S. Jiang, J. Li, H. Zong, H. Liu, H. Zhu, S. Hu, E. Li, J. Ding, Y. Han,           dataset for falcon LLM: outperforming curated corpora with web data
+                      W. Ning, G. Wang, Y. Dong, K. Zhang, and G. Li, “aixcoder-7b: A                    only,” in Advances in Neural Information Processing Systems 36:
+                      lightweight and effective large language model for code completion,”               Annual Conference on Neural Information Processing Systems 2023,
+                      CoRR, vol. abs/2410.13187, 2024.                                                   NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023, A. Oh,
+                  [6] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen, X. Bi,                T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, Eds.,
+                      Y. Wu, Y. K. Li, F. Luo, Y. Xiong, and W. Liang, “Deepseek-coder:                  2023. [Online]. Available: http://papers.nips.cc/paper\ files/paper/2023/
+                      When the large language model meets programming - the rise of code                 hash/fa3ed726cc5073b9c31e3e49a807789c-Abstract-Datasets\ and\
+                      intelligence,” CoRR, vol. abs/2401.14196, 2024.                                    Benchmarks.html
+                  [7] B. Rozière, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan,           [20] A. Z. Broder, “Identifying and filtering near-duplicate documents,” in
+                      Y. Adi, J. Liu, T. Remez, J. Rapin, A. Kozhevnikov, I. Evtimov,                    CPM, ser. Lecture Notes in Computer Science, vol. 1848. Springer,
+                      J. Bitton, M. Bhatt, C. Canton-Ferrer, A. Grattafiori, W. Xiong,                   2000, pp. 1–10.
+                      A. Défossez, J. Copet, F. Azhar, H. Touvron, L. Martin, N. Usunier,          [21] P. Indyk and R. Motwani, “Approximate nearest neighbors: Towards
+                      T. Scialom, and G. Synnaeve, “Code llama: Open foundation models                   removing the curse of dimensionality,” in STOC. ACM, 1998, pp.
+                      for code,” CoRR, vol. abs/2308.12950, 2023. [Online]. Available:                   604–613.
+                      https://doi.org/10.48550/arXiv.2308.12950                                     [22] P. Jaccard, “Étude comparative de la distribution florale dans une portion
+                  [8] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni,             des alpes et des jura,” Bull Soc Vaudoise Sci Nat, vol. 37, pp. 547–579,
+                      and P. Liang, “Lost in the middle: How language models use long                    1901.
+                      contexts,” Trans. Assoc. Comput. Linguistics, vol. 12, pp. 157–173,           [23] “Scip.” [Online]. Available: https://github.com/sourcegraph/scip
+                      2024. [Online]. Available: https://doi.org/10.1162/tacl\ a\ 00638             [24] R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon,
+                  [9] P. Xu, W. Ping, X. Wu, L. McAfee, C. Zhu, Z. Liu, S. Subramanian,                  and C. Finn, “Direct preference optimization: Your language
+                      E. Bakhturina, M. Shoeybi, and B. Catanzaro, “Retrieval meets                      model is secretly a reward model,” in Advances in Neural
+                      long context large language models,” in The Twelfth International                  Information Processing Systems 36: Annual Conference on Neural
+                      Conference on Learning Representations, ICLR 2024, Vienna, Austria,                Information Processing Systems 2023, NeurIPS 2023, New Orleans,
+                      May 7-11, 2024. OpenReview.net, 2024. [Online]. Available: https:                  LA, USA, December 10 - 16, 2023, A. Oh, T. Naumann,
+                      //openreview.net/forum?id=xw5nxFWMlo                                               A. Globerson, K. Saenko, M. Hardt, and S. Levine, Eds., 2023.
+                 [10] Y. Wang, D. Guo, J. Chen, R. Zhang, Y. Ma, and Z. Zheng, “Rlcoder:                 [Online]. Available: http://papers.nips.cc/paper\ files/paper/2023/hash/
+                      Reinforcement learning for repository-level code completion,” CoRR,                a85b405ed65c6477a4fe8302b5e06ce7-Abstract-Conference.html
+                      vol. abs/2407.19487, 2024.                                                    [25] X. Lai, Z. Tian, Y. Chen, S. Yang, X. Peng, and J. Jia, “Step-
+                 [11] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,                    dpo: Step-wise preference optimization for long-chain reasoning
+                      M. Marone, C. Akiki, J. Li, J. Chim, Q. Liu, E. Zheltonozhskii,                    of llms,” CoRR, vol. abs/2406.18629, 2024. [Online]. Available:
+                      T. Y. Zhuo, T. Wang, O. Dehaene, M. Davaadorj, J. Lamy-Poirier,                    https://doi.org/10.48550/arXiv.2406.18629
+                      J. Monteiro, O. Shliazhko, N. Gontier, N. Meade, A. Zebaze, M. Yee,           [26] Y. Wu, Z. Sun, H. Yuan, K. Ji, Y. Yang, and Q. Gu, “Self-play
+                      L. K. Umapathi, J. Zhu, B. Lipkin, M. Oblokulov, Z. Wang, R. M.                    preference optimization for language model alignment,” CoRR, vol.
+                      V, J. Stillerman, S. S. Patel, D. Abulkhanov, M. Zocca, M. Dey,                    abs/2405.00675, 2024. [Online]. Available: https://doi.org/10.48550/
+                      Z. Zhang, N. Moustafa-Fahmy, U. Bhattacharyya, W. Yu, S. Singh,                    arXiv.2405.00675
+                      S. Luccioni, P. Villegas, M. Kunakov, F. Zhdanov, M. Romero, T. Lee,          [27] A. Yang, B. Yang, B. Hui, B. Zheng, B. Yu, C. Zhou, C. Li, C. Li,
+                      N. Timor, J. Ding, C. Schlesinger, H. Schoelkopf, J. Ebert, T. Dao,                D. Liu, F. Huang, G. Dong, H. Wei, H. Lin, J. Tang, J. Wang,
+                      M. Mishra, A. Gu, J. Robinson, C. J. Anderson, B. Dolan-Gavitt,                    J. Yang, J. Tu, J. Zhang, J. Ma, J. Yang, J. Xu, J. Zhou, J. Bai,
+                      D. Contractor, S. Reddy, D. Fried, D. Bahdanau, Y. Jernite, C. M.                  J. He, J. Lin, K. Dang, K. Lu, K. Chen, K. Yang, M. Li, M. Xue,
+                      Ferrandis, S. Hughes, T. Wolf, A. Guha, L. von Werra, and H. de Vries,             N. Ni, P. Zhang, P. Wang, R. Peng, R. Men, R. Gao, R. Lin, S. Wang,
+                      “Starcoder: may the source be with you!” CoRR, vol. abs/2305.06161,                S. Bai, S. Tan, T. Zhu, T. Li, T. Liu, W. Ge, X. Deng, X. Zhou,
+                      2023. [Online]. Available: https://doi.org/10.48550/arXiv.2305.06161               X. Ren, X. Zhang, X. Wei, X. Ren, X. Liu, Y. Fan, Y. Yao, Y. Zhang,
+                 [12] V. Sharan, S. M. Kakade, P. Liang, and G. Valiant, “Prediction                     Y. Wan, Y. Chu, Y. Liu, Z. Cui, Z. Zhang, Z. Guo, and Z. Fan,
+                      with a short memory,” in Proceedings of the 50th Annual ACM                        “Qwen2 technical report,” CoRR, vol. abs/2407.10671, 2024. [Online].
+                      SIGACT Symposium on Theory of Computing, STOC 2018, Los                            Available: https://doi.org/10.48550/arXiv.2407.10671
+                      Angeles, CA, USA, June 25-29, 2018, I. Diakonikolas, D. Kempe, and            [28] “Trl.” [Online]. Available: https://github.com/huggingface/trl
+                      M. Henzinger, Eds. ACM, 2018, pp. 1074–1087. [Online]. Available:             [29] “Deepspeed ai.” [Online]. Available: https://www.deepspeed.ai/2021/03/
+                      https://doi.org/10.1145/3188745.3188954                                            07/zero3-offload.html
+                 [13] S. Sun, K. Krishna, A. Mattarella-Micke, and M. Iyyer, “Do                    [30] T. Dao, “Flashattention-2: Faster attention with better parallelism
+                      long-range language models actually use long-range context?” in                    and work partitioning,” in The Twelfth International Conference
+                      Proceedings of the 2021 Conference on Empirical Methods in                         on Learning Representations, ICLR 2024, Vienna, Austria, May
+                      Natural Language Processing, EMNLP 2021, Virtual Event / Punta                     7-11, 2024. OpenReview.net, 2024. [Online]. Available: https:
+                      Cana, Dominican Republic, 7-11 November, 2021, M. Moens,                           //openreview.net/forum?id=mZn2Xyh9Ec
+                      X. Huang, L. Specia, and S. W. Yih, Eds. Association for                      [31] M. Finlayson, J. Hewitt, A. Koller, S. Swayamdipta, and A. Sabharwal,
+                      Computational Linguistics, 2021, pp. 807–822. [Online]. Available:                 “Closing the curious case of neural text degeneration,” in The Twelfth
+                      https://doi.org/10.18653/v1/2021.emnlp-main.62                                     International Conference on Learning Representations, ICLR 2024,
+                 [14] Y. Ding, Z. Wang, W. U. Ahmad, H. Ding, M. Tan, N. Jain, M. K.                     Vienna, Austria, May 7-11, 2024. OpenReview.net, 2024. [Online].
+                      Ramanathan, R. Nallapati, P. Bhatia, D. Roth, and B. Xiang, “Cross-                Available: https://openreview.net/forum?id=dONpC9GL1o
+
+
+
+
+                                                                                                 1488
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+                 [32] E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang,
+                      and W. Chen, “Lora: Low-rank adaptation of large language models,”
+                      in The Tenth International Conference on Learning Representations,
+                      ICLR 2022, Virtual Event, April 25-29, 2022. OpenReview.net, 2022.
+                      [Online]. Available: https://openreview.net/forum?id=nZeVKeeFYf9
+                 [33] D. Biderman, J. Portes, J. J. G. Ortiz, M. Paul, P. Greengard, C. Jennings,
+                      D. King, S. Havens, V. Chiley, J. Frankle et al., “Lora learns less and
+                      forgets less,” Transactions on Machine Learning Research, 2024.
+                 [34] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei,
+                      N. Bashlykov, S. Batra, P. Bhargava, S. Bhosale et al., “Llama
+                      2: Open foundation and fine-tuned chat models,” arXiv preprint
+                      arXiv:2307.09288, 2023.
+                 [35] A. Lozhkov, R. Li, L. B. Allal, F. Cassano, J. Lamy-Poirier, N. Tazi,
+                      A. Tang, D. Pykhtar, J. Liu, Y. Wei, T. Liu, M. Tian, D. Kocetkov,
+                      A. Zucker, Y. Belkada, Z. Wang, Q. Liu, D. Abulkhanov, I. Paul, Z. Li,
+                      W. Li, M. Risdal, J. Li, J. Zhu, T. Y. Zhuo, E. Zheltonozhskii, N. O. O.
+                      Dade, W. Yu, L. Krauß, N. Jain, Y. Su, X. He, M. Dey, E. Abati, Y. Chai,
+                      N. Muennighoff, X. Tang, M. Oblokulov, C. Akiki, M. Marone, C. Mou,
+                      M. Mishra, A. Gu, B. Hui, T. Dao, A. Zebaze, O. Dehaene, N. Patry,
+                      C. Xu, J. J. McAuley, H. Hu, T. Scholak, S. Paquet, J. Robinson, C. J.
+                      Anderson, N. Chapados, and et al., “Starcoder 2 and the stack v2: The
+                      next generation,” CoRR, vol. abs/2402.19173, 2024.
+                 [36] K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu, “Bleu: a method for
+                      automatic evaluation of machine translation,” in Proceedings of the 40th
+                      annual meeting of the Association for Computational Linguistics, 2002,
+                      pp. 311–318.
+                 [37] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan,
+                      H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri,
+                      G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan,
+                      S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian,
+                      C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis,
+                      E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak,
+                      J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse,
+                      A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford,
+                      M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew,
+                      D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating
+                      large language models trained on code,” CoRR, vol. abs/2107.03374,
+                      2021.
+                 [38] D. Liao, S. Pan, X. Sun, X. Ren, Q. Huang, Z. Xing, H. Jin, and
+                      Q. Li, “$\mathbf{Aˆ{3}}$a3-codgen: A repository-level code gener-
+                      ation framework for code reuse with local-aware, global-aware, and
+                      third-party-library-aware,” IEEE Trans. Software Eng., vol. 50, no. 12,
+                      pp. 3369–3384, 2024.
+                 [39] W. Cheng, Y. Wu, and W. Hu, “Dataflow-guided retrieval augmentation
+                      for repository-level code completion,” in ACL (1). Association for
+                      Computational Linguistics, 2024, pp. 7957–7977.
+                 [40] L. A. Agrawal, A. Kanade, N. Goyal, S. K. Lahiri, and S. K. Rajamani,
+                      “Monitor-guided decoding of code lms with static analysis of repository
+                      context,” in NeurIPS, 2023.
+                 [41] Q. Guo, X. Li, X. Xie, S. Liu, Z. Tang, R. Feng, J. Wang, J. Ge, and
+                      L. Bu, “Ft2ra: A fine-tuning-inspired approach to retrieval-augmented
+                      code completion,” in ISSTA. ACM, 2024, pp. 313–324.
+                 [42] M. Sapronov and E. Glukhov, “On pretraining for project-level
+                      code completion,” in ICLR 2025 Third Workshop on Deep Learning
+                      for Code, 2025. [Online]. Available: https://openreview.net/forum?id=
+                      t9RN9WX4Ic
+                 [43] H. Zhao, J. Hui, J. Howland, N. Nguyen, S. Zuo, A. Hu, C. A.
+                      Choquette-Choo, J. Shen, J. Kelley, K. Bansal, L. Vilnis, M. Wirth,
+                      P. Michel, P. Choy, P. Joshi, R. Kumar, S. Hashmi, S. Agrawal,
+                      Z. Gong, J. Fine, T. Warkentin, A. J. Hartman, B. Ni, K. Korevec,
+                      K. Schaefer, and S. Huffman, “Codegemma: Open code models based
+                      on gemma,” CoRR, vol. abs/2406.11409, 2024. [Online]. Available:
+                      https://doi.org/10.48550/arXiv.2406.11409
+
+
+
+
+                                                                                                    1489
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 00:22:47 UTC from IEEE Xplore. Restriction
+

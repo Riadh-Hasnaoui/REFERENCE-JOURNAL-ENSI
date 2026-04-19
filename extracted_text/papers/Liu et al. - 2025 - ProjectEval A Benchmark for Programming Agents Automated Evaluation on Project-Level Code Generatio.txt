@@ -1,0 +1,1262 @@
+        ProjectEval: A Benchmark for Programming Agents Automated
+                 Evaluation on Project-Level Code Generation
+            Kaiyuan Liu1,2 , Youcheng Pan2 , Yang Xiang2 , Daojing He1 , Jing Li1
+                                   Yexing Du1,2 , Tianrun Gao3 ,
+                      1
+                        Harbin Institute of Technology, Shenzhen, China
+                             2
+                               Pengcheng Laboratory, Shenzhen, China
+                        3
+                          Harbin Institute of Technology, Harbin, China
+                         1171000408@stu.hit.edu.cn, daojinghehit@163.com, panych@pcl.ac.cn,
+
+
+                       Abstract                              was a base for many benchmarks. MBPP concen-
+                                                             trating on algorithm realization. In 2023, DS-1000
+    Recently, LLM agents have made rapid                     (Lai et al., 2023) was raised and represented a
+    progress in improving their programming ca-              new series of benchmarks, evaluating LLM agents
+    pabilities. However, existing benchmarks lack
+                                                             programming abilities of accessing the third-party
+    the ability to automatically evaluate from users’
+    perspective, and also lack the explainability of
+                                                             libraries or packages. In 2024, LLM-based pro-
+    the results of LLM agents’ code generation ca-           gramming agents developed rapidly, researchers
+    pabilities. Thus, we introduce ProjectEval, a            noticed that many of them can do project-level
+    new benchmark for LLM agents project-level               programming (Hong et al., 2024, Nguyen et al.,
+    code generation’s automated evaluation by sim-           2024). Therefore, project-level benchmarks came
+    ulating user interaction. ProjectEval is con-            out, they were SoftwareDev (Hong et al., 2024),
+    structed by LLM with human reviewing. It has             ProjectDev (Nguyen et al., 2024), SRDD (Qian
+    three different level inputs of natural languages
+                                                             et al., 2024), CASSD (Zhang et al., 2024a), and
+    or code skeletons. ProjectEval can evaluate
+    the generated projects by user interaction sim-          DevBench (Li et al., 2024a). These benchmarks
+    ulation for execution, and by code similarity            provided the methods evaluated agent’s code gen-
+    through existing objective indicators. Through           eration capabilities at the granularity level project.
+    ProjectEval, we find that systematic engineer-           However, only DevBench achieved automated
+    ing project code, overall understanding of the           evaluation using in-project test units, and the
+    project and comprehensive analysis capability            test-unit-evaluation was NOT a realistic method
+    are the keys for LLM agents to achieve practical
+                                                             in a production environment used by human
+    projects. Our findings and benchmark provide
+    valuable insights for developing more effective
+                                                             users. And, the other benchmarks still relied on
+    programming agents that can be deployed in               natural language tests, which usually required
+    future real-world production.1                           human judgment for correctness and efficiency.
+                                                             Moreover, only DevBench provided a table of
+1   Introduction                                             evaluation scores, but it lacked explainability.
+                                                                To bridge this gap, we propose ProjectEval, a
+The field of programming has seen significant ad-            novel benchmark tailored for automated evaluating
+vances with the rise of large language models                project-level programming tasks(missions) in this
+(LLMs), today the LLM agents can do many pro-                field. ProjectEval is designed to assess the abil-
+gramming works without the help of humans (Liu               ity of agents to tackle complex user-driven tasks
+et al., 2024). To evaluate the programming ability           with precision and adaptability. Unlike existing
+of GPT-2, Chen et al. (2021) raised the first pro-           benchmarks, ProjectEval emphasizes real-world
+gramming benchmark named HumanEval in 2021.                  usability by integrating automated test suites of
+HumanEval was also the first of the HumanEval-               user interaction simulation, parameter analysis,
+based benchmarks. In the last three years, more              and canonical solutions into a cohesive evaluation
+than 20 benchmarks had been raised manually or               pipeline. ProjectEval contains 20 real-world tasks
+automatically based on LLM. After HumanEval,                 with totally 284 testcases, and supports two task
+MBPP (Austin et al., 2021) came out which also               types: website-based projects and batch/console-
+                                                             based programs, with theoretical scalability to even
+       Corresponding authors
+    1
+      Dataset, code and constructed evaluation machine are   more complex, custom UI-based tasks. By lever-
+available at https://github.com/RyanLoil/ProjectEval/.       aging LLMs for generation, supplemented with
+                                                        20205
+                Findings of the Association for Computational Linguistics: ACL 2025, pages 20205–20221
+                       July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+                                                           Construction  Input Level         Evaluation     Pass@k #Tasks #Tests #LOC #Tokens
+    Benchmarks      Subject           Test Type
+                                                            Automated Checklist Skeleton Automated LLM-less Available
+SoftwareDev(2024) Execution             -                      %         %         %      -         -       %       70       -    191.6   6218.0
+ ProjectDev(2024) Execution Manual Checklist Reviewing         %         !         %      %         !       !       14    19.10     -     36818.0
+   SRDD(2024)     Checklist        LLM-Rating                  !         !         %      !         %       %      1200      -      -        -
+  CASSD(2024a) Execution Manual Checklist Reviewing            %         !         %      %         !       !       72     5.25   ≈240    21993.0
+ DevBench(2024a) Execution     Inside Project Test Units       %         %         %      !         !       !       22    10.18 377.8     1298.3
+ ProjectEval(ours) Execution User Interaction Simulation       a         !         !      !         !       !       20     14.2 402.20    2972.0
+
+
+Table 1: Summary of Existing Project Level Benchmarks. #Tasks: number of tasks, #Tests: average number of
+testcase in each task, #LOC: average lines of code in the canonical answer, #Tokens: average number of tokens
+of code in the canonical answer. a: Our benchmark is constructed by GPT-4o with human reviewing and editing,
+which is semi-automated. -:SoftwareDev does not contain any evaluation.
+
+
+manual reviewing, ProjectEval ensures robust and                             to become agents through agent designs of CoT,
+detailed evaluation metrics.                                                 ReAct or Reflextion. Some researchers have de-
+   We introduce the core structure and evaluation                            veloped LLM agents. ChatDev (Qian et al., 2024)
+process of ProjectEval, highlight the challenges                             presents a diffusion-based model combining large
+faced by state-of-the-art models such as Gemma-2                             language models with image decoders, advancing
+and GPT-4o, and demonstrate the benchmark’s abil-                            text-to-image generation. AgileCoder (Nguyen
+ity to test comprehensive capabilities through pass                          et al., 2024) introduces multi-agent Agile role as-
+rate (Pass@K) and existing algorithms. Our goal                              signments for efficient, collaborative software de-
+is to establish a more effectively, and more explain-                        velopment, while MetaGPT (Hong et al., 2024)
+able new standard for automated evaluating project                           encodes workflows into prompt sequences for struc-
+code quality. We summarize the contributions of                              tured multi-agent task management. Besides some
+this work as follow:                                                         large multimodal reasoning models also have the
+                                                                             abilities to generate codes (Li et al., 2025).
+    • User-Centric Project-level Benchmark: Pro-
+      jectEval fills the gap in existing benchmarks
+                                                                             2.2       Benchmarks for Code Generation
+      by offering a user-focused framework with
+      real-world applicability with comprehensive                            Table 2 provides a detailed summary of existing
+      and project-level metrics. It supports website                         benchmarks in the programming domain, and cat-
+      and batch/console-based projects.                                      egorize them into six groups: exploratory bench-
+    • Enhancing the Agent Code Generation Ex-                                marks before 2020, HumanEval-based benchmarks
+      plainability by Three Different Level Inputs:                          (Chen et al. 2021,Liu et al. 2023, Hao et al. 2022,
+      Three different level inputs integrating three                         Peng et al. 2024, Athiwaratkun et al. 2023), MBPP-
+      kinds of objective indicators and pass rate,                           based benchmarks (Austin et al. 2021, Peng et al.
+      ProjectEval ensures precise, adaptable evalua-                         2024, Hendrycks et al. 2021, Huang et al. 2024,
+      tion and enhances the result explainability.                           Jain et al. 2024, Li et al. 2023, Li et al. 2022),
+    • Automated Evaluation Testsuites: ProjectEval                           DS-based benchmarks (Lai et al. 2023, Du et al.
+      realizes the automated evaluation from user                            2023, Zhang et al. 2024b), problem understand-
+      perspective in website tasks and batch/con-                            ing benchmarks, and those focused on specific do-
+      sole tasks through simulating user interaction.                        mains or methods. With the development of LLM
+      This is a new low-cost method to evaluate the                          and agents, the benchmarks are gradually moving
+      code generation capabilities of agents.                                toward higher granularity level. The project-level
+                                                                             is the last and highest level of programming. The
+2    Related Works                                                           project-level benchmarks, which are the primary
+                                                                             focus of our research, comprehensively evaluate
+2.1 LLM-Based Coding Agents                                                  the process of transforming an initial idea into a
+There are many code LLMs to date, e.g. StarCoder,                            complete project.
+InCoder, WizardCoder, CodeGen and etc. How-                                     There are currently five benchmarks in this cate-
+ever, only the NL-i/o-available models could be-                             gory, see Table 1 for the differences. In summary,
+come programming agents as the instruction of an                             all project-level benchmarks can’t evaluate auto-
+agent-level mission used to be natural language.                             matically except DevBench and our ProjectEval.
+Without NL input ability, the LLMs are really hard                           Except ours, all benchmarks don’t provide a multi-
+                                                                       20206
+                                                                                              Granularity
+       Benchmark         Language        Construction   Evaluation        Source                          #Tasks #Tests #LOC #Tokens Input Information
+                                                                                                Level
+                                                                     HumanEval-based
+  HumanEval (2021)        Python            Manual      Automated      Original                Function     164    7.7   11.5   24.4     NL+ Signature
+Multi-HumanEval(2023)     Multiple          Manual      Automated HumanEval & Original         Function     164    7.7   11.5   24.4     NL+ Signature
+                                                                       MBPP-based
+       MBPP(2021)          Python          Manual       Automated        Original              Function     974    3.0  6.8      24.2         NL
+    CodeContests(2022)   Python, C++      Automated     Automated      Contest Sites          Competitive   165   203.7 59.8    184.8   NL + Example I/O
+                                                                        DS-based
+     DS-1000(2023)         Python         Automated     Automated     Stack Overflow           Statement    1000 1.6   3.8       12.8           NL
+    CoderEval(2024b)     Python, Java     Automated     Automated         Github               Function     230 N/A 30.0        108.2     NL + Signature
+    SWEBench(2024)         Python         Automated     Automated          PyPI                 Commit      2294 120.8 32.8     ≈200    Issue + Repository
+    ClassEval (2023)       Python          Manual       Automated     PyPI + Original            Class       100 33.1 45.7      123.7     Class Skeleton
+                                                                Granularity Level - Project
+       SRDD (2024)        Python          Automated     Automated      Original                 Project     1200 N/A N/A     N/A            NL
+      CASSD (2024a)       Python           Manual        Manual        Original                 Project      72  5.25 ≈240 21993.0          NL
+    SoftwareDev(2024)     Multiple         Manual          N/A         Original                 Project      70  N/A 191.6 6218.0           NL
+     ProjectDev(2024)     Multiple         Manual        Manual        Original                 Project      14  19.1 N/A 36818.0           NL
+     DevBench(2024a)      Multiple         Manual       Automated      Original                 Project      22 10.18 377.8 1298.3          NL
+                                                                   SoftwareDev &                                                    NL+ Class Skeleton
+    ProjectEval (ours)     Python       Semi-automated Automated                                Project     20    14.2 402.2 2972.0
+                                                                 ProjectDev & Origin                                                /Function Skeleton
+
+
+Table 2: Summary of Existing Benchmarks for Code Generation. #Tasks: number of tasks, #Tests: average number
+of testcase in each task, #LOC: average lines of code in the canonical answer, #Tokens: average number of tokens
+of code in the canonical answer. N/A: This benchmark doesn’t involve this item. Part of this table is referred from
+Du et al.’s (2023). Other categories are in Appendix C.
+
+
+level inputs. Compared with DevBench, we have                                            Checklist): In this level, the agent will re-
+more testcases, and our tasks (missions) are compli-                                     ceive a standard natural language checklist de-
+cate than DevBench as more lines of code and more                                        scribing the project through the abilities and
+tokens. Besides, existing project-level benchmarks                                       functions that the project should have.
+use the test units, manual checklist reviewing or                                      • Level 3 – Skeleton: In this level, the agent
+LLM-scoring directly from the tested library or                                          will receive a skeleton of the standard answer.
+framework to complete the evaluation, rather than                                        This skeleton contains doc-strings and com-
+actually compiling and executing the project and                                         ments to describe the project inside.
+checking in users’ perspective.
+   For other based benchmarks, see Table 2 for                                  A mission test suite will contain two parts (See
+brief and Appendix C for full version.                                          example in Figure 1 orange part):
+
+                                                                                       • Testcodes: a mission contains several auto-
+3      ProjectEval Benchmark
+                                                                                         mated evaluation Python functions similar to
+3.1 Benchmark Format                                                                     HumanEval testcases. But, these testcodes are
+                                                                                         prohibited using test unit inside the technical
+A standard ProjectEval mission will have three                                           stack but using user simulation by operating
+parts: Inputs, Test Suite and Canonical Solution.                                        UI to test the project generated by agents.
+Figure 1 shows an example structure of a standard
+                                                                                       • Parameter Description (PD): usually, every
+ProjectEval mission.
+                                                                                         testcode has a matching parameter descrip-
+  As for the inputs, there are three different input
+                                                                                         tions. PD is used for a special kind of parame-
+types named Level for the test in each mission for
+                                                                                         ter alignment. These parameters are required
+the agent to achieve the target in ProjectEval (See
+                                                                                         by the matching testcode to achieve the es-
+example in Figure 1 purple part):
+                                                                                         tablished test goal(s), e.g. in Figure 1, the
+      • Level 1 - Natural Language Prompt (NL                                            “test_url” is the URL of the page which can
+        Prompt): In this level, the agent will receive                                   show all the “tasks” that are required by the
+        one or several natural language sentences to                                     testcodes. PD is similar with a user manual
+        describe the target of the project. The agent                                    given by developers to guide users to accom-
+        will create the entire project ONLY based on                                     plish what they want to do - that is, the main
+        these sentences.                                                                 evaluation concept we designed: evaluation
+      • Level 2 – Natural Language Checklist (NL                                         based on the user’s perspective.
+                                                                         20207
+                                                                       Input
+                                                                                                                                  guage descriptions, which is Level 1 NL Prompt. 7
+                     Level 1 NL Prompt - Source:        MetaGPT ,                     and original.
+                      Create a website for a Todo application, additional chart for analysis will be better.                      of them are sourced from SoftwareDev (Hong et al.,
+                     Level 2 NL Checklist - Generated by LLM with manual reviewing
+                                                                                                                                  2024) and ProjectDev (Nguyen et al., 2024) while
+                        "Page-Todo List":
+                           "Create New List": "Allows users to create a new Todo list",
+                                                                                                                                  others are created originally by us. Figure 2 purple
+                           "View Tasks":"Displays all tasks under a selected list",
+                                                                                                                                  part shows that these descriptions are sent to an
+                      Level 3 Skeleton - Generated by Masker module from Canonical Solution
+
+                       class TodoListView(ListView):
+                                                                                                                                  LLM, which generates a list of more detailed natu-
+                          def get_queryset(self):
+                              """
+                              Gets the list of TodoLists, updating their completion status.
+                                                                                                                                  ral language task descriptions. After manual review
+                              """
+                                                                                                                                  and modification, the refined version is referred as
+                                                                     Test Suite                                                   the Level 2 NL Checklist.
+                    Selenium Testcode - For Website mission
+                                                                                                                                     Testsuite: Figure 2 orange part shows that the
+                     def test_view_tasks(driver, test_url, selector_class_name):
+                                                                                                                                  NL Checklist is given into the LLM, which, from
+Mission (Project)
+
+
+
+
+                         driver.get(test_url)
+                         todo_list_selector = \
+                           driver.find_element(By.CLASS_NAME, selector_class_name)
+                         todo_list_selector.click()
+                         assert 'New List' in driver.title                                                                        a user testing perspective, generates test code.
+                      Parameter "test_url": "the url for test"
+                     Descriptions "selector_class_name": "the class name for a todo list selector"                                For website missions, the test code is mostly
+                    Console&File Testcode - For No-UI mission                                                                     implemented using the open-source testing li-
+                                                                                                                                  brary Selenium, which simulates user behav-
+                                                                                                         Parameters' values
+                      def test_move_player(direction, expected_output):                                  will be reasoned by
+                          stdout = _subprocess.send_command("cd "+direction)                             agent based on
+
+                                                                                                                                  ior in a browser to interact with websites. For
+                          assert utils.string_similarity(expected_output, stdout)                        description and
+                                                                                                         given solution
+                        Parameter "direction": "A destination name..."
+                       Descriptions "expected_output": " ... wrong selection..."
+                                                                                                                                  batch/console tasks, the test code typically uses
+                                                                Canonical Solution                                                Python’s subprocess module to mimic user inter-
+                     Canonical Parameter Values
+                                                                       Canonical Code: A reference solution generated by
+                                                                       LLM with manual reviewing passable to all the testcase     actions such as running commands and entering
+                    "test_url":
+                        "http://localhost:8000/todos/"
+                    "todo_list_selector_class_name":
+                                                                          Canonical Code                                          keyboard input. If the task involves file genera-
+                        "todo-list-selector"
+                                                                                                                                  tion, the test code utilizes dedicated open-source
+                                                                          # example_app/views.py
+                                                                          class TodoListView(ListView):
+                                                                              template_name = 'todo_list.html'
+
+                                                                                                                                  libraries to read and compare the similarity of the
+                                                                              model = TodoList
+                     Canonical Parameter Values
+                     "direction": "home"                                       def get_queryset(self):
+
+                                                                                                                                  generated file against a canonical file. For example,
+                     "expected_output":                                            ...
+                         "You are now in \\home\n"                                 return queryset
+
+                    Canonical Parameter Values: the standard answer correspond to Canonical Solution for the testcase.
+                    Note: every solution will have their own parameter values to getpass the testcase                             programs that generate Excel files are validated
+                                                                                                                                  using the Openpyxl library to compare with the
+Figure 1: A typical ProjectEval website mission, includ-                                                                          reference files. The test code often requires one or
+ing three different levels of input, a test suite, and a                                                                          more parameters to execute because the specifics of
+canonical solution. Notice that the upper test suite is the
+                                                                                                                                  the code generated by an agent—such as variable
+test suite used in website mission while the lower one is
+an example of console/file mission test suite.                                                                                    names, function names, class names, and output
+                                                                                                                                  file names—are unpredictable. To address this, the
+                                                                                                                                  test code is input into the LLM to generate an addi-
+Finally, every mission we constructed has a canon-                                                                                tional Parameter Description (PD), which provides
+ical solution, beside the canonical code, we also                                                                                 a natural language explanation of the parameters
+build every PD’s standard answer matching to the                                                                                  needed by the test code. The PD, along with the
+canonical code called canonical parameter values                                                                                  test code, constitutes the Test Suite.
+(See example in Figure 1 red part). In addition, we                                                                                  Canonical Solution: Simultaneously, in Fig-
+categorized tasks into “easy”, “medium”, “hard”,                                                                                  ure 2 red part, the NL Checklist is put into another
+and “human” based on code volume and human-                                                                                       LLM thread to generate a temporary project skele-
+reviewed complexity. However, since results show                                                                                  ton, which is then fed back into the LLM to infer
+no distinction, we won’t elaborate further.                                                                                       and generate Canonical Code (CNC). Practical re-
+   We give the agent missions by JSON format                                                                                      sults show that while most of the code can’t be
+directly embedded into their prompt and asked                                                                                     use directly, a little of the LLM-generated code is
+the same format output, which we consider as a                                                                                    mostly correct, but it often requires manual correc-
+very important ability of code generation.                                                                                        tions to form the true canonical code. This process
+                                                                                                                                  aligns with the findings of AgileCoder experiments
+3.2 Construction Process                                                                                                          partially. A human reviewer is asked for checking
+The construction process of ProjectEval is rela-                                                                                  the CNC to confirm that it is runnable and meets
+tively complex (See Appendix A for the complete                                                                                   the requirements of the Checklist. By inputting
+version ProjectEval process and structure diagram).                                                                               the PD and CNC into the LLM and applying mini-
+   Level 1 NL Prompt & Level 2 NL Checklist:                                                                                      mal manual adjustments, Canonical Parameter Val-
+There are initial 20 tasks (missions) in ProjectEval                                                                              ues (CPV) are obtained. Together, CPV and CNC
+that are manually edited into concise natural lan-                                                                                are the Canonical Solution (CNS). When the CNS
+                                                                                                                               20208
+        Source                             Input                                                   Test Suite
+
+
+                              Level 1                    Level 2                                                Parameters
+                                                                                       Testcode
+       ProjectDev            NL Prompt                 NL Checklist                                             Description
+
+
+
+
+         MetaGPT               Level 3                 Temporary
+      SoftwareDev             Skeleton                  Skeleton
+
+                                                                                             Canonical Solution
+
+                                            Human
+                                                                                                                Canonical
+      ProjectEval                          Reviewing                                   Canonical
+                              Masker                                                                            Parameter
+        Original                            GPT-4o                                       Code
+                                                                                                                 Values
+                                           Reasoning
+
+
+
+
+Figure 2: Construction of ProjectEval. Testcode is aligned with Checklist. Parameter Description is aligned with
+Testcode and Canonical Parameter Values. Canonical Parameter Values is aligned with Canonical Code and use for
+testcode to get passed.
+
+
+is input into the ProjectEval testing controller, it             Parts                             Method                      Type
+achieves a perfect score, i.e., Pass@K = 100%.
+                                                                                     Sentence Transformer (2020) Maximum
+   Level 3 Skeleton: Finally, the CNC is processed               Level 2 Checklist
+                                                                                       + Jonker Volgenant (1987)
+through a Masker (which could be a regex-based
+                                                                                          CodeBLEU (2020)                     Maximum
+program or an LLM) to replace function bodies,                   Level 3 Skeleton
+class bodies, and critical HTML tag content with                                          + Jonker Volgenant
+
+functional description comments. This produces                   Code                CodeBLEU + Jonker Volgenant Maximum
+
+a test skeleton that can evaluate LLMs without                   Parameters Values    Levenshtein Distance (1966)             Average
+
+natural language generation capabilities, referred
+                                                               Table 3: ProjectEval Objective Indicators. Four addi-
+to as the Level 3 Skeleton.
+                                                               tional objective similarity evaluation methods to evalu-
+   All CNC are programmed in Python but Project-               ate the performance of each parts individually.
+Eval theoretically supports any programming
+language as we evaluate the LLM through users’
+perspective. It may need researchers compile the
+                                                               cess is equivalent to disassembling the CoT of LLM
+LLM-generated program in advance. The total cost
+                                                               agents to a certain extent, thereby enhancing the
+of construction process with GPT-4o is $2.95 and
+                                                               explanabilities of the pass rate results.
+the human reviewing cost is $420 by hiring a third-
+party company with contract.                                      Therefore, we introduces four additional objec-
+                                                               tive similarity evaluation methods to evaluate the
+3.3 Evaluation Process                                         performance of four parts individually (See Ta-
+The evaluation process begins by selecting a spe-              ble 3). As a Level 2 Checklist consists of multi-
+cific level from the input and presenting it to the            ple independent natural language sentences, which
+agent (See Figure 3). The agent can use any de-                cannot be considered a cohesive document, after
+signs or methods to solve the inputs and generate              calculating the similarity between each sentence
+Solution Code (Code). The Code is then fed back                in the canonical Checklist and the test Check-
+into the same agent along with the PD. The agent               list using Sentence Transformers (Reimers and
+is tasked with answering the parameter description             Gurevych, 2020), the Jonker-Volgenant algorithm
+based on its own generated Code to produce Param-              (1987) is employed to determine the optimal match-
+eter Values (PV). The Code is then converted into              ing scheme, from which an overall matching score
+an executable file, creating a tangible project in a           is derived. Since both the Level 3 Skeleton and the
+sandbox environment. This project, together with               answer are written as code, existing code evaluation
+the testcode with PV substituted, is integrated into           tools like CodeBLEU (Ren et al., 2020) are used
+the ProjectEval evaluation machine to obtain the               to compute BLEU scores by considering structure
+evaluation results which is also done in a sandbox.            similarity. The Skeleton and Code have the rect-
+   Since we have different level inputs, we can com-           angular linear sum assignment problems same as
+pare the similarity of the generated results at each           Checklist, so Jonker-Volgenant is also used in these
+level and obtain the score for each step. This pro-            parts. Parameter Values are typically short, often
+                                                       20209
+    Input - Level X                                                                                                   Answer
+
+     e.g. Level 1: Create a website for a Todo application, additional chart ...
+                                                                                                   Code                                                     File Writer                                     Executor
+                                                                                                   # example_app/views.py
+                                                                                                   class TodoListView(ListView):
+                                        Test Suite                                  Can use any        template_name = 'todo_list.html'                                       Executable File(s)
+                                                                                                       model = TodoList
+                                                                                      designs
+      Parameter Descriptions                                                       and/or tricks       def get_queryset(self):                                                  ProjectEval
+                                                                                                           queryset = TodoList.objects.all()                 Random
+      "test_url": "the url for test"
+      "selector_class_name":
+                                                                                                           for todolist in queryset:                        Test Data
+                                                                                                    ...
+          "the class name for a todo list selector"
+
+
+     Selenium Testcode - For Website mission                                                       Parameter Values                                                                                         Project
+     def test_view_tasks(driver, test_url, selector_class_name):                                   "test_url":
+         driver.get(test_url)                                                                          "http://localhost:8000/todos/"                     Test Functions
+                                                                                                   "todo_list_selector_class_name":                                                     Score
+         ...
+         assert 'New List' in driver.title                                                             "todo-list-selector"
+                                                                                                                                                                                        Report: {'total': 20, 'pass': 20,
+                                                                                                                                                                                        'failed': 0, 'score': 1.0}
+                                                                                                                         Substitute
+
+
+
+
+Figure 3: Evaluation Process of ProjectEval. The evaluation process begins by selecting a specific level from the
+input and presenting it to the agent. The agent generates solution code. The solution code is then fed back into the
+same agent along with the parameter description. The agent is tasked with answering the parameter description
+based on its own solution to produce parameter values (PV). The code is then converted into an executable file,
+creating a tangible project. PV is substitute to testcode, and testcode is integrated into the ProjectEval evaluation
+machine to obtain the evaluation results.
+
+
+consisting of single words, compound words, or                                                                    We also added 4 objective indicators mentioned
+simple URLs. Therefore, strings cosine similarity                                                              in Section 3.3 for each part which agents generated
+is directly used to measure their similarity.                                                                  mentioned in Table 3. ProjectEval will compute
+                                                                                                               these metrics in parallel with Pass@K.
+4         Experiments                                                                                             The total evaluation cost of Pass@5 with GPT-4o
+                                                                                                               is $28.02, average $5.60 for each round.
+4.1 Research Questions
+                                                                                                                                                 Cascade                           Direct
+Our experiments intend to answer the following                                                                  Model                                                                                          All Avg.
+                                                                                                                                        Level 1 Level 2 Avg. Level 1 Level 2 Level 3 Avg.
+research questions:                                                                                                                                Open-source AGI LLMs
+
+       • RQ1 (Overall Correctness): How do LLM                                                                  Llama-2-7B
+                                                                                                                Llama-3.1-7B
+                                                                                                                                          0.00
+                                                                                                                                          0.28
+                                                                                                                                                   0.07
+                                                                                                                                                   0.28
+                                                                                                                                                            0.04
+                                                                                                                                                            0.28
+                                                                                                                                                                      0.28
+                                                                                                                                                                      0.14
+                                                                                                                                                                                0.00
+                                                                                                                                                                                0.28
+                                                                                                                                                                                           0.07
+                                                                                                                                                                                           0.42
+                                                                                                                                                                                                      0.12
+                                                                                                                                                                                                      0.28
+                                                                                                                                                                                                                   0.08
+                                                                                                                                                                                                                   0.28
+         agents perform on ProjectEval benchmark?                                                               Llama-3.2-3B
+                                                                                                                Phi-3-14B
+                                                                                                                                          0.21
+                                                                                                                                          0.00
+                                                                                                                                                   0.14
+                                                                                                                                                   0.00
+                                                                                                                                                            0.18
+                                                                                                                                                            0.00
+                                                                                                                                                                      0.14
+                                                                                                                                                                      0.00
+                                                                                                                                                                                0.00
+                                                                                                                                                                                0.00
+                                                                                                                                                                                           0.00
+                                                                                                                                                                                           0.00
+                                                                                                                                                                                                      0.05
+                                                                                                                                                                                                      0.00
+                                                                                                                                                                                                                   0.10
+                                                                                                                                                                                                                   0.00
+       • RQ2 (Cascade Generation & Direct Gener-                                                                Phi-4-14B
+                                                                                                                Gemma-7B
+                                                                                                                                          0.14
+                                                                                                                                          0.99
+                                                                                                                                                   0.56
+                                                                                                                                                   1.06
+                                                                                                                                                            0.35
+                                                                                                                                                            1.02
+                                                                                                                                                                      1.76
+                                                                                                                                                                      0.56
+                                                                                                                                                                                1.13
+                                                                                                                                                                                0.63
+                                                                                                                                                                                           2.04
+                                                                                                                                                                                           0.49
+                                                                                                                                                                                                      1.64
+                                                                                                                                                                                                      0.56
+                                                                                                                                                                                                                   1.13
+                                                                                                                                                                                                                   0.75
+         ation): Do LLM agents performs better when                                                             Gemma-2-9B                1.69     1.06     1.37      1.34      0.56       0.63       0.85         1.06
+                                                                                                                Mistral-7B-v0.3           1.48     1.06     1.27      0.92      0.99       0.56       0.82         1.00
+         they generated level by level till answer code                                                                                            Code Generation LLMs
+         (i.e. cascade) than directly generate?                                                                 StarCoder-2-7B             -         -         -          -        -       0.00         -             -
+                                                                                                                CodeGemma                  -         -         -          -        -       1.20         -             -
+       • RQ3 (Basic LLM Selection): Which basic                                                                 CodeLlama                  -         -         -          -        -       0.77         -             -
+         LLM perform the best in the experiments and                                                                                               Close-source AGI LLMs
+
+         where it does better than the others?                                                                  GPT-3.5-turbo
+                                                                                                                GPT-4o
+                                                                                                                                          2.39
+                                                                                                                                          8.52
+                                                                                                                                                   2.46 2.43 1.97
+                                                                                                                                                   12.32 10.42 16.06
+                                                                                                                                                                                2.39
+                                                                                                                                                                                15.42
+                                                                                                                                                                                          5.28 3.22
+                                                                                                                                                                                          10.14 13.87
+                                                                                                                                                                                                                   2.90
+                                                                                                                                                                                                                  12.49
+       • RQ4 (Step by Step Performance): How do                                                                 Gemini 1.5 pro            7.82     7.39 7.61 5.28               4.51      8.24 6.01                6.65
+                                                                                                                Gemini 2.0-flash          3.24     3.59 3.42 3.52               3.45      7.75 4.91                4.31
+         LLM agents performs on each part of Pro-                                                               Avg.                      2.23     2.50     2.37      2.66      2.45       2.51       2.69         2.56
+         jectEval benchmark?
+                                                                                                               Table 4: ProjectEval Result Pass@5. ProjectEval is hard
+For the basic LLM selection and settings part, see
+                                                                                                               for recent LLM agents to get pass. GPT-4o has the best
+Appendix B for the details.                                                                                    score. See Appendix F for Pass@K.
+
+4.2 Evaluation Metric
+Same as many benchmarks of HumanEval-based                                                                     5       Results
+and MBPP-based, we adapt the pass rate (Pass@K)
+for every LLM. We have average 14.2, totally 284                                                               5.1        RQ1: Overall Correctness
+testcases (including runnable as a testcase) to eval-                                                          Table 4 shows the overall correctness is low. The
+uate the correctness of Code generated by LLM                                                                  results are very similar to CoderEval(2024b) and
+(See Table 1 for all statistics). The percentage of                                                            Dev-Bench(2024a) as all agents are very unlikely
+test cases that passed is the final score that an LLM                                                          to make the project runnable (only 17.91% projects
+gains from ProjectEval. Notice that some of the                                                                in CoderEval’s result) and almost impossible to
+testcases are chain-reacted, as if the former one                                                              make every details correct in the project (lower
+fails, the followings will never get passed.                                                                   than 10% passed in DevBench’s result).
+                                                                                                     20210
+                                           Cascade                                                Direct
+ Model
+                              Level 1                       Level 2             Level 1        Level 2           Level 3
+                    CL       SK     Code     PV       SK     Code       PV    Code    PV    Code       PV      Code     PV
+                                                  Open-source AGI LLMs
+ Llama-2-7B         1.13    0.43    0.32    0.00     0.00    0.49      0.00    0.13 0.00     0.30     0.00      0.40   0.00
+ Llama-3.1-7B       3.61    2.60    1.41    0.33     1.92    1.99      0.68    1.92 0.68     1.84     0.39      4.74   0.54
+ Llama-3.2-3B       1.00    0.27    1.61    0.00     0.55    0.00      0.00    0.17 0.00     0.00     0.00      0.17   0.00
+ Phi-3-14B          5.62    1.69    1.37    0.44     1.14    0.88      0.00    0.30 0.00     0.00     0.00      0.29   0.00
+ Phi-4-14B          41.92   3.74    1.71    1.37     2.42    3.82      4.74   10.87 10.76    6.87     8.15     13.32   9.70
+ Gemma-7B           38.08   5.70    5.12    0.00     6.98    6.37      0.00    1.95 0.00     2.38     0.00      5.38   0.00
+ Gemma-2-9B         40.25   7.90    7.53    9.32     7.70    9.05      6.62    5.50 8.93     5.97     6.59      8.07   5.19
+ Mistral-7B-v0.3    4.20    7.12    8.73    9.74     7.03    7.48      7.14    6.37 6.16     6.80     7.45      7.81   7.23
+                                                  Code Generation LLMs
+ StarCoder-2-7B       -       -      -        -        -       -         -      -      -      -            -   0.00     0.00
+ CodeGemma            -       -      -        -        -       -         -      -      -      -            -   9.99    14.75
+ CodeLlama            -       -      -        -        -       -         -      -      -      -            -   5.44     0.99
+                                                  Production Code Agent
+ OpenHands*†          -       -      -        -        -       -         -    22.96 35.51     -            -     -       -
+                                                  Close-source AGI LLMs
+ GPT-3.5-turbo      38.33    8.82   13.73 38.46 12.56 13.55 42.30             13.27 37.73 13.91 41.19 34.19 39.21
+ GPT-4o             55.73   16.57   36.37 54.75 15.46 36.42 53.62             35.18 51.75 33.10 50.16 53.01 62.69
+ Gemini 1.5 pro     49.48   14.01   31.96 18.15 15.22 31.04 25.62             15.97 9.99 24.32 22.05 46.51 27.90
+ Gemini 2.0-flash   51.85   16.08   20.63 6.61 17.63 22.02 11.53              26.39 10.46 24.99 13.39 41.89 19.40
+ Gemini 2.0-pro*    49.44   13.69   16.86 5.09 19.93 24.09 10.91               2.61 0.00 30.19 16.22 36.95 10.39
+ Average            29.28   7.59    11.34 11.10      8.35    12.09 12.55      9.28   10.50 11.59 12.74 16.76 12.37
+
+Table 5: ProjectEval Result Objective Indicators. Phi-4, the Gemmas and all close-source LLM agents have abilities
+to generate Checklist well, but only close-source LLM agents can do the Skeleton and Code well. CL: Checklist,
+SK: Skeleton, PV: Parameter Value. * We only test the Gemini-2.0-pro and OpenHands pass@1. †We used GPT-4o
+as Openhands’ based LLM.
+
+
+   Table 5 shows that most of the opensource-                         • Invalid Output Format: LLMs sometimes
+model agents cannot generate compilable project.                        produce outputs that do not conform to the
+We examine through Phi-4 and Gemma-2, they                              expected format. This is more common with
+have only 1 to 3 simple projects can be compiled                        the Llama series, potentially due to a lack of
+and run. Even if the close-source LLMs can hardly                       training data on formatted code and JSON.
+reach the 10% of ProjectEval standard, but the                        • Missing Essential Files: Essential files, such
+close-source LLM agents do better than the open-                        as manage.py in Django projects, are often
+source ones which is equivalent to 1 or 2 simple                        omitted. This may be because these files are
+projects get almost full scores.                                        considered basic and are therefore underrepre-
+   However, Table 5 shows that the Gemma,                               sented in training corpora which may more be
+Gemma-2 and Phi-4 do have the abilities on Check-                       focusing on function files and their problem.
+list generating as they have approximate score to                     • Omitted Content: LLMs frequently leave
+GPT-3.5-turbo, lower than GPT-4o and Geminis,                           sections blank or only comments. This may
+while the Llama series, Mistral and Phi-3 have very                     be due to the prevalence of community cor-
+low scores. The latter is caused by the lack of                         pora where answerers often leave custom parts
+JSON format adaptability.                                               blank for the questioner to fill in.
+  Both tables shows that Gemma-2 and Phi-4 may                        Additionally, the Code LLMs agents have almost
+have the same capability to GPT-3.5-turbo, but far                 no effective results can be produced. The reason
+more way to go for GPT-4o and Gemini-1.5-pro.                      may be that Skeleton only has natural language
+  We examine the logs of the LLMs and they                         descriptions, and it is difficult to fill in the whole
+shows that the typical failure cases are:                          framework without the context code.
+                                                            20211
+   We also test the current SOTA production coding        Also, this finding in ProjectEval Pass@5 is con-
+agent, the OpenHands (Wang et al., 2025), by using     flicted with the CodeBLEU result, as the latter’s
+GPT-4o as its based LLM. It shows that there were      cascade scores are higher than the direct scores no
+8 tasks that OpenHands agent did not finish (Task      matter it uses Level 1 or Level 2 input, both in Code
+2, 8, 10, 11, 14, 20 of AgentStuckInLoopError          and PV. This means even if CodeBLEU has consid-
+and Task 16, 17 of Not Complete) and lacks a lot       ered the structure, “details will determine success
+of optional features and pages. As ProjectEval’s       or failure”. For instance, we found that the GPT-
+tasks are origin and have no user interaction while    4o’s cascade generation did has better structure of
+the agents generate the code, it is acceptable that    the code but it just missed filling a path parameter
+OpenHands got lower scores than the source GPT-        and the result was fatal for the project.
+4o (See Appendix F), but it still beat the Gemini-        In summary, cascade generation is better than
+1.5-pro which indicates that coding agents may         direct generation, and ProjectEval execution pass
+have a better chance to pass ProjectEval.              rate is better than the similarity indicators as the
+   In summary, ProjectEval is hard for nowadays        latter cannot reflect the program execution effects.
+agents as only GPT-4o reach the Pass@5 of 15%.
+Open-source LLM agents are doing worse than the        5.3   RQ3: Basic LLM Selection
+close-source ones, and Code LLMs agents do not         The close-source LLM agents have better perfor-
+have the abilities to pass ProjectEval.                mance on ProjectEval than the open-source ones
+                                                       (See Table 4). GPT-4o are the SOTA of project
+5.2 RQ2: Cascade Generation & Direct                   generation under ProjectEval evaluation.
+    Generation                                            The first difference is the ability to generate sys-
+The average scores of objective indicators in Ta-      tematic project code based on natural language.
+ble 5 show that agents are doing better on cascade     From the objective indicators (Table 5), we find the
+generation than the direct generation with 2.06%       close-source LLM agents do better on skeleton and
+higher at Level 1 input. The cascade generation in     code generation, both GPT and Gemini can gener-
+a way mimics the CoT process and the ReAct de-         ate better skeleton reflecting well to the standard
+sign of an agent. It allows agents to re-examine the   code. We used GPT-4o as the ProjectEval’s data
+project development procedure and correct some er-     generation procedure base model but Gemini-1.5-
+rors. As for the core scores (Pass@K) of all LLMs,     pro reaches almost the same performance of GPT-
+they are too low to analyze. But we notice that the    4o. Thus, the reason may not be the familiarity
+Gemmas, Mistral, and Gemini-1.5-pro are doing          of GPT’s prompt. This suggests that close-source
+better in cascade generation.                          LLM agents may have better ability on reflecting
+   However, GPT-4o has higher scores when us-          the Checklist into a skeleton or framework. The
+ing direct generation mode rather than the cascade     Checklist and Skeleton’s Functions and/or Classes
+mode. So, we study a case, Project 3 – “Create a       are many-to-many relationship. It is a very compli-
+password generator”, of GPT-4o (See Appendix G).       cate mission for open-source LLM agents to solve.
+We resend all the input and output by order back to       Second, the over-all understanding of the project
+GPT-4o and ask the CoT of it. It shows that GPT-       and comprehensive analysis capabilities are also
+4o directly hits the files that need to be generated   very important for the LLM agents. Close-source
+when using the direct generation mode while it con-    LLM agents are doing well on all parts of the Pro-
+centrates more on the NL processing and analysis       jectEval inputs and the open-source LLM agents
+on cascade generation mode. This is an interesting     will have a better chance to get passed ProjectEval
+phenomenon, and we suspect that asking the LLM         when they have better performance on those parts.
+agents to generate according to the thought steps         Third, already mentioned in Section 5.1, the
+we set induces the LLM to tend to activate param-      LLM agents’ formatted output capabilities have
+eters about natural language rather than the more      huge influence. We ask all LLM agents to output
+important aspects of code generation.                  JSON format. All the close-source agents can do
+   This phenomenon does not affect ProjectEval’s       well compare with only Phi-4, Gemma and Gemma-
+evaluating capabilities as the cascade mode is not     2 have this capabilities of open-source agents. This
+for ProjectEval core functions as the standard Pro-    finding is important for research or engineering that
+jectEval score is evaluating the projects generated    requires the LLM Agent to be the controller, as they
+by asking the LLM only once.                           need to guarantee stable and regulated outputs.
+                                                  20212
+   In summary, the close-source LLM agents are          7    Limitation
+doing better on ProjectEval. GPT-4o are the SOTA
+of project generation under ProjectEval evaluation.         • Some projects, whether due to complexity or
+                                                              human-related difficulties, may follow com-
+5.4 RQ4: Step-by-Step Performance                             mon design patterns that do not align with
+Objective indicators can also show the step-by-step           Django, our primary technical stack.
+performance in cascade generation (See Table 5).            • The canonical answer right now only supports
+   Except the Llama series, from the cascade per-             Python language but in theory, any language
+spective, the LLM agents perform well in the field            that can be rendered and simulated can be
+of NL generation for Checklists, which is also                tested by the Test suite.
+one of its fundamental capabilities. In addition,           • JSON format is not universally compatible
+the Checklist itself includes an understanding of             with all LLMs. Some models might perform
+project prompts which means most LLMs agents                  better if they were allowed to generate out-
+also possess this capability.                                 put in their own format. However, permitting
+   When it comes to the Skeleton, we have already             this would compromise fairness and introduce
+mentioned the problem of many-to-many relation-               inconsistencies in output standards.
+ship question of Checklist and Skeleton. This is a          • CPV is based on the CNC, but the CNC may
+challenge for LLM agents to deal with. And Code               not the only answer for the project. This may
+generation is a traditional topic of LLM agents, Phi-         lead to some PV is correct for the reflected
+4 does better when it directly generates the code             code but will get lower score on Levenshtein
+from Level 1 rather than the cascade.                         Distance evaluation.
+   Parameter answering reflects the code under-         All these limitations will be solved in the future
+standing capability. Though, in ProjectEval, the        research if it is possible.
+score may highly connect with the Code genera-             Besides, the ProjectEval judge machine will au-
+tions but still may indicate that the capability of     tomatically run the project that generated by LLM
+LLM agents. When the code is effective, both open-      agents which may contain harmful code. This is a
+source and close-source LLM agents can explain          potential risk that we can’t fix. There are also some
+their own code, which confirms that LLM agents          issues that this work does not fully capture like
+have a strong ability to understand code. Specif-       software maintainability, efficiency, or best coding
+ically, it can identify the key statements needed       practices.
+from the PD as for ProjectEval questions.
+   In summary, LLM agents are best at generating        Acknowledgments
+Checklists than the other parts of ProjectEval.
+                                                        This work is supported by the National Science
+6   Conclusion                                          and Technology Innovation 2030 Major program
+                                                        (Grant No. 2024ZD01NL00101).
+We develop a new benchmark ProjectEval. It fills
+the gap for the lack of benchmark in the project
+granularity level code generation field of natural      References
+language processing and provides automated evalu-
+ation tools for higher-level research in LLM agent.     Ben Athiwaratkun, Sanjay Krishna Gouda, Zijian Wang,
+                                                          Xiaopeng Li, Yuchen Tian, Ming Tan, Wasi Uddin
+We also leverage additional objective metrics to          Ahmad, Shiqi Wang, Qing Sun, Mingyue Shang, Su-
+reveal the effectiveness of LLM agents at different       jan Kumar Gonugondla, Hantian Ding, Varun Ku-
+stages of project generation. These metrics are cru-      mar, Nathan Fulton, Arash Farahani, Siddhartha Jain,
+cial in revealing the capabilities for improvement        Robert Giaquinto, Haifeng Qian, Murali Krishna Ra-
+                                                          manathan, Ramesh Nallapati, Baishakhi Ray, Parmin-
+in the agents’ performance, thus offering a deeper        der Bhatia, Sudipta Sengupta, Dan Roth, and Bing
+understanding of how these models can be further          Xiang. 2023. Multi-lingual evaluation of code gener-
+enhanced. We confirmed that GPT-4o is still the           ation models. Preprint, arXiv:2210.14868.
+SOTA in this field. Our findings and benchmark
+                                                        Jacob Austin, Augustus Odena, Maxwell Nye, Maarten
+provide valuable insights for developing more ef-          Bosma, Henryk Michalewski, David Dohan, Ellen
+fective programming agents that can be deployed            Jiang, Carrie Cai, Michael Terry, Quoc Le, and
+in real-world production environments.                     Charles Sutton. 2021. Program synthesis with large
+                                                           language models. Preprint, arXiv:2108.07732.
+                                                   20213
+Mark Chen, Jared Tworek, Heewoo Jun, et al. 2021.         Nikita Jain, Ke Han, and Aiden Gu. 2024. Live-
+ Evaluating large language models trained on code.          codebench:    Holistic and contamination free
+ arXiv:2107.03374.                                          evaluation of large language models for code.
+                                                            arXiv:2403.07974.
+Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+  Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng           Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+  Sha, Xin Peng, and Yiling Lou. 2023. Classe-              sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  val: A manually-crafted benchmark for evaluating          de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  llms on class-level code generation. 2308.01861,          laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+  arXiv:2308.01861.                                         Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+                                                            Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+Google. 2023a. Gemini: Chat to supercharge your idea.       and William El Sayed. 2023. Mistral 7b. Preprint,
+                                                            arXiv:2310.06825.
+Google. 2023b. Gemma: Introducing new state-of-the-       Carlos E Jimenez, John Yang, Alexander Wettig,
+  art open models.                                          Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R
+                                                            Narasimhan. 2024. SWE-bench: Can language mod-
+Alex Gu, Baptiste Roziere, Hugh James Leather, Ar-          els resolve real-world github issues? In The Twelfth
+  mando Solar-Lezama, Gabriel Synnaeve, and Sida            International Conference on Learning Representa-
+  Wang. 2024. CRUXeval: A benchmark for code                tions.
+  reasoning, understanding and execution.
+                                                          R. Jonker and A. Volgenant. 1987. A shortest augment-
+Yiyang Hao, Ge Li, Yongqiang Liu, Xiaowei Miao,              ing path algorithm for dense and sparse linear assign-
+  He Zong, Siyuan Jiang, Yang Liu, and He Wei. 2022.         ment problems. Computers & Operations Research,
+  AixBench: A code generation benchmark dataset.            14(5):325–340.
+  arXiv:2206.13179.
+                                                          Yuhang Lai, Chengxi Li, Yiming Wang, Tianyi Zhang,
+Dan Hendrycks, Steven Basart, and Saurav Kadavath.          Ruiqi Zhong, Luke Zettlemoyer, Wen-Tau Yih,
+  2021. Measuring coding challenge competence with          Daniel Fried, Sida Wang, and Tao Yu. 2023. DS-
+  apps. In Advances in Neural Information Processing        1000: A natural and reliable benchmark for data sci-
+  Systems.                                                  ence code generation. In Proceedings of the 40th
+                                                            International Conference on Machine Learning, vol-
+                                                            ume 202 of Proceedings of Machine Learning Re-
+Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu
+                                                            search, pages 18319–18345. PMLR.
+   Zheng, Yuheng Cheng, Jinlin Wang, Ceyao Zhang,
+   Zili Wang, Steven Ka Shing Yau, Zijuan Lin, Liyang     Vladimir I. Levenshtein. 1966. Binary codes capable of
+   Zhou, Chenyu Ran, Lingfeng Xiao, Chenglin Wu,            correcting deletions, insertions, and reversals. Soviet
+   and Jurgen Schmidhuber. 2024. MetaGPT: Meta pro-         physics doklady, 10(8):707–710.
+   gramming for a multi-agent collaborative framework.
+   In The Twelfth International Conference on Learning    Bowen Li, Wenhan Wu, Ziwei Tang, Lin Shi, John
+   Representations.                                         Yang, Jinyang Li, Shunyu Yao, Chen Qian, Binyuan
+                                                            Hui, Qicheng Zhang, Zhiyin Yu, He Du, Ping
+Dong Huang, Yuhao Qing, Weiyi Shang, Heming Cui,            Yang, Dahua Lin, Chao Peng, and Kai Chen. 2024a.
+  and Jie Zhang. 2024. EFFIBENCH: Benchmarking              Prompting large language models to tackle the
+  the efficiency of automatically generated code. In        full software development lifecycle: A case study.
+  NeurIPS 2024.                                             arXiv:2403.08604.
+
+Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit, Miltiadis      Jia Li, Ge Li, Xuanming Zhang, Yihong Dong, and
+  Allamanis, and Marc Brockschmidt. 2020. Code-              Zhi Jin. 2024b. Evocodebench: An evolving code
+  searchnet challenge: Evaluating the state of semantic      generation benchmark aligned with real-world code
+  code search. arXiv:1909.09436.                             repositories. arXiv:2404.00599.
+                                                          Rongao Li, Jie Fu, Bo-Wen Zhang, Tao Huang, Zhihong
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and         Sun, Chen Lyu, Guang Liu, Zhi Jin, and Ge Li. 2023.
+   Luke Zettlemoyer. 2018a. Mapping language to code        Taco: Topics in algorithmic code generation dataset.
+   in programmatic context. In Proceedings of the 2018      arXiv:2312.14852.
+   Conference on Empirical Methods in Natural Lan-
+   guage Processing, pages 1643–1652, Brussels, Bel-      Yujia Li, David Choi, Junyoung Chung, Nate Kush-
+   gium. Association for Computational Linguistics.         man, Julian Schrittwieser, Rémi Leblond, Tom Ec-
+                                                            cles, James Keeling, Felix Gimeno, Agustin Dal
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and         Lago, Thomas Hubert, Peter Choy, Cyprien de Mas-
+   Luke Zettlemoyer. 2018b. Mapping language to code        son d’Autume, Igor Babuschkin, Xinyun Chen, Po-
+   in programmatic context. In Proceedings of the 2018      Sen Huang, Johannes Welbl, Sven Gowal, Alexey
+   Conference on Empirical Methods in Natural Lan-          Cherepanov, James Molloy, Daniel J. Mankowitz,
+   guage Processing (EMNLP 2018), pages 1643–1652.          Esme Sutherland Robson, Pushmeet Kohli, Nando
+   Association for Computational Linguistics.               de Freitas, Koray Kavukcuoglu, and Oriol Vinyals.
+                                                     20214
+  2022. Competition-level code generation with alpha-       for automatic evaluation of code synthesis. Preprint,
+  code. Science, 378(6624):1092–1097.                       arXiv:2009.10297.
+Yunxin Li, Zhenyu Liu, Zitao Li, Xuanyu Zhang, Zhen-     Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+  ran Xu, Xinyu Chen, Haoyuan Shi, Shenyuan Jiang,         Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+  Xintong Wang, Jifang Wang, Shouzheng Huang, Xin-         Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal
+  ping Zhao, Borui Jiang, Lanqing Hong, Longyue            Azhar, Aurelien Rodriguez, Armand Joulin, Edouard
+  Wang, Zhuotao Tian, Baoxing Huai, Wenhan Luo,            Grave, and Guillaume Lample. 2023. Llama: Open
+  Weihua Luo, Zheng Zhang, Baotian Hu, and Min             and efficient foundation language models. Preprint,
+  Zhang. 2025. Perception, reason, think, and plan:        arXiv:2302.13971.
+  A survey on large multimodal reasoning models.
+  Preprint, arXiv:2505.04921.                            Shiqi Wang, Zheng Li, Haifeng Qian, Chenghao Yang,
+                                                           Zijian Wang, Mingyue Shang, Varun Kumar, Sam-
+Fang Liu, Yang Liu, Lin Shi, Houkun Huang, Ruifeng         son Tan, Baishakhi Ray, Parminder Bhatia, Ramesh
+  Wang, Zhen Yang, Li Zhang, Zhongqi Li, and Yuchi         Nallapati, Murali Krishna Ramanathan, Dan Roth,
+  Ma. 2024. Exploring and evaluating hallucinations        and Bing Xiang. 2023. ReCode: Robustness eval-
+  in llm-powered code generation. arXiv:2404.00971.        uation of code generation models. In Proceedings
+                                                           of the 61st Annual Meeting of the Association for
+Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and            Computational Linguistics (Volume 1: Long Papers),
+   LINGMING ZHANG. 2023. Is your code gener-               pages 13818–13843, Toronto, Canada. Association
+   ated by chatgpt really correct? rigorous evaluation     for Computational Linguistics.
+   of large language models for code generation. In
+   Advances in Neural Information Processing Systems,    Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu,
+   volume 36, pages 21558–21572. Curran Associates,        Xiangru Tang, Mingchen Zhuge, Jiayi Pan, Yueqi
+   Inc.                                                    Song, Bowen Li, Jaskirat Singh, Hoang H. Tran,
+                                                           Fuqiang Li, Ren Ma, Mingzhang Zheng, Bill Qian,
+Minh Huynh Nguyen, Thang Phan Chau, Phong X.               Yanjun Shao, Niklas Muennighoff, Yizhe Zhang,
+  Nguyen, and Nghi D. Q. Bui. 2024. Agilecoder: Dy-        Binyuan Hui, Junyang Lin, Robert Brennan, Hao
+  namic collaborative agents for software development      Peng, Heng Ji, and Graham Neubig. 2025. Open-
+  based on agile methodology. arXiv:2406.11912.            hands: An open platform for ai software developers
+                                                           as generalist agents. Preprint, arXiv:2407.16741.
+OpenAI. 2023. Openai.
+                                                         Yiqing Xie, Alex Xie, Divyanshu Sheth, Pengfei Liu,
+Qiwei Peng, Yekun Chai, and Xuhong Li. 2024.               Daniel Fried, and Carolyn Rose. 2024. Codebench-
+  Humaneval-xl: A multilingual code generation             gen: Creating scalable execution-based code genera-
+  benchmark for cross-lingual natural language gen-        tion benchmarks. Preprint, arXiv:2404.00566.
+  eralization. In Proceedings of the 2024 Joint In-
+  ternational Conference on Computational Linguis-       Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan
+  tics, Language Resources and Evaluation (LREC-           Vasilescu, and Graham Neubig. 2018. Learning to
+  COLING 2024), pages 8383–8394, Torino, Italia.           mine aligned code and natural language pairs from
+  ELRA and ICCL.                                           stack overflow. In Proceedings of the 15th Interna-
+                                                           tional Conference on Mining Software Repositories,
+Phi. 2023. Phi: A family of powerful, small language       MSR ’18, page 476–486, New York, NY, USA. As-
+  models (slms) with groundbreaking performance at         sociation for Computing Machinery.
+  low cost and low latency.
+                                                         Daoguang Zan, Ailun Yu, Wei Liu, Dong Chen,
+Chen Qian, Wei Liu, Hongzhang Liu, Nuo Chen, Yufan         Bo Shen, Wei Li, Yafen Yao, Yongshun Gong, Xi-
+  Dang, Jiahao Li, Cheng Yang, Weize Chen, Yusheng         aolin Chen, Bei Guan, Zhiguang Yang, Yongji Wang,
+  Su, Xin Cong, Juyuan Xu, Dahai Li, Zhiyuan Liu,          Qianxiang Wang, and Lizhen Cui. 2024. CodeS:
+  and Maosong Sun. 2024. ChatDev: Communicative            Natural language to code repository via multi-layer
+  agents for software development. In Proceedings          sketch. Preprint, arXiv:2403.16443.
+  of the 62nd Annual Meeting of the Association for
+  Computational Linguistics (Volume 1: Long Papers),     Simiao Zhang, Jiaping Wang, Guoliang Dong, Jun Sun,
+  pages 15174–15186, Bangkok, Thailand. Association        Yueling Zhang, and Geguang Pu. 2024a. Experiment-
+  for Computational Linguistics.                           ing a new programming practice with llms. Preprint,
+                                                           arXiv:2401.01062.
+Nils Reimers and Iryna Gurevych. 2020. Making
+  monolingual sentence embeddings multilingual us-       Yakun Zhang, Wenjie Zhang, Dezhi Ran, Qihao Zhu,
+  ing knowledge distillation. In Proceedings of the        Chengfeng Dou, Dan Hao, Tao Xie, and Lu Zhang.
+  2020 Conference on Empirical Methods in Natural          2024b. Learning-based widget matching for migrat-
+  Language Processing (EMNLP), pages 4512–4525,            ing gui test cases. In Proceedings of the IEEE/ACM
+  Online. Association for Computational Linguistics.       46th International Conference on Software Engineer-
+                                                           ing, page 1–13. ACM.
+Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu,
+  Duyu Tang, Neel Sundaresan, Ming Zhou, Ambrosio        Wenting Zhao, Nan Jiang, Celine Lee, Justin T Chiu,
+  Blanco, and Shuai Ma. 2020. CodeBLEU: a method          Claire Cardie, Matthias Gallé, and Alexander M
+                                                    20215
+    Rush. 2024. Commit0: Library generation from         these libraries/classes are not included within the
+    scratch. Preprint, arXiv:2412.01769.                 benchmark dataset itself.
+A     ProjectEval Structure and                             Program Understanding Benchmarks: Unlike
+      Construction Process Full-version                  other benchmarks that focus on whether the code is
+                                                         written correctly, these benchmarks assess the abil-
+Figure 4 shows the full-version of the structure and     ity of an agent or LLM to thoroughly understand
+construction process of ProjectEval.                     the provided code.
+B    Basic LLM Selection and Settings                       Project-level Benchmarks: Project-level bench-
+                                                         marks, which are the primary focus of this paper,
+Since the ProjectEval Level 1, Level 2 input and         comprehensively evaluate the process of transform-
+PV input are natural language but the Level 3 input,     ing an initial idea into a complete program. There
+and code output are program language, the basic          are currently five benchmarks in this category, see
+LLM models should have both aspects abilities.           Table 1 for the differences.
+This means that ProjectEval full evaluation must
+be run under AGI LLM models.                             D       Prompts & Outputs
+   We select three types of models: open-source
+AGI LLMs, close-source AGI LLMs, and code                Here is the prompt of the Reasoning:
+generation LLMs.          Among the open-source              ProjectEval Reasoning Prompt
+AGI models, we include Mistral-7B-v0.3(2023),
+Gemma(2023b), Phi(2023), and Llama(2023),                    Based on this {description}, give a {techni-
+which are known for their advancements in general            cal_stack} Project of its all files (including
+AI capabilities. In the close-source AGI LLM cat-            the essential files to run the project) to
+egory, we consider models such as GPT(OpenAI,                meet the requirement in JSON format of [
+2023) and Gemini(Google, 2023a), which repre-                {"file":"answer.something","path":
+sent cutting-edge proprietary models excelling in a          "somepath/somedir/answer.something",
+variety of tasks.                                            "code":"the_code_in_the_file"},{...},
+   Additionally, the Code generation LLMs cate-              ... ] with NO other content. Recom-
+gory features CodeLlama and Starcoder2, which                mend adding an id attribute to each HTML
+are specialized in code generation and will be used          element and adding classes for them too.
+only in Skeleton input evaluation.
+   For Gemma series, we include Gemma-7B,                  The reasoning phase will eventually come to an
+Gemma2-9B; For Phi series, we include Phi-4, Phi-        JSON file. Here is an example of the output:
+3-14B; For Llama series we include Llama3.2-3B,
+Llama3.1-8B, Llama2-7B; For GPT series, we in-               An Example of ProjectEval Output
+clude GPT-4o and GPT-3.5-turbo; For Gemini we
+include Gemini-1.5-pro and Gemini-2.0. All the               {
+models are running under temperature zero with all                "19": [
+                                                                      {
+settings default in their releases.                                         "file": "19-stdanswer.py",
+                                                                            "path": "19-stdanswer.py",
+C     Related Benchmarks                                                    "code": "import pandas as pd\n
+                                                                                ..."
+Table 6 is the full-version of the related bench-                     }
+marks.                                                            ]
+                                                             }
+   HumanEval-based Benchmarks: These bench-
+marks are similar to or extensions of OpenAI’s Hu-
+manEval, primarily emphasizing functional tasks          E    Human Annotators Instruction
+with general-purpose functions.
+   MBPP-based Benchmarks: These benchmarks               Our human annotators have an 8-page instruction
+are similar to or derived from Google’s MBPP, fo-        guideline for them to annotate the code in both the
+cusing on algorithmic problem-solving functions.         Canonical Solutions and the Test Suites. It is im-
+   DS-based Benchmarks: DS-based benchmarks              possible to show it in the paper and in the appendix
+involve the use of external libraries or classes. How-   as it is in Chinese and it is too long with instruc-
+ever, the specific contents and documentation of         tion images and an assisting small information web
+                                                    20216
+                                                                Input                                                                                         Natural Language (NL) Prompt Source
+
+                     Level 1 NL Prompt - Source:        MetaGPT ,                      and original.
+                                                                                                                                                                                                     ProjectEval
+                      Create a website for a Todo application, additional chart for analysis will be better.               Legends             SoftwareDev                  ProjectDev                 Original
+
+                                                                                                                            Human
+                     Level 2 NL Checklist - Generated by           GPT-4o with manual reviewing                            Reviewing
+                       "Page-Todo List":
+                          "Create New List": "Allows users to create a new Todo list",
+                          "View Tasks":"Displays all tasks under a selected list",
+                      ...
+
+
+                                                                                                                             LLM
+                      Level 3 Skeleton - Generated by Masker module from Canonical Solution                                                      Level 1                                         Level 3
+                                                                                                                           Reasoning
+                                                                                                                                                NL Prompt                                       Skeleton
+                       class TodoListView(ListView):
+                          def get_queryset(self):
+                              """
+                              Gets the list of TodoLists, updating their completion status.
+                              """
+                              pass
+
+                                                                                                                                                 Level 2                                        Temporary
+                                                                                                                                               NL Checklist                                      Skeleton
+
+                                                                        Test Suite
+
+                    Selenium Testcode - For Website mission
+                     def test_view_tasks(driver, test_url, todo_list_selector_class_name):
+                         driver.get(test_url)
+                         todo_list_selector = driver.find_element(By.CLASS_NAME, todo_list_selector_class_name)
+Mission (Project)
+
+
+
+
+                         todo_list_selector.click()
+                         assert 'New List' in driver.title
+                     ...
+
+                      Parameter "test_url": "the url for test"
+                     Descriptions "todo_list_selector_class_name": "the class name for a todo list selector"                                                  Test Suite
+
+
+
+                    Console&File Testcode - For No-UI mission                                                  Parameters' values              Testcode
+                                                                                                                                                                           Parameters                              Masker
+                                                                                                               will be reasoned and                                        Description
+                      def test_move_player(direction, expected_output):                                        answered by agent
+                          stdout = _subprocess.send_command("cd "+direction)
+                          assert utils.string_similarity(expected_output, stdout)                              based on their
+                      ...                                                                                      description and given
+                                                                                                               solution
+                      Parameter "direction": "A destination name..."
+                     Descriptions "expected_output": "...player input a wrong selection..."
+
+
+
+
+                                                                          Canonical Solution
+
+                                                                         Canonical Code
+                    Canonical Parameter Values: the standard
+                    answer correspond to Canonical Solution for          # example_app/views.py
+                                                                         class TodoListView(ListView):
+                    the testcase.
+                                                                             template_name = 'todo_list.html'
+                    Note: every solution will have their own                 model = TodoList
+                    parameter values to getpass the testcase
+                                                                               def get_queryset(self):
+                                                                                   queryset = TodoList.objects.all()
+                     Canonical Parameter Values                                    for todolist in queryset:
+                                                                                       flag = True
+                    "test_url":                                                        for todoitem in todolist.todoitem_set.all():
+                        "http://localhost:8000/todos/"                                     if todoitem.completed:
+                    "todo_list_selector_class_name":                                           continue
+                        "todo-list-selector"                                               flag = False                                                                    Canonical Solution
+                                                                                           break
+                                                                                       todolist.completed = flag
+                                                                                       todolist.save()
+                     Canonical Parameter Values                                    return queryset
+                                                                         ...                                                                                 Canonical                          Canonical
+                     "direction": "home"                                                                                                                  Parameter Values                        Code
+                     "expected_output":
+                         "You are now in \\home\n"                      Canonical Code: A reference solution generated by LLM with manual
+                                                                        reviewing passable to all the testcase
+
+
+
+                                                                  Figure 4: ProjectEval Structure and Construction Process
+
+
+system. As compensation, we provide the follow-                                                                                        4. Review the parameter description, add the
+ing annotation key steps (listed in the instruction                                                                                       missing ones, and remove the redundant ones;
+guideline):                                                                                                                            5. Run the entire answer code again, make sure
+                                                                                                                                          that all the tests can be aligned with the an-
+              1. Review the checklist, see if there are any in-                                                                           swer.
+                 appropriate requirements and remove them or
+                 edit them, and add the missing general require-                                                                 Figure 5 shows a screenshot of the assisting small
+                 ments;                                                                                                          information web system.
+              2. Review the answer code in render mode, and                                                                      F       ProjectEval Result Pass@K
+                 make sure it can meet all the requirements of
+                 the annotated checklist;                                                                                        Table 7 is the full result of the ProjectEval.
+              3. Run the answer code and review the test code
+                 and the parameter values in render mode,
+                 make sure it can test the checklist require-
+                 ments, and those common-sense requirements
+                 (such as login authorization check), since
+                 the common-sense requirements may not be
+                 added in Step 2, you may edit the answer code
+                 at the same time;
+                                                                                                                        20217
+                                                                                                            Granularity
+         Benchmark              Language        Construction      Evaluation             Source                         #Tasks #Tests           #LOC    #Tokens    Input Information
+                                                                                                              Level
+
+                                                                                     Early Years Research
+
+       Concode (2018a)             Java          Automated         Automated             GitHub               Function       2000     N/A 1     N/A 1    26.3             NL
+       CoNaLA (2018)              Python         Automated         Automated         Stack Overflow          Statement        500     N/A 1      1.0      4.6             NL
+
+                                                                                         BLEU-based
+
+       Django (2018b)             Python
+      CodeBLEU(2020)             Multiple           N/A2           Automated              N/A2                  Project                       N/A2                       Code
+     SketchBLEU(2024)            Multiple
+
+                                                                                      HumanEval-based
+
+                                                                                                                                                                     NL+ Function
+      HumanEval (2021)            Python           Manual          Automated            Original              Function        164      7.7       11.5    24.4
+                                                                                                                                                                      Signature
+                                                                                                                                                                     NL+ Function
+       AixBench (2022)             Java            Manual          Automated HumanEval & Original             Function        175                N/A3
+                                                                                                                                                                      Signature
+   Multi-HumanEval(2023)         Multiple          Manual          Automated HumanEval & Original             Function        164      7.7       11.5    24.4        NL+ Signature
+         HumanEval+               Python           Manual          Automated            Original              Function        164     774.8      11.5    24.4        NL+ Signature
+
+                                                                                         MBPP-based
+
+         MBPP(2021)               Python           Manual          Automated            Original              Function        974      3.0       6.8     24.2             NL
+         APPS(2021)               Python         Automated         Automated          Contest Sites         Competitive      5000     13.2       21.4     58         NL+ Examples
+         MBXP(2023)              Multiple          Manual          Automated       MBPP & Original            Function        974      3.0       6.8     24.2             NL
+     CodeContests(2022)        Python, C++       Automated         Automated          Contest Sites         Competitive       165     203.7      59.8    184.8     NL + Example I/O
+
+                                                                                           DS-based
+
+       DS-1000(2023)              Python         Automated         Automated         Stack Overflow          Statement       1000      1.6       3.8     12.8             NL
+                                                                                                                                          1                          NL + Function
+      CoderEval(2024b)         Python, Java      Automated         Automated             Github               Function        230     N/A        30.0    108.2
+                                                                                                                                                                       Signature
+       ClassEval (2023)           Python           Manual          Automated         PyPI + Original             Class        100     33.1       45.7    123.7       Class Skeleton
+   EvoCodeBench (2024b)           Python       Semi-automated      Automated             GitHub               Function        275     N/A 1     20.40   185.57         Repository
+      SWEBench(2024)              Python         Automated         Automated              PyPI                  Commit       2294     120.8      32.8   ≈ 200       NL + Repository
+       Commit0(2024)              Python         Automated         Automated              PyPI                  Commit        54     ≈ 500 ≈ 25000 ≈ 1250            NL + Testunits
+
+                                                                                   Program Understanding
+
+        ReCode(2023)              Python         Automated         Automated     HumanEval & MBPP             Function        30      10.0      N/A 1    N/A 1           Code
+      CRUXEval (2024)             Python         Automated         Automated     Python Standard Libs         Function        800     10.0       5.49    N/A 1           Code
+                                                                                 CodeSearchNet(2020)
+    CodeBenchGen(2024)            Python         Automated         Automated                                  Function       1931     8.79       60.5    491.9    Code + NL Statements
+                                                                                      (GitHub)
+
+                                                                                  Granularity Level - Project
+
+        SRDD (2024)               Python         Automated         Automated            Original                Project      1200     N/A 1     N/A 1    N/A 1            NL
+       CASSD (2024a)              Python           Manual           Manual              Original                Project       72      5.25      ≈240    21993.0           NL
+     SoftwareDev(2024)           Multiple          Manual1            N/A               Original                Project       70      N/A 1     191.6   6218.0            NL
+      ProjectDev(2024)           Multiple          Manual           Manual              Original                Project       14      19.1      N/A 1   36818.0           NL
+      DevBench(2024a)            Multiple          Manual          Automated            Original                Project       22      10.18     377.8   1298.3            NL
+                                                                                   SoftwareDev &                                                                  NL+ Class/Function
+     ProjectEval (ours)           Python      Semi-automated Automated                                          Project       20      14.2      402.2   2972.0
+                                                                                 ProjectDev & Origin                                                                  Skeleton
+
+    [1]This benchmark doesn’t involve this item.
+    [2]The Bleu-based benchmark doesn’t involve construction, source and number items.
+    [3]Since Aixbench wrote 175 Java files for testing and wrote the test samples directly into the code, it is very difficult to count its details.
+
+
+Table 6: Summary of Existing Benchmarks for Code Generation. #Tasks: number of tasks, #Tests: average number
+of testcase in each task, #LOC: average lines of code in the canonical answer, #Tokens: average number of tokens
+of code in the canonical answer. Part of this table is referred from Du et al.’s (2023).
+
+
+
+
+                                                                                           20218
+                                   Figure 5: screenshot of the Assisting Websystem
+
+
+
+
+                                   Pass@1                                                    Pass@5
+Model
+                      Cascade               Direct                     Cascade                    Direct
+                                                                                                                      All Avg.
+                   Level 1 Level 2 Level 1 Level 2 Level 3 Level 1 Level 2 Avg. Level 1 Level 2 Level 3 Avg.
+
+                                                     Open-source AGI LLMs
+
+Llama-2-7B          0.00    0.35    1.06     0.00      0.35     0.00     0.07    0.04   0.28    0.00    0.07   0.12     0.08
+Llama-3.1-7B        0.70    0.70    0.35     0.70      1.06     0.28     0.28    0.28   0.14    0.28    0.42   0.28     0.28
+Llama-3.2-3B        0.70    0.35    0.35     0.00      0.00     0.21     0.14    0.18   0.14    0.00    0.00   0.05     0.10
+Phi-3-14B           0.00    0.00    0.00     0.00      0.00     0.00     0.00    0.00   0.00    0.00    0.00   0.00     0.00
+Phi-4-14B           0.35    1.06    4.23     1.41      4.23     0.14     0.56    0.35   1.76    1.13    2.04   1.64     1.13
+Gemma-7B            1.41    1.41    1.06     0.70      1.06     0.99     1.06    1.02   0.56    0.63    0.49   0.56     0.75
+Gemma-2-9B          2.11    2.46    2.11     1.06      1.06     1.69     1.06    1.37   1.34    0.56    0.63   0.85     1.06
+Mistral-7B-v0.3     2.11    1.76    1.41     1.41      0.70     1.48     1.06    1.27   0.92    0.99    0.56   0.82     1.00
+
+                                                     Code Generation LLMs
+
+StarCoder-2-7B        -      -        -        -       0.00      -        -       -      -        -     0.00    -        -
+CodeGemma             -      -        -        -       2.11      -        -       -      -        -     1.20    -        -
+CodeLlama             -      -        -        -       1.41      -        -       -      -        -     0.77    -        -
+
+                                                     Production Code Agent
+
+OpenHands             -      -      7.39       -         -       -        -       -      -        -        -    -        -
+
+                                                     Close-source AGI LLMs
+
+GPT-3.5-turbo       2.46    2.46    2.46     2.46      6.69     2.39     2.46    2.43   1.97    2.39    5.28   3.22     2.90
+GPT-4o             10.21   15.85    19.72    17.96     12.32    8.52     12.32 10.42 16.06      15.42   10.14 13.87    12.49
+Gemini 1.5 pro      9.15    8.80    7.39     6.34      9.51     7.82     7.39    7.61   5.28    4.51    8.24   6.01     6.65
+Gemini 2.0-flash    5.63    5.28    5.63     6.69      8.80     3.24     3.59    3.42   3.52    3.45    7.75   4.91     4.31
+Gemini 2.0-pro*     4.93    4.93    0.00     5.63      7.39      -        -       -      -        -        -    -        -
+
+Avg.                3.06    3.49    3.52     4.03      3.54     2.23     2.50    2.37   2.66    2.45    2.51   2.69     2.56
+
+* We only test the Gemini-2.0-pro pass@1.
+
+                                            Table 7: ProjectEval Result Pass@k
+
+
+                                                               20219
+G     Casestudy Log of GPT-4o
+G.1 Cascade Version
+
+                                       Listing 1: Cascade Verison
+My chain of thought for each step in the log is as follows:
+
+1. **Instruction to Generate Natural Language Function Checklist**:
+   - **Input Reasoning**: A request is made to create a website for a password generator and generate
+        a natural language function checklist from the users' perspectives in a JSON format.
+   - **Action Taken**: Based on the request, I generate a JSON object representing different pages of
+        the proposed website, each containing functions for user interactions, along with
+       descriptions of these functions.
+   - **Output Reasoning**: I structure the output JSON to clearly separate the different pages (e.g.,
+        Home, Password Generator, Settings) and the functions associated with each, providing a
+       concise description for each user-facing action.
+
+2. **Generate Django Framework Skeleton**:
+   - **Input Reasoning**: Build a Django framework skeleton based on the previously provided
+       checklist, using JSON format to outline the necessary files and logic.
+   - **Action Taken**: Construct a basic Django app structure, including `views.py` and `urls.py` for
+        simplicity, containing placeholder functions that align with the provided natural language
+       functions.
+   - **Output Reasoning**: The JSON output details files like `views.py` and `urls.py`, including
+       paths and basic skeleton code for each function as derived from the JSON function checklist.
+
+3. **Complete Django Project with Essential Files**:
+   - **Input Reasoning**: Expand the Django project to include all essential files for a basic
+       working project, add ID attributes, and consider adding classes to HTML elements for future
+       CSS or JavaScript interactions.
+   - **Action Taken**: Create a comprehensive JSON representation of a Django project, including
+       files such as `manage.py`, `settings.py`, `urls.py` for the project and the app, HTML
+       templates, and CSS files necessary for the application.
+   - **Output Reasoning**: The output JSON contains each file's relative path and code content,
+       ensuring each crucial component for running a Django application is included. It also adheres
+       to the instruction of adding identifiers like IDs and classes to HTML elements.
+
+4. **Generating Required Parameters for Django Project Test**:
+   - **Input Reasoning**: Derive and return necessary parameters for testing each function within the
+        previously defined Django project based on the requirements outlined, using JSON format,
+       specifying example URLs and identifiers.
+   - **Action Taken**: I extract specific identifiers (like IDs and URLs) used in the Django project
+       HTML and map them to their respective functions in a JSON format that defines parameter names
+       and their corresponding examples.
+   - **Output Reasoning**: The JSON output specifies each function's parameters for testing purposes,
+        using IDs defined in the HTML and expected URL paths. Each function in the project maps back
+       to a user scenario described earlier, ensuring the testing parameters align with those
+       scenarios.
+
+Throughout each step, I maintained a structured approach to interpret the instructions, generating
+    JSON outputs that capture the interaction logic, application skeleton, and testing parameters in
+     alignment with the requirements provided.
+
+
+G.2 Direct Version
+
+                                        Listing 2: Direct Verison
+Given the provided log, here's how I processed the task requests step-by-step:
+
+### Initial Request and Reasoning
+
+1. **Request to Provide a Django Project:**
+
+    - The request was to create a Django project for a password generator. The specific structure was
+        requested in a JSON format that included all necessary files for the project.
+    - The project was constructed with essential modules and files, typical of a basic Django setup: `
+        manage.py`, `__init__.py`, `settings.py`, `urls.py`, `wsgi.py`, etc.
+
+                                                 20220
+  - Inside the project folder, two main components were established: `password_generator` for
+      project-level configurations and `generator` for the app dedicated to password generation
+      logic.
+
+2. **Project Configuration and Application Code:**
+
+  - **`manage.py`**: Standard entry point for running Django commands.
+  - **`settings.py`**: Configures the project's settings including installed apps (like `generator`)
+      , middleware, database configurations, allowed hosts, static files handling, etc.
+  - **`urls.py`** at the project level defines the URL routes and maps them to respective views in
+      the `generator` app.
+  - The app `generator` has core logic hosted in its `views.py`, handling requests to generate
+      passwords with different options (uppercase, numbers, symbols).
+
+3. **HTML Templates for User Interaction:**
+
+  - **`home.html`**: Presents users with options to generate a password, using forms with checkboxes
+       and a submit button to include various character types.
+  - **`password.html`**: Displays the generated password, allowing users to generate another if
+      desired.
+  - **`about.html`**: Provides basic project information.
+  - IDs and classes were assigned to HTML elements per the requirement to enable easy referencing in
+       styles and scripts.
+
+### Parameterized Test Outputs
+
+4. **Parameters Extraction for Test:**
+
+  - A structured JSON was requested to determine specific parameter values within the project for
+      automated testing purposes.
+  - Each HTML element's IDs, button names, and page URLs were mapped to ensure correct access and
+      functionality tests.
+
+5. **Page: Home:**
+
+  - It confirmed the main URL and associated ID for displaying the welcome message (`title`).
+  - Navigation from the home page via specific button IDs to the password generator feature was
+      detailed.
+
+6. **Page: PasswordOptions:**
+
+  - Confirmed the identification of form elements like length input and checkboxes for including
+      character types (uppercase, numbers, symbols) during password generation.
+
+7. **Page: GeneratedPassword:**
+
+  - Ensured the display of generated passwords was accurately linked via the element ID (`password`).
+
+  - Proposed testing for a "Copy to Clipboard" functionality (though the ID `copy` was assumed, this
+       component may have been developed later).
+
+8. **Page: About:**
+
+  - Validated navigation to and from the 'About' page. Extracted the ID from the hyperlink (`about`)
+       as well as a description ID, although it posed wrong by using `title` where expected a
+      unique ID for description was needed.
+
+9. **Errors & Oversights:**
+
+  - Some mismatches were found in the parameter mappings, notably in assuming generic IDs like `
+      length` to also be suitable for lowercase inclusion function tests or reusing `title` for `
+      description_id`.
+  - This indicates that further adjustments or clarification might be needed to align data bindings
+      for consistent testing.
+
+This reflection covers the derivation of each function response from the given initial requests and
+    input, along with the pathway the project's elements were stored and rationalized for potential
+    tests.
+
+
+
+                                               20221
+

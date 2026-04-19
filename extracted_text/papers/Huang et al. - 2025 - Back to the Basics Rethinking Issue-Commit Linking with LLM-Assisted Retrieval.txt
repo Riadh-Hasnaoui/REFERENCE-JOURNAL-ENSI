@@ -1,0 +1,960 @@
+                                                              Back to the Basics:
+                                          Rethinking Issue-Commit Linking with LLM-Assisted Retrieval
+                                               Huihui Huang♦ , Ratnadira Widyasari♦ , Ting Zhang♥ , Ivana Clairine Irsan♦ , Jieke Shi♦ , Han Wei
+                                                  Ang♠ , Frank Liauw♠ , Eng Lieh Ouh♦ , Lwin Khin Shar ♦ , Hong Jin Kang♣ , and David Lo♦
+                                                              ♦ School of Computing and Information Systems, Singapore Management University, Singapore
+                                                                                   ♥ Faculty of Information Technology, Monash University, Australia
+                                                                                                                     ♠ GovTech, Singapore
+                                                                                       ♣ School of Computer Science, University of Sydney, Australia
+
+                                                                  {hhhuang, ratnadiraw.2020, ivanairsan, jiekeshi, elouh, lkshar, davidlo}@smu.edu.sg
+                                                           ting.zhang@monash.edu, {ang_han_wei, frank_liauw}@tech.gov.sg, hongjin.kang@sydney.edu.au
+arXiv:2507.09199v3 [cs.SE] 6 Oct 2025
+
+
+
+
+                                        Abstract                                                                                    2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 13 pages. https:
+                                        Issue-commit linking, which connects issues with commits that fix                           //doi.org/10.1145/3744916.3764530
+                                        them, is crucial for software maintenance. Existing approaches have
+                                        shown promise in automatically recovering these links. Evaluations
+                                                                                                                                    1    Introduction
+                                        of these techniques assess their ability to identify genuine links                          Software traceability involves establishing relationships between
+                                        from plausible but false links. However, these evaluations overlook                         different software artifacts and is essential for safety-critical sys-
+                                        the fact that, in reality, when a repository has more commits, the                          tems [9, 10]. A critical task in this domain is issue-commit linking,
+                                        presence of more plausible yet unrelated commits may interfere                              which connects issues, i.e., bug reports, to the commits that resolve
+                                        with the tool in differentiating the correct fix commits. To address                        them [28], playing a vital role in software provenance. It also plays
+                                        this, we propose the Realistic Distribution Setting (RDS) and use it to                     a key role for developers in assessing security risks [30, 41, 42] and
+                                        construct a more realistic evaluation dataset that includes 20 open-                        gaining deeper insights about security flaws [37, 69].
+                                        source projects. By evaluating tools on this dataset, we observe                                Prior studies [3, 53] have revealed that many issue-commit links
+                                        that the performance of the state-of-the-art deep learning-based                            can be missing during the development of large-scale projects. Man-
+                                        approach drops by more than half, while the traditional Information                         ually recovering these links is not only time-consuming but error-
+                                        Retrieval method, VSM, outperforms it.                                                      prone, even for experienced developers [54].
+                                           Inspired by these observations, we propose EasyLink, which                                   To address this, several studies [14, 31, 49, 54, 63, 72] have pro-
+                                        utilizes a vector database as a modern Information Retrieval tech-                          posed learning-based approaches to automatically recover issue-
+                                        nique. To address the long-standing problem of the semantic gap                             commit links, achieving strong performance on datasets collected
+                                        between issues and commits, EasyLink leverages a large language                             from open-source repositories.
+                                        model to rerank the commits retrieved from the database. Under our                              The evaluation method requires the tool to distinguish fix com-
+                                        evaluation, EasyLink achieves an average Precision@1 of 75.03%,                             mits (i.e., “true links”) from plausible but non-fix commits (i.e., “false
+                                        improving over the state-of-the-art by over four times. Additionally,                       links”). However, prior studies’ evaluations often lack realism. ❶
+                                        this paper provides practical guidelines for advancing research in                          Some studies use an unrealistic time window to select commits. For
+                                        issue-commit link recovery.                                                                 example, studies [4, 40, 54, 64] rely on a narrow 7-day time window
+                                                                                                                                    to select potential fix commits, which may miss many true links.
+                                        Keywords                                                                                    Another example involves studies [14, 49] that require the issue
+                                                                                                                                    close time to select commits, but in practice, when commits are
+                                        Issue-Commit Link Recovery, Software Traceability
+                                                                                                                                    missing, the issue may not have a close time. ❷ Another limitation
+                                        ACM Reference Format:                                                                       is the unrealistic false link distributions in prior evaluation datasets.
+                                        Huihui Huang♦ , Ratnadira Widyasari♦ , Ting Zhang♥ , Ivana Clairine Irsan♦ ,                Some [31, 54] use evaluation datasets where the number of false
+                                        Jieke Shi♦ , Han Wei Ang♠ , Frank Liauw♠ , Eng Lieh Ouh♦ , Lwin Khin Shar                   and true links is equal, an unrealistic assumption since false links
+                                        ♦ , Hong Jin Kang♣ , and David Lo♦ . 2026. Back to the Basics: Rethinking
+                                                                                                                                    far outnumber true links in reality [14]. Recently, Zhang et al. [72]
+                                        Issue-Commit Linking with LLM-Assisted Retrieval. In 2026 IEEE/ACM 48th
+                                        International Conference on Software Engineering (ICSE ’26), April 12–18,
+                                                                                                                                    addressed this issue by using an imbalanced dataset with a fixed
+                                                                                                                                    number of false links per issue. Still, this method overlooks a cru-
+                                        † Jieke Shi and Ting Zhang are the corresponding authors.                                   cial factor: a higher commit frequency results in a larger pool of
+                                                                                                                                    plausible commits for the tool to differentiate from the actual fix
+                                        Permission to make digital or hard copies of all or part of this work for personal or       commit, making the task inherently more difficult.
+                                        classroom use is granted without fee provided that copies are not made or distributed           Therefore, we propose to construct a more realistic evaluation
+                                        for profit or commercial advantage and that copies bear this notice and the full citation
+                                        on the first page. Copyrights for third-party components of this work must be honored.      dataset under the Realistic Distribution Setting (RDS). We began
+                                        For all other uses, contact the owner/author(s).                                            with an in-depth analysis of the issues and commits from open-
+                                        ICSE ’26, Rio de Janeiro, Brazil                                                            source repositories used in prior studies [14, 31, 36, 72]. According
+                                        © 2026 Copyright held by the owner/author(s).
+                                        ACM ISBN 979-8-4007-2025-3/26/04                                                            to our observation, after fetching all commits in each repository,
+                                        https://doi.org/10.1145/3744916.3764530                                                     approximately 97% of fix commits were made within one year
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                    Huang et al.
+
+
+from issue creation. These findings suggest that, in practice, the         (1) Constructing a more realistic evaluation dataset: To achieve
+corresponding fix commit for an issue is likely to be found among              a more realistic evaluation, we propose the Realistic Distribution
+the commits made within one year after the issue’s creation. We                Setting (RDS), which adjusts the number of candidate commits
+thus include the genuinely linked commit as the true link and                  for generating false links according to the quantity of commits
+consider all non-fix commits made within one year of an issue’s                in the repository. This results in a dataset that more accurately
+creation as candidate commits linked to the given issue as false               reflects real-world practices.
+links when constructing evaluation datasets.                               (2) A comprehensive evaluation benchmark: We include the
+   After collecting issues and commits from 20 open-source projects            datasets from recent studies [14, 31, 36, 72]. Our benchmark
+analyzed in prior studies [14, 31, 36, 72], we first successfully repli-       includes 9,319 issues from 20 projects, with an average of 1,530
+cate the performance of the state-of-the-art method, EALink [72],              false links constructed per issue. To the best of our knowledge,
+using the original evaluation method they reported. However, when              this dataset is the largest in the literature.
+we switched the experimental setup to the Realistic Distribution           (3) Reevaluation of the state-of-the-art approach: After suc-
+Setting, we find that the average Precision@1 of EALink dropped                cessfully replicating the strong performance of EALink [72],
+to 14.43%, surprisingly underperforming the Vector Space Model                 the state-of-the-art approach, we switched the evaluation pro-
+(VSM) [1], a traditional Information Retrieval (IR) technique, which           cedure under RDS, which offers a greater challenge due to a
+achieves a Precision@1 of 46.59%, suggesting that there is great               higher number of false links. On the same set of projects used
+room for improving issue-commit linking using IR techniques.                   in the evaluation of EALink, its average Precision@1 of 53.67%
+Meanwhile, as recent years have witnessed huge advances in the                 decreases to 28.05%, underperforming traditional IR baselines.
+IR field, modern IR techniques that use embedding models to cap-
+                                                                           (4) A new state-of-the-art for issue-commit linking: We pro-
+ture semantic-level similarities have demonstrated better perfor-
+                                                                               pose EasyLink, which leverages modern IR techniques, includ-
+mance than those traditional techniques evaluated in previous stud-
+                                                                               ing an off-the-shelf database FAISS [15], and addresses the prob-
+ies [14, 31, 72] that measure token-level textual similarities, such as
+                                                                               lem of semantic gap [22, 49] by prompting an LLM to rerank the
+VSM [1] and Latent Semantic Indexing (LSI) [35]. This also presents
+                                                                               retrieved results. In our evaluation, EasyLink improves over
+an opportunity to boost issue-commit linking performance and
+                                                                               EALink in average Precision@1 from 14.43% to 75.03%.
+motivates our paper.
+   In this paper, we propose EasyLink, a novel method that inte-              The rest of the paper is organized as follows. Section 2 outlines
+grates modern IR techniques and Large Language Models (LLMs)               the background of this work, including the limitations of exist-
+to enhance issue-commit linking performance in realistic settings          ing work. Section 3 details the evaluation dataset construction
+by capturing deeper semantic relationships between issues and              under the Realistic Distribution Setting (RDS). Section 4 introduces
+commits. EasyLink operates in two stages. The first stage fetches a        EasyLink. Section 5 describes the experimental setup. Section 6
+set of commits that share similarities to a given issue, and the sec-      presents the experimental results. Section 7 revisits the classical
+ond stage reranks them by their relevance to the issue. Concretely,        baseline, discusses the lessons learned and threats to validity. Sec-
+in the first stage, EasyLink leverages recent advances in Informa-         tion 8 reviews related work. Finally, Section 9 concludes the paper.
+tion Retrieval by using a modern vector database (optimized for
+high-dimensional similarity search) [15] to fetch the most similar         2 Background
+commits for each issue. In the second stage, EasyLink prompts an
+LLM (GPT-4o [44]) to rerank the results. We use LLMs for their             2.1 Issue-Commit Linking Recovery
+strong ability to capture the semantic relationship between issues         Issue-commit links play an essential role in maintaining software
+and commits, bridging the semantic gap, as the most similar commit         traceability, supporting critical tasks such as impact analysis [2, 24,
+does not guarantee that it is the fix for the issue [14, 31, 72]. Ea-      47], regression testing [38], and project management [46]. Due to
+syLink achieves an average Precision@1 of 75.03%, outperforming            the high cost of manually maintaining these links, they are often
+EALink [72] by four times in our realistic datasets and by more            incomplete [26], highlighting the need for automated methods.
+than 30% in Precision@1 on EALink’s original evaluation setup. We          Automatic issue-commit linking considers a large set of commits
+also conduct an ablation analysis on each of EasyLink’s two stages.        that are made in the period after each issue’s creation and identifies
+Our results demonstrate that advances in IR, such as context-aware         the right commits that address the issue. Figure 1 shows an example
+dense embeddings [39, 60, 67] and efficient vector search [15, 65],        that demonstrates the challenge of automatically linking issues to
+have been largely overlooked in the software traceability literature.      commits. It presents an issue along with two commits. The first
+Notably, even the out-of-the-box use of a vector database achieves         commit shares more matched words and has the highest similarity
+a high average Precision@1 of 61.57%. Additionally, the strong per-        to the issue, but it is not the fix, while the second commit is the
+formance of the reranking step, which improves Precision@1 by              correct fix commit. An issue-commit linker that considers keyword
+13.46%, highlights the capability of LLMs to bridge the semantic           counts would incorrectly prioritize the first commit as there are a
+gap between issues and commits [22, 49]. Finally, we discuss the           greater number of matches of the keyword nb-javac. While both
+lessons learned from our work, such as the need to consider mod-           commits mention nb-javac, the top-ranked commit updates the
+ern IR baselines, for future research on software traceability. Our        JAR for JDK-12, whereas the issue specifies that nb-javac 11 should
+implementation has been made available at [45].                            be upgraded, tested, and deployed. This highlights two challenges.
+   This paper makes the following contributions:                           First, it shows the need for approaches that go beyond surface-
+                                                                           level similarities. Second, it demonstrates the sensitivity of the
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                             ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                                                              Unrealistic Time Window Selection: Some works [4, 40, 54,
+   An example of an issue, the incorrectly top-ranked                     64] assume that fix commits fall within a 7-day time window before
+   commit, and the correct commit.                                        or after the issue’s create/update/close time or the comment create
+                                                                          time, treating all other commits in this period as non-fix commits.
+   The input issue, with summary and description, is shown                However, this approach is inadequate when fixes take a longer
+   below.                                                                 time, requiring tools to distinguish the correct fix commit from
+   Issue ID: NETBEANS-803                                                 more plausible commits. From our preliminary analysis of selected
+   Summary:                                                               projects, we found that only 59% of issues had a corresponding
+   nb-javac 11 upgrade in NetBeans                                        fix commit within seven days of their creation. Additionally, some
+   Description:                                                           works [14, 49] require the issue’s close time to select commits. Under
+   Should cover below tasks in NetBeans - nb-javac 11 testing :
+   • Run tests for modules java.completion, java.editor,                  a practical scenario, the issue fix/close date is unknown—precisely
+     java.editor.base, java.hints, java.source,                           also why issue-commit recovery is necessary—and approaches need
+     java.source.base, lib.nbjavac
+   • Update libs.javacimpl and libs.javacapi jars, upload updated
+                                                                          to distinguish the fix commit while the issue remains open. There-
+     nb-javac jars                                                        fore, selecting commits based on the issue’s fix/close date may also
+   • Upload nb-javac module jars in update center                         lack realism.
+                                                                              Unrealistic False Link Distribution: When constructing the
+   The top-ranked commit message in the initial results is                evaluation dataset, some works [31, 36, 54] use a balanced dataset
+   shown below but is incorrect.                                          (i.e., an equal number of false links and true links) to evaluate
+   Commit ID: 4fd115aeae3b8423de9ced22d52914e60a1c5800.                   their tools. This evaluation setting is unrealistic because, in reality,
+   Updation for external nb-javac jar in libs.javacapi and                false links outnumber true links [14]. Zhang et al. [72] address the
+   libs.javaimpl modules with nb-javac jar for jdk-12                     balanced dataset limitation by constructing a fixed number of 99
+                                                                          false links per issue. While this results in more false links than
+   The correct commit message is shown below.                             true links, it still overlooks that the number of potentially linked
+   Commit ID: 3055661e4dd1c7d587012c917cbec31b27ae9e34                    commits depends on the number of commits made in the same time
+                                                                          period as the ground-truth link. Moreover, as shown in Figure 2,
+   Uptake nb-javac 11 jars for java tests runtime
+                                                                          when sampling unrelated commits to construct the false links, prior
+                                                                          work [72] only selects commits from other ground-truth links. In
+                                                                          other words, they construct false links for an issue by connecting
+Figure 1: Example of an issue with the incorrect top-ranked
+                                                                          it only to other commits that are already linked to other issues. In
+commit and the correct commit. An issue-commit linking
+                                                                          practice, an approach has to consider all commits from the same
+approach has to bridge the semantic gap and distinguish the
+                                                                          time period, regardless of whether they are linked to specific issues.
+correct commit from similar ones in a potentially large set.
+                                                                          This is a superset of commits compared to the ground-truth links.
+                                                                          In Section 3, we show that the number of commits made within a
+                                                                          one-year time frame is at least 80% larger than the constant number
+evaluations of their effectiveness to the number of commits that          of 99 commits considered by Zhang et al. [73]. As a result, the
+share keywords or resemble the ground-truth commit.                       evaluation setups of prior work may not adequately reflect how
+   Many automatic issue-commit link recovery methods have been            these approaches would be used in practice.
+proposed. Some studies employ traditional feature- and rule-based
+methods [4, 40, 57, 68], which rely on predefined heuristics such as
+                                                                          3     Evaluation Dataset Construction Under the
+keyword matching or the recency of the commits. However, these
+heuristics tend to be inadequate [5]. Some approaches [29, 36, 49, 63,          Realistic Distribution Setting
+64] adopt traditional machine learning techniques, such as support        This section describes our new evaluation setting, Realistic Distri-
+vector machines, to reduce the reliance on manual rules. Recently,        bution Setting (RDS), for constructing a more realistic evaluation
+deep learning methods [22, 54, 70] have demonstrated improved             dataset. By adaptively constructing false links for an issue based on
+performance. A key challenge of the task is the semantic gap that         the commits in the period after each issue creation, aligning with
+exists between issues and commits [14, 31, 72]. Prior work [31]           the repository’s development activity, our method addresses the
+attempted to address this issue using BERT-based methods, such            limitations of prior evaluations.
+as CodeBERT [17], which leverage contextual understanding. The               We combine datasets from four recent studies [14, 31, 36, 72]
+state-of-the-art method, EALink [72], employs knowledge distilla-         into a unified benchmark covering 20 projects, ensuring broader
+tion to transfer knowledge to a smaller model and utilizes multi-task     coverage and a consistent benchmark for comparison. Evaluations
+learning to improve both accuracy and efficiency.                         in the previous studies [31, 36, 72] did not use a shared benchmark,
+                                                                          and each of their datasets had only up to 12 projects [36]. Our
+2.2     Limitations in Evaluation                                         dataset fills the need for a large, shared benchmark.
+The experiments in prior studies evaluate approaches based on their
+ability to distinguish the true link from false links constructed using   3.1    Ground Truth Dataset Selection
+other commits. However, these studies use unrealistic methods to          We selected datasets from four recent studies, covering 20 open-
+construct false links and the evaluation dataset.                         source software projects over a span of 20 years. These datasets
+                                                                                                                            Sample commits for I_1
+
+                                                                                                                                                          Commit
+                                                                                                                                                            C_3
+                                                                                                                                                            C_4
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                        Huang et al.
+                                                                                                                                                            C_5
+                                                                                                                                                     In total 99 sampled
+  True Links in the Dataset           Prior work on false links                                                                                            commits
+  Issue       Commit    Label            construction for #*                                           Algorithm 1: False Links Construction under RDS
+                                   Issue     Commit      Label        The tool distinguishes the
+   !!          "!           1
+                                    #*          $$           0        fix commit from linked             Input: test_set_true_links     ⊲ Contains true issue-commit
+   !!          ""           1                                         commits and considers
+                                    #*           $%            0                                                pairs labeled as 1
+    ##         $$           1                                         only 99 false links per issue
+                                 A total of 99 false links per issue.
+    #$         $%           1                                         in the evaluation dataset.         Input: commits_pool          ⊲ Contains all fetched commits
+                                            RDS false links
+                                          construction for #*                                                  (Subsection 3.2)
+ Commits in the Real-world        Issue      Commit       Label      The tool distinguishes the
+       Repository                   #*          $$          0        fix commit from more
+                                                                                                         Result: evaluation_dataset
+                                    #*          $%          0        plausible commits in the          1 Function EvalSetGen(test_set_true_links, commits_pool):
+    Commit          Commit                                           real-world repository, with
+                                    #*          $&          0                                               evaluation_dataset ← ∅
+                                                                     false links constructed
+                                                                                                       2
+         "!            $&           #*          $'          0        based on the true                 3    sampled_issue_id_list ←
+         ""            $'           #*          $(          0        distribution of commits
+         $$            $(           #*          $)          0        within the same time                    test_set_true_links[issue_id].unique()[:1000]
+         $%            $)       More false links if the repository   frame.
+                                                                                                       4    for each issue_id in sampled_issue_id_list do
+                                has a higher commit frequency.
+                                                                                                       5        true_links ← test_set_true_links[issue_id]
+                                                                                                       6        issue ← true_links[0].issue_info
+Figure 2: Illustration of the evaluation limitation in prior
+work. 𝐶 1 and 𝐶 2 are the fix commits of issue 𝐼 1 . False links will                                  7        candidate_commits ← { commit ∈ commits_pool |
+be constructed for 𝐼 1 . 𝐶 3 and 𝐶 4 are commits already linked                                        8            commit.time ≥ issue.create_time and
+to the issue in the true links dataset. 𝐶𝑎 , 𝐶𝑏 , 𝐶𝑐 , and 𝐶𝑑 are                                      9            commit.time ≤ issue.create_time + 𝜖 and
+commits present in the repository but not in the true links                                           10            commit ≠ issue.fix_commit }
+dataset, and they are ensured not to be the fix commit of 𝐼 1 .                                       11        false_links ← {(issue, commit, label=0) |
+                                                                                                      12            commit ∈ candidate_commits }
+                                                                                                      13        evaluation_dataset.append(false_links)
+use explicit issue tags (e.g., “#123”, “JIRA-456”) in commit messages                                 14        evaluation_dataset.append(true_links)
+to construct the true links. We include the same issues and true
+links from these datasets, resulting in a total of 9,319 issues in                                    15    return evaluation_dataset
+the benchmark. For datasets with incomplete information detected
+through a manual check, we re-fetched the necessary data, such
+as issue comments, code diffs, and committed files (i.e., the source                                  modified file paths for each commit is identified, and their content
+code files after applying the commits).                                                               at the specific commit state is retrieved. The corresponding code
+• From Zhang et al.’s dataset [72], we include the issues from                                        diffs are also extracted and stored. Table 1 presents the number of
+  all six projects, Ambari, Calcite, Groovy, Ignite, Isis, and Netbeans,                              commits fetched for each project in the column “#Commits”.
+  in our benchmark.                                                                                       The following information is fetched during the process:
+• From Dong et al.’s dataset [14], we include the issues from five                                    • Commit ID: A unique hash value assigned to each commit,
+  projects, Pig, Maven, Infinispan, Drools, and Derby. This dataset                                      serving as its identifier.
+  also includes Groovy, which is already included in our benchmark                                    • Parent Commit IDs: The hash(es) of the immediate predecessor
+  from Zhang et al.’s dataset [72]. As they were missing issue                                           commit(s) of the current commit.
+  comments, code diffs, and committed files, we refetched these                                       • Author: The person who originally wrote the changes.
+  data.                                                                                               • Committer: The person who applied the changes to the reposi-
+• From Lin et al.’s dataset [31], we include the issues from all                                         tory.
+  three projects: Pgcli, Flask, and Keras. As the issue comments and                                  • Commit Time: The commit’s creation timestamp.
+  committed files were missing, we refetched them.                                                    • Commit Message: The description of the commit.
+• From Mazrae et al.’s dataset [36], we include the issues from                                       • Changed Files: List of paths of the files modified in the commit.
+  six projects, Beam, Flink, Freemarker, Airflow, Arrow, and Cassan-                                  • Code Diffs: The changes introduced by the commit.
+  dra, out of 12 projects. The six other projects from this dataset                                   • Committed Files: Source code files after applying the commit.
+  are already included in Zhang et al.’s dataset [72]. As this dataset                                Note that while our work only requires the commit ID, commit
+  provides only postprocessed data, we re-fetched the original                                        time, and commit message, we collect all commit information since
+  issue summaries, issue descriptions, issue comments, commit                                         other approaches may utilize this additional data.
+  messages, code diffs, and committed files.
+                                                                                                      3.3    Constructing False Links
+3.2           Preparing Commits                                                                       For a more realistic evaluation dataset, the number of false links
+For constructing false links, the set of all commits in each repository                               should match the actual number of commits that may be viable for
+is required. First, we clone the GitHub repository locally, which                                     linking to each issue in practice. For each issue in the evaluation
+enables faster access to commit data without API requests. From the                                   dataset, under the Realistic Distribution Setting (RDS), false links
+cloned repository, all commit IDs are obtained using the git log                                      will be adaptively constructed to better align with the repository’s
+command. Each commit is then processed to retrieve its metadata,                                      level of activity. We include all commits submitted in the time
+including the parent commit IDs, author, committer, commit time,                                      window within which the true commit can appear. To determine
+and commit message, using git show. Additionally, the list of                                         the size of the time window, we perform an analysis and find that
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                                                                  ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                         Vector Database Indexing and Retrieval (Sec. 4.1)                                                        LLM-Assisted Reranking (Sec 4.2 )
+                     Issue                                                                                                                                      Prompt
+                                                                 0.12 -0.45 0.78      …      0.02                   Role: User
+      Issue ID NETBEANS-803
+                                                                       Issue Embedding                              Content:
+     Summary nb-javac 11 upgrade in NetBeans                                                                        Given the following issue summary and description:
+                                                                -0.79 0.87   0.34     …      -0.23                  {issue_text}
+   Description Should cover below tasks in NetBeans -                                                               Rerank the provided commits based on their relevance to the issue. Only
+               nb-javac 11 testing :                             0.87 -0.45 -0.34     …      0.76                   output the commit IDs in descending order of relevance, formatted as
+               • Run tests for modules java …                                                                       follows:
+                                                                                                                    ['1-{{commit_id}}', '2-{{commit_id}}', '3-{{commit_id}}', ...]
+                                                                 0.23 -0.35 0.81      …      -0.97                  Do not include any additional text or explanation in the output.
+                                                                    Commits Embeddings                              Commits:
+                 sentence-transformers                                                                              Commit ID: {commit_id}. Commit Message: {message}
+                                                                                                                    Commit ID: {commit_id}. Commit Message: {message}
+              /all-MiniLM-L6-v2
+                                                                            FAISS                                    ...... (there should be 10 commits in total)
+                huggingface.co                                                                                      Output:
+                                                                       Vector Database                              ['1-daa281...', '2-48135...', '3-984a8...', '...', '8-3acfa0...', '9-8f9bf9...', '10-610f68...']
+
+       Commit ID 4fd115aeae3b8423d……                    Rank   Commit ID     Similarity Score          Label                         Rank                  Commit ID                       Label
+   CommitCommit      17cbec31b27ae9e3……
+          MessageID Updation for nb-javac jar ……         1     4fd115ae...          0.7069               0                              1                   3055661e...                       1
+           MessageID Updation
+    CommitCommit               for nb-javac jar ……
+                      3055661e4dd1c7d58……                2     3055661e...          0.6843               1                              2                   4fd115ae...                       0
+      Commit Message Uptake nb-javac 11 jars for …       3        ……                 ……                 ……                              3                        ……                         ……
+                        Commits                                        Initial Results                                                                Reranked Results
+
+
+Figure 3: Overview of EasyLink. EasyLink consists of two key steps—the first step utilizes a vector database to retrieve initial
+ranked results, and the second step prompts an LLM to rerank the results.
+
+
+approximately 97% of all issues have their ground truth commit                                                  Table 1: Statistics of the benchmark
+submitted within one year of their creation (7-day time window:
+59%, 30-day time window: 77%, 6-month time window: 92%). This                                                                                                                         Average # of
+                                                                                                    Project name      #Commits                #Unique issue_id
+observation aligns with previous studies analyzing bug reports (e.g.,                                                                                                             false links per issue
+Rodrigues et al. [51], Zhang et al. [73]). Consequently, we apply a                                    Ambari★            24809                          1000                            3978.26
+                                                                                                        Calcite★          5889                           551                              516.31
+one-year time window to select candidate commits from the com-
+                                                                                                       Groovy★            20862                          1000                            1064.79
+mits pool (as described in Subsection 3.2) for each issue. Specifically,
+                                                                                                        Ignite★           28869                          1000                            2611.81
+for a true link denoted as 𝑡𝑖 = {𝐼𝑖 , 𝐶𝑖 }, where 𝐼𝑖 represents the issue                                 Isis★           24945                           652                            1265.91
+and 𝐶𝑖 the commit in the true link, the candidate commit 𝐶 𝑗 is                                       Netbeans★           10501                           159                            1279.68
+determined using Equation 1. If the commit time of 𝐶 𝑗 is within                                        Derby†            8040                            43                              363.93
+one year after the creation time of 𝐼𝑖 , we treat 𝐶 𝑗 as a candidate                                    Drools†           16585                           182                             630.74
+commit. By linking 𝐶 𝑗 to 𝐼𝑖 , we generate the false link 𝑓𝑖 = {𝐼𝑖 , 𝐶 𝑗 }.                           Infinispan†         17078                           399                            1110.68
+                                                                                                        Maven†            14685                           61                              377.15
+     is_candidate(𝐼𝑖 , 𝐶 𝑗 ) = 𝑐𝑟𝑒𝑎𝑡𝑒𝑑 (𝐼𝑖 ) ≤ 𝑐𝑜𝑚𝑚𝑖𝑡𝑡𝑒𝑑 (𝐶 𝑗 )                                           Pig†            3675                            45                              197.44
+                                                                                                         Flask‡           5353                           151                              357.88
+                                   ∧ 𝑐𝑜𝑚𝑚𝑖𝑡𝑡𝑒𝑑 (𝐶 𝑗 ) ≤ 𝑐𝑟𝑒𝑎𝑡𝑒𝑑 (𝐼𝑖 ) + 𝜖, (1)                           Keras‡           11248                           111                             454.23
+                                 𝜖 = one year.                                                           Pgcli‡           2364                           105                              356.92
+                                                                                                       Airflow§           27123                           961                            1882.61
+   Algorithm 1 details the construction of the evaluation dataset.                                      Arrow§            16947                          1000                            2058.99
+We first split the entire ground-truth dataset into training and test                                    Beam§            43595                           865                            6096.72
+sets following a 4:1 ratio [14, 54, 72]. The inputs to the algorithm are                             Cassandra§           29867                           25                             2560.84
+the true links from the test set and the commits pool for the project,                                   Flink§           35767                          1000                            3251.68
+which is prepared using the process described in Subsection 3.2.                                     Freemarker§          2492                             9                              179.00
+First, following the method used by EALink [72], we randomly                                  Note: Each project is annotated with a superscript representing its original dataset
+                                                                                              source: ★ Zhang et al. [72], † Dong et al. [14], ‡ Lin et al. [31], § Mazrae et al. [36]
+sample up to 1,000 unique issue IDs from the test set, forming
+the list sampled_issue_id_list. If fewer than 1,000 unique issues are
+available, all issues are included. Then, for each issue_id in this list,                     the issue with each commit in candidate_commits and labeling the
+we extract the true links for that issue from the test set. We use                            pair as 0. Finally, we append both the true_links and the false_links
+the term “links” (plural) because an issue may be linked to more                              for the issue to the evaluation dataset and then proceed to process
+than one commit [72]. In line 6 of the algorithm, we extract only                             the next issue. Note that this algorithm is executed separately for
+the issue information for the issue being processed (including issue                          each project, as each project has its own test dataset and commits
+ID, summary, description, etc.), denoted as issue. Next, as shown                             pool. Following prior work [54, 72], issue tags (e.g., “#123”, “JIRA-
+in lines 7 to 10 of the algorithm, we filter the candidate_commits                            456”) in the issue and commit text are removed to prevent potential
+to include all commits whose creation time is no earlier than the                             data leakage.
+issue’s creation time and strictly earlier than one year after the                                Table 1 shows the statistics of the evaluation dataset. The dataset
+issue’s creation time. Additionally, the commit should not be the fix                         includes the same issues as used in the evaluation of prior stud-
+commit of the issue. We then construct the false_links by pairing                             ies [14, 31, 36, 72]. Each issue has an average of 1,530 false links,
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                      Huang et al.
+
+
+with a minimum of 179 (Freemarker). In contrast, for each issue,              been retrieved, it could be obscured by incorrect commits that
+EALink [72] constructs a constant number of 99 false links per issue,         exhibit greater similarity to the issue. To address this, we rerank
+which is substantially smaller than the number of commits within              the retrieved commits using a large language model (LLM).
+a one-year time frame from issue creation. Note that an issue may                In this phase, the top-𝑘 commits from the initial retrieval are
+be fixed by one or more commits [72]. In our evaluation dataset,              provided to the LLM with a structured prompt, as shown in Figure 3.
+17% of issues were fixed by multiple commits.                                 The prompt includes the issue text (summary and description),
+                                                                              along with each commit’s ID and message. We also specify an
+4     The EasyLink Approach                                                   output format instructing the LLM to return a reranked list of
+This section details EasyLink. Figure 3 shows an overview of Ea-              commit IDs. The LLM will analyze these commits and produce a
+syLink, which consists of two stages: the first stage uses a vector           reranked list based on contextual understanding and issue-commit
+database for scalable retrieval to fetch commits ranked by their              relevance. Outputs that do not match the expected format (0.1% of
+similarity to the issue and the second stage prompts an LLM to                the time) default to the initial retrieval results.
+rerank them by their relevance to the issue. We elaborate the key                In detail, we adopt a zero-shot approach guided by prompts
+steps, vector database indexing and retrieval, and LLM-assisted               with ChatGPT (gpt-4o), following recent studies [19, 25, 66], which
+reranking below.                                                              demonstrate gpt-4o advanced capabilities in understanding complex
+                                                                              textual relationships. The parameter 𝑘 controls the additional cost
+4.1      Vector Database Indexing and Retrieval                               incurred for increasing precision. While it is possible to rerank all
+                                                                              fetched commits for higher precision, this requires a longer prompt
+The process begins by embedding the commit messages using
+                                                                              for the LLM, requiring more computation resources. For the value
+an embedding tool, retaining the commit ID as metadata. Simi-
+                                                                              of 𝑘, we select 𝑘=10 for its balance of precision and efficiency. We
+larly, the issue summary and description are concatenated and
+                                                                              later show that this allows a high Precision@1 without incurring a
+embedded together, with the issue ID retained as metadata. To
+                                                                              high cost. This will be discussed in Subsection 6.3.
+generate the embeddings, we utilize the Sentence-Transformers
+library [50] with the all-MiniLM-L6-v2 model, a lightweight and
+efficient transformer based on Microsoft’s MiniLM architecture [67].          5 Experimental Setup
+We chose this model because it is the most downloaded and most                5.1 Research Questions
+liked sentence-similarity model on Hugging Face, indicating strong
+                                                                              This work aims to answer the following research questions (RQs):
+community trust and widespread adoption. This model employs
+self-attention distillation to capture contextual information effec-          RQ1: How does the state-of-the-art tool perform on a real-
+tively while maintaining computational efficiency. Given an input             istic evaluation dataset? This question investigates the perfor-
+text 𝑇 , the embedding process can be defined as follows:                     mance of the state-of-the-art EALink [72] on the evaluation dataset
+                                                                              constructed under the Realistic Distribution Setting (RDS). First,
+                                 E = MiniLM(𝑇 )                        (2)
+                                                                              we replicate the successful performance of EALink on their orig-
+where E ∈ R384 represents the output embedding vector in a 384-               inal evaluation dataset. Next, we investigate the performance of
+dimensional space.                                                            EALink after expanding the evaluation onto a larger benchmark.
+   After generating embeddings, we use a vector database for in-              Afterwards, to understand the sensitivity of its performance to
+dexing and retrieval. We use FAISS [15]—an off-the-shelf library de-          the evaluation dataset, we investigate how much the performance
+signed for efficient nearest neighbor (NN) retrieval in high-dimensional      of EALink changes when evaluated under Realistic Distribution
+spaces. We believe that switching FAISS with another vector data-             Setting and compare it with the traditional IR method, VSM.
+base with comparable capability would produce similar results, as
+shown in Subsection 6.3,                                                      RQ2: How does EasyLink perform on the same realistic eval-
+   To retrieve commits from the vector database, we compute the               uation dataset? This research question is concerned with the
+cosine similarity score, following prior studies [49, 54, 72]. The            effectiveness of EasyLink. We assess EasyLink in terms of both its
+computation is given by the following equation:                               ability to distinguish true links from false links and its efficiency.
+                                        q · e𝑖                                We analyze the sensitivity of the performance of EasyLink to the
+                       sim(q, e𝑖 ) =                               (3)        evaluation setup by comparing its performance on the different
+                                     ∥q∥ 2 ∥e𝑖 ∥ 2
+                                                                              evaluation methods.
+where e𝑖 is the 𝑖-th element of the commit message embeddings E =
+⟨e1, e2, . . . , e𝑛 ⟩ that are indexed by the vector database for efficient   RQ3: Does EasyLink’s performance change under different
+access, and q is the issue embedding. A higher score between the              configurations? This question aims to investigate the effect of
+query issue and the commit message indicates greater similarity,              different settings of EasyLink. We explore different embedding
+enabling the ranking of commit messages and the generation of a               models for the vector database and various 𝑘 value settings for the
+list of candidate commits.                                                    LLM-assisted stage to assess whether these changes will signifi-
+                                                                              cantly affect EasyLink’s performance.
+4.2      LLM-Assisted Reranking
+Due to the semantic gap between issues and commits [14, 31, 72],              5.2    Experiment Setting
+retrieving the most similar commit does not guarantee finding                 5.2.1 Hardware Configuration. The experiments were conducted
+the one that fixed the issue. While the correct commit may have               on a machine equipped with two Intel(R) Xeon(R) Platinum 8480C
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                                        ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+CPUs @ 3.80GHz, 2.0 TiB of main memory, and one NVIDIA H100                       Table 2: Performance of EALink on evaluation datasets con-
+80GB HBM3 GPU.                                                                    structed using different methods
+
+5.2.2 LLM Setup. We utilized the ChatGPT model GPT-4o provided                                                 False Links=99               RDS
+by OpenAI, specifically the gpt-4o-2024-11-20 version, with its                             P@1 (Hit@1)             32.52            14.43 (↓ 55.63%)
+default configuration. The temperature was set to the default value                            P@10                  7.08             3.64 (↓ 48.59%)
+of 1.0, and the model was sampled once per query. The input token                             Hit@10                59.46            30.76 (↓ 48.27%)
+size was limited to a 128k token context window per API constraints,                         Recall@10              56.68            28.06 (↓ 50.49%)
+with no additional adjustments or fine-tuning.                                                 MRR                  41.16            20.21 (↓ 50.90%)
+5.2.3 Baseline Description. We use EALink1 [72] as the baseline,                             NDCG@1                 20.52             9.10 (↓ 55.65%)
+which is a state-of-the-art tool that outperforms T-BERT [31] and                            NDCG@10                30.84            15.52 (↓ 49.67%)
+                                                                                  Note: Results are averaged over 20 projects. The column False Links=99 shows
+DeepLink [54]. It distills knowledge from CodeBERT [17] into a                    EALink’s performance on a dataset constructed with a fixed 99 false links per is-
+smaller model, fine-tuned with multi-task contrastive learning. We                sue, while the column RDS shows its performance on a dataset constructed under
+follow its original methodology, using the provided code and the                  Realistic Distribution Setting (RDS). The parentheses in the RDS column show the
+                                                                                  percentage change in performance.
+same hyperparameters. As a fundamental baseline, we also run
+VSM2 [56], which is widely used in other studies [14, 31, 72].
+                                                                                    where |𝑄 | is the number of queries, and Rank𝑖 is the position
+5.3     Evaluation Metrics                                                          of the first correctly linked commit for query 𝑖. A higher MRR
+We adopt the same metrics used by Zhang et al. [72], which use stan-                indicates earlier retrieval of relevant commits.
+dard metrics for information retrieval tasks [48, 55]: Precision@𝑘                • NDCG@k (Normalized Discounted Cumulative Gain) assesses
+(P@𝑘), Normalized Discounted Cumulative Gain (NDCG@𝑘), Mean                         how well relevant commits are ranked within the top 𝑘 retrieved
+Reciprocal Rank (MRR), and Hit Ratio (Hit@𝑘) for evaluation. We                     results:
+                                                                                                                       𝑘
+also include Recall@𝑘, which was overlooked in prior studies.                                                      1 ∑︁ 2𝑟𝑖 − 1
+                                                                                                    NDCG@k =                          ,          (8)
+• Precision@k evaluates the proportion of relevant commits (i.e.,                                                 𝑍𝑘 𝑖=1 log2 (𝑖 + 1)
+  commits that belong to the correct issue-commit links) within                     where 𝑍𝑘 is a normalization factor ensuring the ideal ranking
+  the top 𝑘 retrieved results:                                                      achieves a value of 1. The term 𝑟𝑖 represents the relevance score of
+                                  1 ∑︁ Rel𝑖                                         the commit at position 𝑖 (𝑟𝑖 = 1 for a correct match, 0 otherwise).
+                   Precision@k =             ,               (4)
+                                 |𝑄 | 𝑖 ∈𝑄 𝑘
+                                                                                  6 Results
+  where 𝑄 is the query set, |𝑄 | its size, and Rel𝑖 the number of                 6.1 RQ1: How does the state-of-the-art tool
+  correctly linked commits in the top 𝑘 results for query 𝑖.
+                                                                                      perform on a realistic evaluation dataset?
+• Hit@k measures the likelihood that at least one correct commit
+  appears within the top 𝑘 retrieved results:                                     To ensure we replicate EALink [72] correctly and perform a fair
+                                                                                  comparison, we ran EALink on both the evaluation dataset con-
+                            1 ∑︁                                                  structed using its original method and the dataset created under
+                  Hit@k =          I(Rank𝑖 ≤ 𝑘),              (5)
+                           |𝑄 | 𝑖                                                 the Realistic Distribution Setting (RDS), then compared the results.
+                                                                                  In the original experiments of Zhang et al., EALink was trained
+  where I(·) returns 1 if the highest-ranked relevant commit for
+                                                                                  using a balanced dataset and then tested on an imbalanced dataset.
+  query 𝑖 is within the top 𝑘, and 0 otherwise. Hit@1 is equivalent
+                                                                                  We reused the same code for training.
+  to Precision@1.
+                                                                                     Following EALink’s original evaluation [72], we first used their
+• Recall@k evaluates the proportion of relevant commits re-
+                                                                                  false link generation method to construct an evaluation dataset
+  trieved within the top 𝑘 results:
+                                                                                  using projects provided by them: Ambari, Calcite, Groovy, Ignite,
+                                 1 ∑︁ Rel𝑖                                        Isis, and NetBeans. For any given issue, it randomly samples 99 of
+                  Recall@k =                        ,            (6)
+                                |𝑄 | 𝑖 ∈𝑄 TotalRel𝑖                               the commits in the ground truth test dataset to construct false links.
+                                                                                  Next, with this evaluation dataset, which we refer to as the original
+  where 𝑄 is the query set, |𝑄 | its size, Rel𝑖 the number of retrieved           evaluation dataset, we evaluated EALink. EALink obtains an aver-
+  relevant commits, and TotalRel𝑖 the total relevant commits for                  age Precision@1 of 53.67%, which matches the 53.90% Precision@1
+  query 𝑖.                                                                        reported in the paper, indicating that our replication was success-
+• MRR (Mean Reciprocal Rank) evaluates how early the first rele-                  ful. Then, we expanded the evaluation to 20 projects (introduced
+  vant commit appears in the ranked list for each query:                          in Subsection 3.1). The results, shown in the first column of Table 2,
+                                         |𝑄 |                                     indicate an average Precision@1 of 32.52%.
+                                     1 ∑︁ 1                                          Then, we ran EALink on the evaluation dataset constructed un-
+                          MRR =                    ,                        (7)
+                                    |𝑄 | 𝑖=1 Rank𝑖                                der the Realistic Distribution Setting. Unlike the original evaluation
+                                                                                  dataset of Zhang et al. [72], which had a fixed number of 99 false
+1We use EALink provided code and data from https://github.com/KDEGroup/EALink.    links per issue, our evaluation generates more false links for repos-
+2We implemented VSM using the Gensim library (https://pypi.org/project/gensim)    itories with a larger number of commits. This results in an average
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                            Huang et al.
+
+
+Table 3: Comparison of linking effectiveness on the original                      Table 4: Comparison of linking effectiveness on the dataset
+dataset with a constant 99 false links constructed per issue.                     constructed under RDS
+This comprises the six projects provided by Zhang et al. [72]
+(Ambari, Calcite, Groovy, Ignite, Isis, and NetBeans)                                  Metric    EALink VSM Vector DB                                 EasyLink
+                                                                                     P@1 (Hit@1) 14.43 46.59  61.57                                75.03 (↑ 420.0%)
+                            EALink        Vector DB      EasyLink                       P@10       3.64  8.70 10.09                                10.09 (↑ 177.2%)
+       P@1 (Hit@1)           53.67          81.83     90.04(↑ 67.77%)                  Hit@10     30.76 70.94 83.38                                83.38 (↑ 171.1%)
+          P@10                8.94          11.14     11.14(↑ 24.61%)                 Recall@10   28.06 67.22 78.84                                78.84 (↑ 181.0%)
+         Hit@10              72.56          92.89     92.89(↑ 28.02%)                   MRR       20.21 55.10 69.21                                78.52 (↑ 288.5%)
+        Recall@10            69.03          89.93     89.93(↑ 30.28%)                 NDCG@1       9.10 29.39 38.85                                46.86 (↑ 415.0%)
+          MRR                60.13          85.87     91.38(↑ 51.97%)                 NDCG@10     15.52 39.45 47.98                                51.08 (↑ 229.1%)
+        NDCG@1               33.86          51.63     56.81(↑ 67.78%)             Note: Results are averaged over 20 projects (%). The parentheses show the improve-
+                                                                                  ments over EALink. Since P@10, Hit@10, and Recall@10 only assess whether the true
+        NDCG@10              41.33          56.31     58.07(↑ 40.50%)             commits are included within the top 10 results, without considering its exact rank,
+Note: The parentheses in the EasyLink column show the improvements over EALink.   they are the same for both the vector database and EasyLink. Bold numbers indicate
+Bold numbers indicate the highest performance. All values are in %.               the highest performance.
+
+
+                                                                                      Table 5: Comparison of training and testing time cost
+number of false links per issue of 1,530. In the second column of Ta-
+ble 2, we present the results of running the tool on our evaluation
+                                                                                                                   EALink             Vector DB           EasyLink
+dataset, which shows a significant performance drop compared to
+                                                                                            Train
+the original evaluation dataset. Across the 20 projects, EALink’s Pre-                                         100.68h / 4.39s            N/A                N/A
+                                                                                      (Total / Per Link)
+cision@1 decreases to 14.43%, a decline of 55.63%. Similarly, Hit@10                         Test
+drops from nearly 60% to about 30%, reducing by half. On the six                                                17.78h / 6.87s       2.26h / 0.87s      14.02h / 5.42s
+                                                                                      (Total / Per Issue)
+projects provided by EALink (including Ambari, Calcite, and four                  Note: “Total” indicates the overall time for all 20 projects. “Per Link” (training) is
+others), the average Precision@1 decreases from 53.67% to 28.05%.                 the average time per link, computed as total training time divided by the number of
+                                                                                  training links. “Per Issue” (testing) is the average time per issue, based on total testing
+Additionally, we evaluated the traditional IR method, VSM, on the                 time divided by the number of evaluation issues. Testing times for Vector DB and
+same evaluation dataset. Its results are presented in Table 4. Sur-               EasyLink include embedding, indexing, and retrieval.
+prisingly, EALink underperforms the traditional IR method, VSM.
+VSM achieves a Precision@1 of 46.59% and demonstrates better
+performance across all other metrics. These results suggest that the              EALink. Following the Mann-Whitney U test [34], the improvement
+use of VSM would be preferred over EALink in a realistic setting.                 of EasyLink over EALink in every metric is statistically significant
+                                                                                  (p-value < 0.01) and exhibits a large effect size [11] (Cohen’s D >
+  Answer to RQ1: We constructed an evaluation dataset un-                         0.8). These results demonstrate that EasyLink is effective in issue-
+  der the Realistic Distribution Setting (RDS), which considers                   commit link recovery and that LLMs can be effectively leveraged
+  more false links per issue when there is higher commit activity                 to enhance performance.
+  during a given period, better reflecting the practical use of an
+  issue-commit link recovery technique on a repository. Under                     6.2.2 Comparison of Efficiency. Efficiency is an important aspect of
+  this evaluation, the average Precision@1 of the state-of-the-art                software traceability, especially when used in large-scale industrial
+  tool declines to 14.43% compared to a VSM baseline with a Pre-                  settings [9, 61]. Therefore, we calculated the training and testing
+  cision@1 of 46.59%.                                                             times required for three approaches—EALink, the vector database,
+                                                                                  and the EasyLink—to compare their efficiency. The results, shown
+                                                                                  in Table 5, indicate that for the 20 projects, EALink requires 100.68
+6.2      RQ2: How does EasyLink perform on the                                    hours for training, with an average of 4.39 seconds per link in the
+         same realistic evaluation dataset?                                       training set. However, approaches using a vector database do not
+6.2.1 Comparison of Effectiveness. To ensure a fair comparison,                   require training on a specific issue-commit link dataset, making
+we first evaluated the vector database and EasyLink on the dataset                them easier to use and more practical with less human effort.
+constructed using the EALink method [72], which generates 99 false                   Regarding testing time, EALink requires a total of 17.78 hours
+links per issue and includes the six projects provided by EALink.                 for the 20 projects, averaging 6.87 seconds per issue, while the
+The results, shown in Table 3, indicate that EasyLink achieves a Pre-             vector database approach takes only 2.26 hours in total, averaging
+cision@1 of 90.04%, significantly outperforming EALink’s 53.67%.                  0.87 seconds per issue. These differences are statistically significant
+The vector database method also outperforms EALink, achieving a                   according to the Mann-Whitney U test [34] (p-value < 0.01) and
+Precision@1 of 81.83%.                                                            demonstrate a large effect size (Cohen’s D > 0.8). Additionally,
+   Furthermore, we compared them using our more realistic eval-                   the LLM-assisted method (i.e., EasyLink) takes 14.02 hours for
+uation dataset. As presented in Table 4, the vector database ap-                  testing, which is faster than EALink and achieves a significantly
+proach achieves an average Precision@1 of 61.57%, a significant                   higher performance. These results demonstrate that the use of
+improvement over EALink’s 14.43%. With LLM-assisted rerank-                       vector database is an efficient solution. It eliminates the need for
+ing, EasyLink further enhances Precision@1 by an average of                       pretraining models and reduces testing time. By incorporating an
+13.46%, reaching 75.03%, representing a 420.0% increase compared to               LLM reranking step, EasyLink achieves a high precision while
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                                           ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+Table 6: Comparison of linking effectiveness while varying                               relatively lower performance, increasing 𝑘 to 10, 15, or 20 does not
+the choice of embedding method                                                           lead to significant performance gains. Considering performance,
+                                                                                         time, and resource costs, we find that 𝑘 = 10 provides the best
+                              MiniLM                MPNet               OpenAI           trade-off. Additionally, compared to the straight line in the figure
+  P@1 (Hit@1)                  61.57                62.73                 70.10          representing the Precision@1 of EALink’s when run on the same
+       P@10                    10.09                10.18                 10.62          evaluation dataset, our approach outperforms EALink across dif-
+      Hit@10                   83.38                83.00                 87.08          ferent 𝑘 values. This shows that its performance does not rely on
+    Recall@10                  78.84                78.40                 82.91          tuning 𝑘.
+       MRR                     69.21                70.39                 76.51
+    NDCG@1                     38.85                39.58                 44.22           Answer to RQ3: For vector database retrieval, using different
+   NDCG@10                     47.98                48.32                 51.56           embedding models with similar runtime costs yields comparable
+ Test Time (hour)              2.26h                3.22h                28.72h           results. In the LLM-assisted reranking stage, increasing the 𝑘
+    Model Size             22.7M params          109M params          Cloud-based         value consistently improves performance over the baseline but
+Note: Results are averaged over 20 projects. All values are in %, except for test time    increases test time cost.
+and model size.
+
+                                                                                         7 Discussion
+eliminating the need for training models. In practice, each issue
+requires about 758 input tokens and 266 output tokens, leading to
+                                                                                         7.1 Revisiting Classical Baselines
+an estimated cost of only $0.009 per issue when using GPT-4o.                            In addition to recent learning-based methods, it is important to
+                                                                                         include classical baselines when revisiting research progress on
+  Answer to RQ2: Our results show that on the realistic evalua-                          issue-commit link recovery. We therefore evaluate ReLink [68], an
+  tion dataset, EasyLink achieves a Precision@1 of 75.03%, outper-                       approach that extends beyond the basic VSM, using our constructed
+  forming EALink (which achieves 14.43%) by 420.0%. Moreover,                            dataset. Since ReLink outputs positive issue-commit links rather
+  using the vector database-based method eliminates the need                             than ranked candidates, we aligned the evaluation by treating Ea-
+  for pretraining on task-specific data, making it a more efficient                      syLink’s top-ranked commit per issue as its predicted link and
+  solution.                                                                              computed precision, recall, and F1 score accordingly. The average
+                                                                                         results across 20 projects show that ReLink achieves 10.92% preci-
+6.3     RQ3: Does EasyLink’s performance change                                          sion, 12.59% recall, and 10.79% F1 score, whereas EasyLink reaches
+        under different configurations?                                                  75.03% precision, 50.75% recall, and 58.75% F1 score, significantly
+                                                                                         outperforming ReLink. Unlike ReLink, which relies on explicit issue
+6.3.1 Vector Database: Evaluating Different Embedding Models. We
+                                                                                         tags in commit messages (removed in our setup) and operates at the
+evaluated two additional embedding models for use in the vec-
+                                                                                         set level, EasyLink leverages semantic relevance and ranks candi-
+tor database. The first model, all-mpnet-base-v2, built upon Mi-
+                                                                                         dates per issue, making it more robust in large and noisy candidate
+crosoft’s MPNet architecture [60], is a sentence transformer and the
+                                                                                         pools.
+second-most-downloaded sentence-similarity model on Hugging
+Face (the most popular is used in EasyLink). The second model,
+text-embedding-ada-002, is the default model for OpenAI embed-                           7.2    Lessons learned and Implications
+dings [39], which is a larger model designed for higher precision.
+                                                                                         Keep your feet on the ground – evaluation should match
+    Table 6 presents the results comparing three embedding models.
+                                                                                         practice. Our results suggest that the performance of issue-commit
+The comparison between MiniLM (used in EasyLink) and MPNet
+                                                                                         linking approaches is sensitive to their evaluation setups, which em-
+shows that the model we selected in our tool requires less time
+                                                                                         phasizes the importance of the evaluation of proposed techniques
+while achieving comparable performance. Although OpenAI em-
+                                                                                         to reflect the conditions under real-world practices. Future research
+beddings provide better performance—with Precision@1 increasing
+                                                                                         should use evaluations that better reflect a practical usage scenario.
+from 61.57% to 70.10% (an improvement of 8.53%)—they require
+28.72 hours to complete the experiment, approximately 11 times                           Back to the basics – IR techniques are strong baselines. Our
+longer than the MiniLM model. Given the high computational cost,                         results showed that the VSM baseline, a dated IR model [1] proposed
+MiniLM is a more practical option.                                                       by Wu et al. [68] for issue-commit linking, was effective. This is
+                                                                                         consistent with the “Easy over hard” principle advocated by Fu and
+6.3.2 LLM-Assisted Reranking: Exploring Different Top-𝑘 Values.
+                                                                                         Menzies [18]. This finding has practical implications – practitioners
+To further analyze the effect of the 𝑘 setting, we conduct experi-
+                                                                                         may find that the use of simple and fast approaches match the
+ments with different top-𝑘 values, specifically 𝑘 = 5, 10, 15, 20. We
+                                                                                         performance of more complex approaches.
+conducted this experiment across 20 projects using the realistic
+evaluation dataset. The results in Figure 4 show that increasing                         Don’t forget your roots – updating baselines.
+𝑘—meaning reranking a larger set of top results—generally leads to                          Studies on issue-commit linking have included traditional IR
+better performance, specifically higher Precision@1 and NDCG@1.                          baselines, such as the Vector Space Model (VSM) [56], Latent Dirich-
+However, this improvement comes with a significant increase in                           let Allocation (LDA) [6], and Latent Semantic Indexing (LSI) [12].
+time cost and requires processing more input tokens, leading to a                        However, recent studies continue to rely on traditional methods as
+higher cost in invoking OpenAI API. While setting 𝑘 = 5 results in                       baselines without considering recent advances in the IR literature.
+   ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                                Huang et al.
+
+
+                               P@1 (Hit@1)              MRR                     NDCG@1
+                               P@1 (Hit@1) - EALink     Test Time Cost (min)
+                                                                                                                         7.3    Threats to Validity
+                                               78.52              79.48           80.23
+                      80        75.47                                                       1400                         Threats to Internal Validity. Threats to internal validity refer
+                                                                               75.69                                     to errors in our experiments or implementation issues. To avoid
+
+
+
+
+                                                                                                  Test Time Cost (min)
+Performance Metrics
+
+
+
+
+                                               75.03              75.14            1287
+                                71.25
+                      60                                                                                                 implementation errors, we replicated the baseline tool, EALink [72],
+                                                                  1149
+                                                                                                                         using its publicly available code. We ensured that we replicated
+                                               46.86              47.41           47.75     900                          its previously reported results before extending the experiments.
+                      40        44.95
+                                               841
+                                                                                                                         Therefore, the threats to internal validity are minimal.
+                      20                                                                                                 Threats to Construct Validity. A potential threat to construct va-
+                             14.43
+                                                                                                                         lidity is the selection of evaluation metrics. We use widely adopted
+                                 503
+                      0                                                                     400                          metrics—Precision@𝑘, Hit@𝑘, MRR, and NDCG@𝑘—from prior
+                                     5          10                 15              20                                    studies [14, 36, 54, 72] and information retrieval tasks [48, 55]. We
+                                                       k values
+                                                                                                                         also included Recall@k, a standard information retrieval evalua-
+                                                                                                                         tion metric, overlooked in prior issue-commit linking work. Conse-
+  Figure 4: Effect of varying 𝑘 in EasyLink during reranking:
+                                                                                                                         quently, we believe that any threat to construct validity is minimal.
+  A higher 𝑘 slightly raises performance (left axis: P@1, MRR,
+  NDCG@1) while significantly increasing test time cost (right                                                           Threats to External Validity. Threats to external validity refer
+  axis).                                                                                                                 to factors that might limit the generalizability of our findings. Our
+                                                                                                                         benchmark is the largest in the literature, which provides confi-
+                                                                                                                         dence that our findings are not specific to only a few projects. One
+                           Table 7: Comparison of EALink and EALink+LLM                                                  threat is the number of times our experiments were performed. To
+                                                                                                                         mitigate the effect of randomness, we repeated our experiments
+                             Metric        EALink        EALink+LLM            Improvement                               five times. For all metrics, the average results exhibit standard devi-
+                           P@1 (Hit@1)      14.43             26.04               ↑ 80.45                                ations below 1%. Given the stability of the results, repeating the
+                                                                                                                         experiments would not yield different findings. As such, there are
+                              P@10           3.64              3.64                  -
+                                                                                                                         minimal threats to external validity.
+                             Hit@10         30.76             30.76                  -
+                            Recall@10       28.06             28.06                  -
+                              MRR           20.21             28.55               ↑ 41.26                                8     Related Work
+                            NDCG@1           9.10             16.96               ↑ 86.37
+                            NDCG@10         15.52             18.79               ↑ 21.07                                Traceability Link Recovery: Traceability link recovery methods
+   Note: Results (%) are averaged over 20 projects on our dataset constructed under the
+                                                                                                                         create links between artifacts such as requirements, design docu-
+   Realistic Distribution Setting (RDS).                                                                                 ments, architecture models, and source code. Research has applied
+                                                                                                                         classic IR techniques [7, 16, 21, 33, 43, 71]. Recent work [19, 52]
+                                                                                                                         utilized LLMs but also found that their level of effectiveness has still
+                                                                                                                         been unable to support practical automatic link recovery [19, 23].
+  In our experiments, the out-of-the-box use of a modern baseline, the
+  vector database FAISS [15], already achieves a strong performance.                                                     Traditional Approaches for Issue-Commit Linking: Tradi-
+  This shows that vector databases provide an effective retrieval ap-                                                    tional approaches combine heuristics and expert annotation to link
+  proach for issue-commit linking, highlighting the need to update                                                       commits with bug reports. Bachmann et al. [4] used interactive
+  baselines to reflect the latest advancements in IR methods. We call                                                    heuristic linking. Wu et al. [68] filtered candidates by textual sim-
+  for the need for newly proposed methods to be evaluated with                                                           ilarity, timing, and committer mapping. It also learned optimal
+  baselines that are continuously updated to accurately measure real                                                     thresholds from training data. Nguyen et al. [40] improved per-
+  progress.                                                                                                              formance by adding code change analysis. Schermann et al. [57]
+                                                                                                                         leveraged developer identity, time proximity, and resource overlap.
+  From good to great – effectiveness of LLMs in retrieval refine-
+                                                                                                                         These methods often miss links [5].
+  ment. Our experiments demonstrate that a reranking step using
+  LLMs is highly effective in overcoming the semantic gap, consistent                                                    Machine Learning-Based Approaches: Machine learning meth-
+  with findings in information retrieval systems [20, 62, 75]. To assess                                                 ods improve linking accuracy by reducing the need for handcrafted
+  whether LLM-based reranking can also enhance the performance                                                           heuristics. Le et al. [29] enriched commit messages via code summa-
+  of EALink [72], a deep learning-based method, we conducted ex-                                                         rization. Sun et al. [64] refined feature extraction with non-source
+  periments on our realistic evaluation dataset, including 20 projects.                                                  documents and code file filtering. Sun et al. [63] used positive-
+  As shown in Table 7, with LLM reranking assistance, we observe                                                         unlabeled learning to address limited labeled data. Rath et al. [49]
+  a Precision@1 improvement of 80.45%, increasing from 14.43% to                                                         combined process, stakeholder, structural, and textual similarity
+  26.04%. This demonstrates the LLM’s effectiveness in refining ini-                                                     metrics. Mazrae et al. [36] incorporated non-textual cues such as au-
+  tially imprecise results. Future work can explore the optimization                                                     thorship, timestamps, and status. Dong et al. [14], a semi-supervised
+  of LLM prompts and apply domain-specific fine-tuning to further                                                        framework, tackled data imbalance and sparsity. These approaches
+  improve the refinement step.                                                                                           were later improved by deep learning.
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                                                    ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+Deep Learning-Based Approaches: Recent works focused on                                        ICPC ’20: 28th International Conference on Program Comprehension, Seoul, Republic
+the use of deep learning. Ruan et al. [54] learned semantic repre-                             of Korea, July 13-15, 2020. ACM, 14–24. https://doi.org/10.1145/3387904.3389251
+                                                                                           [3] Adrian Bachmann and Abraham Bernstein. 2009. Software process data quality
+sentations with word embeddings and RNNs, while Xie et al. [70]                                and characteristics: a historical view on open and closed source projects. In
+combined RNNs with SVMs and a code knowledge graph from ASTs                                   Proceedings of the Joint International and Annual ERCIM Workshops on Principles of
+                                                                                               Software Evolution (IWPSE) and Software Evolution (Evol) Workshops (Amsterdam,
+for semantic and code context. Lin et al. [31] leveraged a BERT-                               The Netherlands) (IWPSE-Evol ’09). Association for Computing Machinery, New
+based framework pre-trained on CodeSearchNet and fine-tuned on                                 York, NY, USA, 119–128. https://doi.org/10.1145/1595808.1595830
+small datasets to address data sparsity. Zhu et al. [74] employed                          [4] Adrian Bachmann, Christian Bird, Foyzur Rahman, Premkumar T. Devanbu,
+                                                                                               and Abraham Bernstein. 2010. The missing links: bugs and bug-fix commits. In
+deep semi-supervised learning and iteratively retrained its model                              Proceedings of the 18th ACM SIGSOFT International Symposium on Foundations of
+using pseudo-labels on unlabeled data. Zhang et al. [72] employed                              Software Engineering, 2010, Santa Fe, NM, USA, November 7-11, 2010, Gruia-Catalin
+knowledge distillation to improve both accuracy and efficiency.                                Roman and André van der Hoek (Eds.). ACM, 97–106. https://doi.org/10.1145/
+                                                                                               1882291.1882308
+Despite these improvements, we found that the approaches were                              [5] Christian Bird, Adrian Bachmann, Eirik Aune, John Duffy, Abraham Bernstein,
+assessed using evaluations whose realism could be improved.                                    Vladimir Filkov, and Premkumar T. Devanbu. 2009. Fair and balanced?: bias
+                                                                                               in bug-fix datasets. In Proceedings of the 7th joint meeting of the European
+Replication Studies: Our study found that the data used in                                     Software Engineering Conference and the ACM SIGSOFT International Sympo-
+                                                                                               sium on Foundations of Software Engineering, 2009, Amsterdam, The Netherlands,
+evaluations for issue-commit link recovery may have the draw-                                  August 24-28, 2009, Hans van Vliet and Valérie Issarny (Eds.). ACM, 121–130.
+back of an unrealistic distribution of false links. Some other stud-                           https://doi.org/10.1145/1595696.1595716
+ies [8, 13, 27, 32, 58, 59] have also emphasized the importance of                         [6] David M. Blei, Andrew Y. Ng, and Michael I. Jordan. 2003. Latent Dirichlet
+                                                                                               Allocation. J. Mach. Learn. Res. 3 (2003), 993–1022. https://jmlr.org/papers/v3/
+using methods and data that evaluate tools in different settings.                              blei03a.html
+While some works [14, 31, 36, 54, 72] have investigated issues of                          [7] Markus Borg, Per Runeson, and Anders Ardö. 2014. Recovering from a decade: a
+                                                                                               systematic mapping of information retrieval approaches to software traceability.
+data cleanliness and data leakage, our work is the first replication                           Empir. Softw. Eng. 19, 6 (2014), 1565–1616. https://doi.org/10.1007/S10664-013-
+study of issue-commit linkers and highlights the importance of                                 9255-Y
+evaluating them using realistic evaluation data that match the real                        [8] Partha Chakraborty, Krishna Kanth Arumugam, Mahmoud Alfadel, Meiyappan
+                                                                                               Nagappan, and Shane McIntosh. 2024. Revisiting the Performance of Deep
+development history.                                                                           Learning-Based Vulnerability Detection on Realistic Datasets. IEEE Transactions
+                                                                                               on Software Engineering 50, 8 (2024), 2163–2177. https://doi.org/10.1109/TSE.2024.
+9    Conclusion and Future Work                                                                3423712
+                                                                                           [9] Jane Cleland-Huang, Olly Gotel, and Andrea Zisman (Eds.). 2012. Software and
+In this study, we successfully replicate the strong performance of                             Systems Traceability. Springer. https://doi.org/10.1007/978-1-4471-2239-5
+the state-of-the-art work on issue-commit linking. To investigate                         [10] Jane Cleland-Huang, Orlena C. Z. Gotel, Jane Huffman Hayes, Patrick Mäder,
+                                                                                               and Andrea Zisman. 2014. Software traceability: trends and future directions.
+it further, we constructed a new benchmark under a proposed                                    In Future of Software Engineering Proceedings (Hyderabad, India) (FOSE 2014).
+Realistic Distribution Setting (RDS) that adaptively constructs false                          Association for Computing Machinery, New York, NY, USA, 55–69. https://doi.
+links based on the level of development activity in the same time                              org/10.1145/2593882.2593891
+                                                                                          [11] Jacob Cohen. 2013. Statistical power analysis for the behavioral sciences. routledge.
+frame as the ground-truth link. To the best of our knowledge, the                         [12] Scott Deerwester, Susan T Dumais, George W Furnas, Thomas K Landauer, and
+benchmark is the largest in the literature, consisting of 9,319 unique                         Richard Harshman. 1990. Indexing by latent semantic analysis. Journal of the
+                                                                                               American society for information science 41, 6 (1990), 391–407.
+issues from 20 open-source projects, with an average of 1,530 false                       [13] Yangruibo Ding, Yanjun Fu, Omniyyah Ibrahim, Chawin Sitawarin, Xinyun
+links constructed per issue. We find that the use of an off-the-shelf IR                       Chen, Basel Alomair, David A. Wagner, Baishakhi Ray, and Yizheng Chen. 2025.
+method outperforms the state-of-the-art technique. Building on our                             Vulnerability Detection with Code Language Models: How Far are We?. In 47th
+                                                                                               IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa,
+findings, we propose EasyLink, a scalable and efficient approach                               ON, Canada, April 26 - May 6, 2025. IEEE, 1729–1741. https://doi.org/10.1109/
+that combines retrieval with an additional step of reranking using                             ICSE55347.2025.00038
+an LLM. In terms of average Precision@1, EasyLink outperforms                             [14] Liming Dong, He Zhang, Wei Liu, Zhiluo Weng, and Hongyu Kuang. 2022. Semi-
+                                                                                               supervised pre-processing for learning-based traceability framework on real-
+the state-of-the-art approach by more than four times.                                         world software projects. In Proceedings of the 30th ACM Joint European Software
+   In the future, we plan to extend EasyLink for other tasks in                                Engineering Conference and Symposium on the Foundations of Software Engineering,
+                                                                                               ESEC/FSE 2022, Singapore, Singapore, November 14-18, 2022, Abhik Roychoudhury,
+software traceability, such as mapping features to their implemen-                             Cristian Cadar, and Miryung Kim (Eds.). ACM, 570–582. https://doi.org/10.1145/
+tations and linking requirements to code changes.                                              3540250.3549151
+                                                                                          [15] Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy,
+                                                                                               Pierre-Emmanuel Mazaré, Maria Lomeli, Lucas Hosseini, and Hervé Jégou. 2024.
+Acknowledgments                                                                                The Faiss library. CoRR abs/2401.08281 (2024). https://doi.org/10.48550/ARXIV.
+This research / project is supported by the National Research Foun-                            2401.08281 arXiv:2401.08281
+                                                                                          [16] Marc Eaddy, Alfred V. Aho, Giuliano Antoniol, and Yann-Gaël Guéhéneuc. 2008.
+dation, Singapore, and the Smart Nation Group under the Smart                                  CERBERUS: Tracing Requirements to Source Code Using Information Retrieval,
+Nation Group’s Translational R&D Grant (Award No. TRANS2023-                                   Dynamic Analysis, and Program Analysis. In The 16th IEEE International Confer-
+TGC02). Any opinions, findings and conclusions or recommenda-                                  ence on Program Comprehension, ICPC 2008, Amsterdam, The Netherlands, June
+                                                                                               10-13, 2008, René L. Krikhaar, Ralf Lämmel, and Chris Verhoef (Eds.). IEEE Com-
+tions expressed in this material are those of the author(s) and do                             puter Society, 53–62. https://doi.org/10.1109/ICPC.2008.39
+not reflect the views of National Research Foundation, Singapore                          [17] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng Feng, Ming Gong,
+                                                                                               Linjun Shou, Bing Qin, Ting Liu, Daxin Jiang, and Ming Zhou. 2020. CodeBERT:
+or the Smart Nation Group.                                                                     A Pre-Trained Model for Programming and Natural Languages. In Findings of
+                                                                                               the Association for Computational Linguistics: EMNLP 2020, Online Event, 16-20
+References                                                                                     November 2020 (Findings of ACL, Vol. EMNLP 2020), Trevor Cohn, Yulan He, and
+                                                                                               Yang Liu (Eds.). Association for Computational Linguistics, 1536–1547. https:
+ [1] Giuliano Antoniol, Gerardo Canfora, Gerardo Casazza, Andrea De Lucia, and
+                                                                                               //doi.org/10.18653/V1/2020.FINDINGS-EMNLP.139
+     Ettore Merlo. 2002. Recovering Traceability Links between Code and Documen-
+                                                                                          [18] Wei Fu and Tim Menzies. 2017. Easy over hard: a case study on deep learning. In
+     tation. IEEE Trans. Software Eng. 28, 10 (2002), 970–983. https://doi.org/10.1109/
+                                                                                               Proceedings of the 2017 11th Joint Meeting on Foundations of Software Engineering,
+     TSE.2002.1041053
+                                                                                               ESEC/FSE 2017, Paderborn, Germany, September 4-8, 2017, Eric Bodden, Wilhelm
+ [2] Thazin Win Win Aung, Huan Huo, and Yulei Sui. 2020. A Literature Review of
+     Automatic Traceability Links Recovery for Software Change Impact Analysis. In
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                 Huang et al.
+
+
+     Schäfer, Arie van Deursen, and Andrea Zisman (Eds.). ACM, 49–60. https://doi.             In IEEE International Conference on Software Maintenance and Evolution, ICSME
+     org/10.1145/3106237.3106256                                                               2021, Luxembourg, September 27 - October 1, 2021. IEEE, 263–273. https://doi.org/
+[19] Dominik Fuchß, Tobias Hey, Jan Keim, Haoyu Liu, Niklas Ewald, Tobias Thirolf,             10.1109/ICSME52107.2021.00030
+     and Anne Koziolek. 2025. LiSSA: Toward Generic Traceability Link Recovery            [37] Andrew Meneely, Harshavardhan Srinivasan, Ayemi Musa, Alberto Rodriguez
+     Through Retrieval- Augmented Generation. In 47th IEEE/ACM International Con-              Tejeda, Matthew Mokary, and Brian Spates. 2013. When a Patch Goes Bad: Explor-
+     ference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6,         ing the Properties of Vulnerability-Contributing Commits. In 2013 ACM / IEEE
+     2025. IEEE, 1396–1408. https://doi.org/10.1109/ICSE55347.2025.00186                       International Symposium on Empirical Software Engineering and Measurement,
+[20] Jingtong Gao, Bo Chen, Xiangyu Zhao, Weiwen Liu, Xiangyang Li, Yichao                     Baltimore, Maryland, USA, October 10-11, 2013. IEEE Computer Society, 65–74.
+     Wang, Zijian Zhang, Wanyu Wang, Yuyang Ye, Shanru Lin, Huifeng Guo,                       https://doi.org/10.1109/ESEM.2013.19
+     and Ruiming Tang. 2024. LLM-enhanced Reranking in Recommender Sys-                   [38] Leila Naslavsky and Debra J. Richardson. 2007. Using traceability to support
+     tems. CoRR abs/2406.12433 (2024). https://doi.org/10.48550/ARXIV.2406.12433               model-based regression testing. In 22nd IEEE/ACM International Conference on
+     arXiv:2406.12433                                                                          Automated Software Engineering (ASE 2007), November 5-9, 2007, Atlanta, Georgia,
+[21] Malcom Gethers, Rocco Oliveto, Denys Poshyvanyk, and Andrea De Lucia. 2011.               USA, R. E. Kurt Stirewalt, Alexander Egyed, and Bernd Fischer (Eds.). ACM,
+     On integrating orthogonal information retrieval methods to improve traceability           567–570. https://doi.org/10.1145/1321631.1321744
+     recovery. In IEEE 27th International Conference on Software Maintenance, ICSM        [39] Arvind Neelakantan, Tao Xu, Raul Puri, Alec Radford, Jesse Michael Han, Jerry
+     2011, Williamsburg, VA, USA, September 25-30, 2011. IEEE Computer Society,                Tworek, Qiming Yuan, Nikolas Tezak, Jong Wook Kim, Chris Hallacy, Johannes
+     133–142. https://doi.org/10.1109/ICSM.2011.6080780                                        Heidecke, Pranav Shyam, Boris Power, Tyna Eloundou Nekoul, Girish Sastry,
+[22] Jin Guo, Jinghui Cheng, and Jane Cleland-Huang. 2017. Semantically enhanced               Gretchen Krueger, David Schnurr, Felipe Petroski Such, Kenny Hsu, Madeleine
+     software traceability using deep learning techniques. In Proceedings of the 39th          Thompson, Tabarak Khan, Toki Sherbakov, Joanne Jang, Peter Welinder, and
+     International Conference on Software Engineering (Buenos Aires, Argentina) (ICSE          Lilian Weng. 2022. Text and Code Embeddings by Contrastive Pre-Training. CoRR
+     ’17). IEEE Press, 3–14. https://doi.org/10.1109/ICSE.2017.9                               abs/2201.10005 (2022). arXiv:2201.10005 https://arxiv.org/abs/2201.10005
+[23] Jane Huffman Hayes, Alex Dekhtyar, and Senthil Karthikeyan Sundaram. 2006.           [40] Anh Tuan Nguyen, Tung Thanh Nguyen, Hoan Anh Nguyen, and Tien N. Nguyen.
+     Advancing Candidate Link Generation for Requirements Tracing: The Study of                2012. Multi-layered approach for recovering links between bug reports and fixes.
+     Methods. IEEE Trans. Software Eng. 32, 1 (2006), 4–19. https://doi.org/10.1109/           In 20th ACM SIGSOFT Symposium on the Foundations of Software Engineering
+     TSE.2006.3                                                                                (FSE-20), SIGSOFT/FSE’12, Cary, NC, USA - November 11 - 16, 2012, Will Tracz,
+[24] Abram Hindle, Daniel M. Germán, and Richard C. Holt. 2008. What do large                  Martin P. Robillard, and Tevfik Bultan (Eds.). ACM, 63. https://doi.org/10.1145/
+     commits tell us?: a taxonomical study of large commits. In Proceedings of the             2393596.2393671
+     2008 International Working Conference on Mining Software Repositories, MSR 2008      [41] Truong Giang Nguyen, Thanh Le-Cong, Hong Jin Kang, Xuan-Bach Dinh Le, and
+     (Co-located with ICSE), Leipzig, Germany, May 10-11, 2008, Proceedings, Ahmed E.          David Lo. 2022. VulCurator: a vulnerability-fixing commit detector. In Proceedings
+     Hassan, Michele Lanza, and Michael W. Godfrey (Eds.). ACM, 99–108. https:                 of the 30th ACM Joint European Software Engineering Conference and Symposium
+     //doi.org/10.1145/1370750.1370773                                                         on the Foundations of Software Engineering, ESEC/FSE 2022, Singapore, Singapore,
+[25] Raisa Islam and Owana Marzia Moushi. 2024. Gpt-4o: The cutting-edge advance-              November 14-18, 2022, Abhik Roychoudhury, Cristian Cadar, and Miryung Kim
+     ment in multimodal llm. Authorea Preprints (2024).                                        (Eds.). ACM, 1726–1730. https://doi.org/10.1145/3540250.3558936
+[26] Maliheh Izadi, Pooya Rostami Mazrae, Tom Mens, and Arie van Deursen. 2022.           [42] Giang Nguyen-Truong, Hong Jin Kang, David Lo, Abhishek Sharma, Andrew E.
+     LinkFormer: Automatic Contextualised Link Recovery of Software Artifacts in               Santosa, Asankhaya Sharma, and Ming Yi Ang. 2022. HERMES: Using Commit-
+     both Project-based and Transfer Learning Settings. CoRR abs/2211.00381 (2022).            Issue Linking to Detect Vulnerability-Fixing Commits. In IEEE International Con-
+     https://doi.org/10.48550/ARXIV.2211.00381 arXiv:2211.00381                                ference on Software Analysis, Evolution and Reengineering, SANER 2022, Honolulu,
+[27] Hong Jin Kang, Khai Loong Aw, and David Lo. 2022. Detecting False Alarms                  HI, USA, March 15-18, 2022. IEEE, 51–62. https://doi.org/10.1109/SANER53432.
+     from Automatic Static Analysis Tools: How Far are We?. In 44th IEEE/ACM 44th              2022.00018
+     International Conference on Software Engineering, ICSE 2022, Pittsburgh, PA, USA,    [43] Rocco Oliveto, Malcom Gethers, Denys Poshyvanyk, and Andrea De Lucia. 2010.
+     May 25-27, 2022. ACM, 698–709. https://doi.org/10.1145/3510003.3510214                    On the Equivalence of Information Retrieval Methods for Automated Traceability
+[28] Masanari Kondo, Yutaro Kashiwa, Yasutaka Kamei, and Osamu Mizuno. 2022.                   Link Recovery. In The 18th IEEE International Conference on Program Compre-
+     An empirical study of issue-link algorithms: which issue-link algorithms should           hension, ICPC 2010, Braga, Minho, Portugal, June 30-July 2, 2010. IEEE Computer
+     we use? Empir. Softw. Eng. 27, 6 (2022), 136. https://doi.org/10.1007/S10664-022-         Society, 68–71. https://doi.org/10.1109/ICPC.2010.20
+     10120-X                                                                              [44] OpenAI. 2024. GPT-4o. https://openai.com/index/hello-gpt-4o/.
+[29] Tien-Duy B. Le, Mario Linares Vásquez, David Lo, and Denys Poshyvanyk. 2015.         [45] EasyLink: Replication Package. 2025. Replication package of EasyLink. https:
+     RCLinker: automated linking of issue reports and commits leveraging rich con-             //figshare.com/s/d495f11c4cc5c1c72e68
+     textual information. In Proceedings of the 2015 IEEE 23rd International Conference   [46] Michael C. Panis. 2010. Successful Deployment of Requirements Traceabil-
+     on Program Comprehension, ICPC 2015, Florence/Firenze, Italy, May 16-24, 2015, An-        ity in a Commercial Engineering Organization...Really. In RE 2010, 18th IEEE
+     drea De Lucia, Christian Bird, and Rocco Oliveto (Eds.). IEEE Computer Society,           International Requirements Engineering Conference, Sydney, New South Wales,
+     36–47. https://doi.org/10.1109/ICPC.2015.13                                               Australia, September 27 - October 1, 2010. IEEE Computer Society, 303–307.
+[30] Kaixuan Li, Jian Zhang, Sen Chen, Han Liu, Yang Liu, and Yixiang Chen. 2024.              https://doi.org/10.1109/RE.2010.43
+     PatchFinder: A Two-Phase Approach to Security Patch Tracing for Disclosed            [47] Ranjith Purushothaman and Dewayne E. Perry. 2005. Toward Understanding the
+     Vulnerabilities in Open-Source Software. In Proceedings of the 33rd ACM SIGSOFT           Rhetoric of Small Source Code Changes. IEEE Trans. Software Eng. 31, 6 (2005),
+     International Symposium on Software Testing and Analysis, ISSTA 2024, Vienna,             511–526. https://doi.org/10.1109/TSE.2005.74
+     Austria, September 16-20, 2024, Maria Christakis and Michael Pradel (Eds.). ACM,     [48] Filip Radlinski and Nick Craswell. 2010. Comparing the sensitivity of informa-
+     590–602. https://doi.org/10.1145/3650212.3680305                                          tion retrieval metrics. In Proceeding of the 33rd International ACM SIGIR Confer-
+[31] Jinfeng Lin, Yalin Liu, Qingkai Zeng, Meng Jiang, and Jane Cleland-Huang. 2021.           ence on Research and Development in Information Retrieval, SIGIR 2010, Geneva,
+     Traceability Transformed: Generating more Accurate Links with Pre-Trained                 Switzerland, July 19-23, 2010, Fabio Crestani, Stéphane Marchand-Maillet, Hsin-
+     BERT Models. In 43rd IEEE/ACM International Conference on Software Engineering,           Hsi Chen, Efthimis N. Efthimiadis, and Jacques Savoy (Eds.). ACM, 667–674.
+     ICSE 2021, Madrid, Spain, 22-30 May 2021. IEEE, 324–335. https://doi.org/10.1109/         https://doi.org/10.1145/1835449.1835560
+     ICSE43902.2021.00040                                                                 [49] Michael Rath, Jacob Rendall, Jin L. C. Guo, Jane Cleland-Huang, and Patrick
+[32] Yue Liu, Chakkrit Tantithamthavorn, Yonghui Liu, Patanamon Thongtanunam,                  Mäder. 2018. Traceability in the wild: automatically augmenting incomplete trace
+     and Li Li. 2024. Automatically Recommend Code Updates: Are We There Yet?                  links. In Proceedings of the 40th International Conference on Software Engineering,
+     ACM Trans. Softw. Eng. Methodol. 33, 8, Article 217 (Dec. 2024), 27 pages. https:         ICSE 2018, Gothenburg, Sweden, May 27 - June 03, 2018, Michel Chaudron, Ivica
+     //doi.org/10.1145/3678167                                                                 Crnkovic, Marsha Chechik, and Mark Harman (Eds.). ACM, 834–845. https:
+[33] Andrea De Lucia, Fausto Fasano, Rocco Oliveto, and Genoveffa Tortora. 2007.               //doi.org/10.1145/3180155.3180207
+     Recovering traceability links in software artifact management systems using          [50] Nils Reimers and Iryna Gurevych. 2019. Sentence-BERT: Sentence Embed-
+     information retrieval methods. ACM Trans. Softw. Eng. Methodol. 16, 4 (2007), 13.         dings using Siamese BERT-Networks. In Proceedings of the 2019 Conference
+     https://doi.org/10.1145/1276933.1276934                                                   on Empirical Methods in Natural Language Processing and the 9th International
+[34] Henry B Mann and Donald R Whitney. 1947. On a test of whether one of                      Joint Conference on Natural Language Processing, EMNLP-IJCNLP 2019, Hong
+     two random variables is stochastically larger than the other. The annals of               Kong, China, November 3-7, 2019, Kentaro Inui, Jing Jiang, Vincent Ng, and
+     mathematical statistics (1947), 50–60.                                                    Xiaojun Wan (Eds.). Association for Computational Linguistics, 3980–3990.
+[35] Andrian Marcus, Jonathan I. Maletic, and Andrey Sergeyev. 2005. Recov-                    https://doi.org/10.18653/V1/D19-1410
+     ery of Traceability Links between Software Documentation and Source Code.            [51] Irving Muller Rodrigues, Daniel Aloise, Eraldo Rezende Fernandes, and Michel R.
+     Int. J. Softw. Eng. Knowl. Eng. 15, 5 (2005), 811–836. https://doi.org/10.1142/           Dagenais. 2020. A Soft Alignment Model for Bug Deduplication. In MSR ’20:
+     S0218194005002543                                                                         17th International Conference on Mining Software Repositories, Seoul, Republic of
+[36] Pooya Rostami Mazrae, Maliheh Izadi, and Abbas Heydarnoori. 2021. Automated
+     Recovery of Issue-Commit Links Leveraging Both Textual and Non-textual Data.
+Rethinking Issue-Commit Linking with LLM-Assisted Retrieval                                                                   ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+     Korea, 29-30 June, 2020, Sunghun Kim, Georgios Gousios, Sarah Nadi, and Joseph        [64] Yan Sun, Qing Wang, and Ye Yang. 2017. FRLink: Improving the recovery of
+     Hejderup (Eds.). ACM, 43–53. https://doi.org/10.1145/3379597.3387470                       missing issue-commit links by revisiting file relevance. Inf. Softw. Technol. 84
+[52] Alberto D. Rodriguez, Katherine R. Dearstyne, and Jane Cleland-Huang. 2023.                (2017), 33–47. https://doi.org/10.1016/J.INFSOF.2016.11.010
+     Prompts Matter: Insights and Strategies for Prompt Engineering in Automated           [65] Jianguo Wang, Xiaomeng Yi, Rentong Guo, Hai Jin, Peng Xu, Shengjun Li, Xi-
+     Software Traceability. In 31st IEEE International Requirements Engineering Con-            angyu Wang, Xiangzhou Guo, Chengming Li, Xiaohai Xu, Kun Yu, Yuxing
+     ference, RE 2023 - Workshops, Hannover, Germany, September 4-5, 2023, Kurt                 Yuan, Yinghao Zou, Jiquan Long, Yudong Cai, Zhenxiang Li, Zhifeng Zhang,
+     Schneider, Fabiano Dalpiaz, and Jennifer Horkoff (Eds.). IEEE, 455–464. https:             Yihua Mo, Jun Gu, Ruiyi Jiang, Yi Wei, and Charles Xie. 2021. Milvus: A
+     //doi.org/10.1109/REW57809.2023.00087                                                      Purpose-Built Vector Data Management System. In Proceedings of the 2021 In-
+[53] Bilyaminu Auwal Romo, Andrea Capiluppi, and Tracy Hall. 2014. Filling the Gaps             ternational Conference on Management of Data (Virtual Event, China) (SIGMOD
+     of Development Logs and Bug Issue Data. In Proceedings of The International                ’21). Association for Computing Machinery, New York, NY, USA, 2614–2627.
+     Symposium on Open Collaboration (Berlin, Germany) (OpenSym ’14). Association               https://doi.org/10.1145/3448016.3457550
+     for Computing Machinery, New York, NY, USA, 1–4. https://doi.org/10.1145/             [66] Tianyu Wang, Nianjun Zhou, and Zhixiong Chen. 2024. Enhancing Computer
+     2641580.2641592                                                                            Programming Education with LLMs: A Study on Effective Prompt Engineering
+[54] Hang Ruan, Bihuan Chen, Xin Peng, and Wenyun Zhao. 2019. DeepLink: Re-                     for Python Code Generation. CoRR abs/2407.05437 (2024). https://doi.org/10.
+     covering issue-commit links based on deep learning. J. Syst. Softw. 158 (2019).            48550/ARXIV.2407.05437 arXiv:2407.05437
+     https://doi.org/10.1016/J.JSS.2019.110406                                             [67] Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. 2020.
+[55] Tetsuya Sakai and Noriko Kando. 2008. On information retrieval metrics designed            MiniLM: Deep Self-Attention Distillation for Task-Agnostic Compression of
+     for evaluation with incomplete relevance assessments. Inf. Retr. 11, 5 (2008), 447–        Pre-Trained Transformers. In Advances in Neural Information Processing Systems
+     470. https://doi.org/10.1007/S10791-008-9059-7                                             33: Annual Conference on Neural Information Processing Systems 2020, NeurIPS
+[56] G. Salton, A. Wong, and C. S. Yang. 1975. A vector space model for automatic               2020, December 6-12, 2020, virtual, Hugo Larochelle, Marc’Aurelio Ranzato, Raia
+     indexing. Commun. ACM 18, 11 (Nov. 1975), 613–620. https://doi.org/10.1145/                Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin (Eds.). https://proceedings.
+     361219.361220                                                                              neurips.cc/paper/2020/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html
+[57] Gerald Schermann, Martin Brandtner, Sebastiano Panichella, Philipp Leitner, and       [68] Rongxin Wu, Hongyu Zhang, Sunghun Kim, and Shing-Chi Cheung. 2011. Re-
+     Harald C. Gall. 2015. Discovering loners and phantoms in commit and issue                  Link: recovering links between bugs and changes. In SIGSOFT/FSE’11 19th ACM
+     data. In Proceedings of the 2015 IEEE 23rd International Conference on Program             SIGSOFT Symposium on the Foundations of Software Engineering (FSE-19) and
+     Comprehension, ICPC 2015, Florence/Firenze, Italy, May 16-24, 2015, Andrea De              ESEC’11: 13th European Software Engineering Conference (ESEC-13), Szeged, Hun-
+     Lucia, Christian Bird, and Rocco Oliveto (Eds.). IEEE Computer Society, 4–14.              gary, September 5-9, 2011, Tibor Gyimóthy and Andreas Zeller (Eds.). ACM, 15–25.
+     https://doi.org/10.1109/ICPC.2015.10                                                       https://doi.org/10.1145/2025113.2025120
+[58] Martin J. Shepperd, Qinbao Song, Zhongbin Sun, and Carolyn Mair. 2013. Data           [69] Zhaonan Wu, Yanjie Zhao, Chen Wei, Zirui Wan, Yue Liu, and Haoyu Wang. 2025.
+     Quality: Some Comments on the NASA Software Defect Datasets. IEEE Trans.                   COmmitSHield: Tracking Vulnerability Introduction and Fix in Version Control
+     Software Eng. 39, 9 (2013), 1208–1215. https://doi.org/10.1109/TSE.2013.11                 Systems. In 47th IEEE/ACM International Conference on Software Engineering,
+[59] Jieke Shi, Zhou Yang, and David Lo. 2025. Efficient and Green Large Language               ICSE 2025 - Companion Proceedings, Ottawa, ON, Canada, April 27 - May 3, 2025.
+     Models for Software Engineering: Literature Review, Vision, and the Road Ahead.            IEEE, 279–290. https://doi.org/10.1109/ICSE-COMPANION66252.2025.00082
+     ACM Trans. Softw. Eng. Methodol. 34, 5, Article 137 (May 2025), 22 pages. https:      [70] Rui Xie, Long Chen, Wei Ye, Zhiyu Li, Tianxiang Hu, Dongdong Du, and Shikun
+     //doi.org/10.1145/3708525                                                                  Zhang. 2019. DeepLink: A Code Knowledge Graph Based Deep Learning Ap-
+[60] Kaitao Song, Xu Tan, Tao Qin, Jianfeng Lu, and Tie-Yan Liu. 2020. MPNet:                   proach for Issue-Commit Link Recovery. In 26th IEEE International Conference on
+     Masked and Permuted Pre-training for Language Understanding. In Advances                   Software Analysis, Evolution and Reengineering, SANER 2019, Hangzhou, China,
+     in Neural Information Processing Systems 33: Annual Conference on Neural In-               February 24-27, 2019, Xinyu Wang, David Lo, and Emad Shihab (Eds.). IEEE,
+     formation Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, virtual,             434–444. https://doi.org/10.1109/SANER.2019.8667969
+     Hugo Larochelle, Marc’Aurelio Ranzato, Raia Hadsell, Maria-Florina Balcan,            [71] Zhou Yang, Jieke Shi, Shaowei Wang, and David Lo. 2021. IncBL: Incremental
+     and Hsuan-Tien Lin (Eds.). https://proceedings.neurips.cc/paper/2020/hash/                 Bug Localization. In 2021 36th IEEE/ACM International Conference on Automated
+     c3a690be93aa602ee2dc0ccab5b7b67e-Abstract.html                                             Software Engineering (ASE). 1223–1226. https://doi.org/10.1109/ASE51524.2021.
+[61] George Spanoudakis and Andrea Zisman. 2005. Software traceability: a roadmap.              9678546
+     In Handbook of software engineering and knowledge engineering: vol 3: recent          [72] Chenyuan Zhang, Yanlin Wang, Zhao Wei, Yong Xu, Juhong Wang, Hui Li, and
+     advances. World Scientific, 395–428.                                                       Rongrong Ji. 2023. EALink: An Efficient and Accurate Pre-Trained Framework
+[62] Weiwei Sun, Lingyong Yan, Xinyu Ma, Shuaiqiang Wang, Pengjie Ren, Zhumin                   for Issue-Commit Link Recovery. In 38th IEEE/ACM International Conference on
+     Chen, Dawei Yin, and Zhaochun Ren. 2023. Is ChatGPT Good at Search?                        Automated Software Engineering, ASE 2023, Luxembourg, September 11-15, 2023.
+     Investigating Large Language Models as Re-Ranking Agents. In Proceedings                   IEEE, 217–229. https://doi.org/10.1109/ASE56229.2023.00059
+     of the 2023 Conference on Empirical Methods in Natural Language Processing,           [73] Ting Zhang, DongGyun Han, Venkatesh Vinayakarao, Ivana Clairine Irsan,
+     EMNLP 2023, Singapore, December 6-10, 2023, Houda Bouamor, Juan Pino, and                  Bowen Xu, Ferdian Thung, David Lo, and Lingxiao Jiang. 2023. Duplicate Bug
+     Kalika Bali (Eds.). Association for Computational Linguistics, 14918–14937.                Report Detection: How Far Are We? ACM Trans. Softw. Eng. Methodol. 32, 4
+     https://doi.org/10.18653/V1/2023.EMNLP-MAIN.923                                            (2023), 97:1–97:32. https://doi.org/10.1145/3576042
+[63] Yan Sun, Celia Chen, Qing Wang, and Barry W. Boehm. 2017. Improving missing           [74] Jianfei Zhu, Guanping Xiao, Zheng Zheng, and Yulei Sui. 2024. Deep semi-
+     issue-commit link recovery using positive and unlabeled data. In Proceedings of            supervised learning for recovering traceability links between issues and commits.
+     the 32nd IEEE/ACM International Conference on Automated Software Engineering,              J. Syst. Softw. 216 (2024), 112109. https://doi.org/10.1016/J.JSS.2024.112109
+     ASE 2017, Urbana, IL, USA, October 30 - November 03, 2017, Grigore Rosu, Massi-       [75] Yutao Zhu, Huaying Yuan, Shuting Wang, Jiongnan Liu, Wenhan Liu, Chen-
+     miliano Di Penta, and Tien N. Nguyen (Eds.). IEEE Computer Society, 147–152.               long Deng, Zhicheng Dou, and Ji-Rong Wen. 2023. Large Language Mod-
+     https://doi.org/10.1109/ASE.2017.8115627                                                   els for Information Retrieval: A Survey. CoRR abs/2308.07107 (2023). https:
+                                                                                                //doi.org/10.48550/ARXIV.2308.07107 arXiv:2308.07107
+

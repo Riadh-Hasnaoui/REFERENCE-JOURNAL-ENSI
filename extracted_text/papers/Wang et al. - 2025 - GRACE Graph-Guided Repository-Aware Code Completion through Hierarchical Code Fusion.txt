@@ -1,0 +1,846 @@
+                                               GRACE: Graph-Guided Repository-Aware Code Completion
+                                                         through Hierarchical Code Fusion
+                                                          Xingliang Wang                                                      Baoyi Wang                                       Haoran Xu
+                                                       Zhejiang University                                             Zhejiang University                               Zhejiang University
+                                                    Hangzhou, Zhejiang, China                                       Hangzhou, Zhejiang, China                         Hangzhou, Zhejiang, China
+                                                    wangxingliang@zju.edu.cn                                         wangbaoyi@zju.edu.cn                               haoran.x@zju.edu.cn
+
+                                                                Chen Zhi∗                                                    Junxiao Han                                     Xinkui Zhao
+                                                       Zhejiang University                                         Hangzhou City University                             Zhejiang University
+                                                    Hangzhou, Zhejiang, China                                      Hangzhou, Zhejiang, China                         Hangzhou, Zhejiang, China
+arXiv:2509.05980v1 [cs.SE] 7 Sep 2025
+
+
+
+
+                                                     zjuzhichen@zju.edu.cn                                            hanjx@hzcu.edu.cn                               zhaoxinkui@zju.edu.cn
+
+                                                                                               Jianwei Yin                                       Shuiguang Deng
+                                                                                       Zhejiang University                                     Zhejiang University
+                                                                                    Hangzhou, Zhejiang, China                               Hangzhou, Zhejiang, China
+                                                                                       zjuyjw@zju.edu.cn                                       dengsg@zju.edu.cn
+
+                                        ABSTRACT                                                                                        graph structures in repository-level code completion, introducing
+                                        Large language models (LLMs) excel in localized code completion                                 a novel multi-semantic graph representation, a structure-aware
+                                        but struggle with repository-level tasks due to limited context win-                            hybrid retrieval and reranking strategy, and an innovative graph
+                                        dows and complex semantic and structural dependencies across                                    fusion technique that prevents structural information loss. Exten-
+                                        codebases. While Retrieval-Augmented Generation (RAG) mitigates                                 sive experiments on public repository-level benchmarks demon-
+                                        context scarcity by retrieving relevant code snippets, current ap-                              strate that GRACE significantly outperforms state-of-the-art meth-
+                                        proaches face significant limitations. They overly rely on textual                              ods across all metrics. Using DeepSeek-V3 as the backbone LLM,
+                                        similarity for retrieval, neglecting structural relationships such as                           GRACE surpasses the strongest graph-based RAG baselines by 8.19%
+                                        call chains and inheritance hierarchies, and lose critical structural                           EM and 7.51% ES points on every dataset. The code is available at
+                                        information by naively concatenating retrieved snippets into text                               https://anonymous.4open.science/r/grace_icse-C3D5.
+                                        sequences for LLM input. To address these shortcomings, we pro-
+                                        pose GRACE, a novel framework that reimagines code repositories                                 CCS CONCEPTS
+                                        as hierarchical, semantically rich graph databases, fundamentally                               • Do Not Use This Code → Generate the Correct Terms for
+                                        advancing repository-level code completion. GRACE constructs a                                  Your Paper; Generate the Correct Terms for Your Paper; Generate
+                                        multi-level, multi-semantic code graph that unifies file structures,                            the Correct Terms for Your Paper; Generate the Correct Terms for
+                                        abstract syntax trees, function call graphs, class hierarchies, and                             Your Paper.
+                                        data flow graphs to capture both static and dynamic code seman-
+                                        tics. For retrieval, GRACE employs a Hybrid Graph Retriever that                                KEYWORDS
+                                        integrates graph neural network-based structural similarity with                                Code Completion, Code Generation, Large Language Model, Graph,
+                                        textual retrieval, refined by a graph attention network-based re-                               RAG
+                                        ranker to prioritize topologically relevant subgraphs. To enhance
+                                        context, GRACE introduces a structural fusion mechanism that                                    ACM Reference Format:
+                                        merges retrieved subgraphs with the local code context and serial-                              Xingliang Wang, Baoyi Wang, Haoran Xu, Chen Zhi, Junxiao Han, Xinkui
+                                                                                                                                        Zhao, Jianwei Yin, and Shuiguang Deng. 2026. GRACE: Graph-Guided
+                                        izes the unified graph into LLM-readable text with explicit structural
+                                                                                                                                        Repository-Aware Code Completion through Hierarchical Code Fusion.
+                                        markers, preserving essential dependencies like function calls and
+                                                                                                                                        In Proceedings of ICSE ’26: 48th International Conference on Software Engi-
+                                        inheritance. This work provides the first systematic analysis of                                neering (Conference ICSE ’26). ACM, New York, NY, USA, 13 pages. https:
+                                        ∗ Corresponding author                                                                          //doi.org/XXXXXXX.XXXXXXX
+
+                                        Permission to make digital or hard copies of all or part of this work for personal or           1    INTRODUCTION
+                                        classroom use is granted without fee provided that copies are not made or distributed
+                                        for profit or commercial advantage and that copies bear this notice and the full citation       In recent years, large language models[3, 10, 11, 15, 16, 33, 34, 40, 56]
+                                        on the first page. Copyrights for components of this work owned by others than the              have demonstrated remarkable capabilities in function-level or file-
+                                        author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+                                        republish, to post on servers or to redistribute to lists, requires prior specific permission   level code completion tasks[6, 49, 52, 55, 57]. However, real-world
+                                        and/or a fee. Request permissions from permissions@acm.org.                                     software development typically involves large-scale, multi-module
+                                        Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                  code repositories whose complexity far exceeds that of individual
+                                        © 2026 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                        ACM ISBN 978-1-4503-XXXX-X/2026/06. . . $15.00                                                  files. In this context, code completion faces significant challenges:
+                                        https://doi.org/XXXXXXX.XXXXXXX                                                                 (1) the vast scale of codebases exceeds the limited context window
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                           Trovato et al.
+
+
+of LLMs[41]; (2) intricate semantic and structural dependencies (e.g.,           To systematically address these challenges, we propose the Graph-
+inheritance, implementation, call chains, data flow) exist between            Guided Repository-Aware Code Completion through Hierarchical
+code entities (classes, functions, variables). These factors lead to          Code Fusion (GRACE) framework. In the graph construction phase,
+a substantial degradation in performance when LLMs are directly               we extract and build a multi-level, multi-semantic hybrid code
+applied to repository-level code completion[45, 46, 51, 53].                  graph from the code repository. We categorize the graph structures
+    To address these issues, the Retrieval-Augmented Generation               into three levels: repo-level, module-level, and function-level. We
+(RAG) paradigm has gradually become the mainstream solution[2,                capture semantic relationships of different granularities at each
+20, 25, 35, 53]. Although RAG partially mitigates the context limi-           level. Through organic fusion between levels, we construct a uni-
+tation problem, existing RAG techniques for repository-level code             fied code graph capable of expressing both static structural features
+completion suffer from two critical limitations.                              and dynamic behavioral patterns of code. In the graph retrieval
+    First, most existing studies[22, 50, 53] rely on semantic similarity      phase, we propose a Hybrid Graph Retriever (HGR) that innova-
+to retrieve relevant code while neglecting structural information             tively combines GNN-based structural retrieval with traditional text
+as shown in Figure 1. Current RAG methods typically treat code as             semantic retrieval. Structural retrieval identifies code snippets with
+plain text sequences and primarily rely on traditional text retrieval         similar topological patterns (such as similar call chains or inheri-
+techniques such as BM25[39], embedding-based similarity, or TF-               tance structures) through subgraph matching, while text retrieval
+IDF. This approach struggles to capture the rich structural informa-          captures semantic-level relevance. We further design a graph-aware
+tion inherent in code[36], including class inheritance hierarchies,           reranking mechanism to refine the preliminary retrieval results,
+interface implementation patterns, cross-module call dependen-                ensuring the prioritization of the most relevant structured context.
+cies, and complex dataflow paths. While a few studies attempt to              In the graph enhancement phase, we propose a Graph Fusion and
+incorporate simple graph structures[12, 27] like Abstract Syntax              Enhancement mechanism that fuses the optimal retrieved code
+Trees (ASTs)[19, 21], their utilization of code structural information        subgraph with the graph structure of the code-to-be-completed
+remains rudimentary, failing to adequately exploit deep semantic              both semantically and structurally, forming a more informationally
+relationships. Second, the utilization of retrieved results is limited        complete enhanced context graph, thereby significantly improving
+to text-level concatenation . Existing methods[24, 30, 37] commonly           the LLM’s understanding of code structure.
+adopt simple sequential concatenation strategies as shown in Figure              The main contributions of this paper are as follows:
+1, feeding the concatenation of retrieved code snippets into the LLM.         • We are the first to systematically propose a multi-level, multi-
+This approach entirely ignores potential structural relationships               semantic code graph construction method for repository-level
+between the retrieved code snippets and the incomplete code, such               code completion, effectively addressing the insufficient utiliza-
+as variable definition-use chains, method override inheritance, and             tion of code structural information in existing methods.
+cross-snippet call dependencies. The absence of this information              • We design and implement a hybrid graph retrieval strategy that
+severely constrains the LLM’s ability to understand and leverage                integrates structural and semantic retrieval, combined with a
+the retrieved context.                                                          graph-aware reranking mechanism, significantly improving the
+    To address these issues, we propose a fundamental paradigm                  quality and relevance of retrieved context.
+shift: modeling the entire code repository as a hierarchical, semantically-   • We innovatively propose a graph fusion enhancement mecha-
+rich code graph database and designing a novel graph-based RAG                  nism that, for the first time, focuses on and utilizes the structural
+pipeline on this foundation. The core of this approach lies in lever-           associations between retrieved code and code-to-be-completed,
+aging the graph structure’s ability to express code elements and                effectively solving the structural information loss problem in
+their rich semantic relationships. However, applying this concept               traditional RAG methods.
+to repository-level code completion RAG pipelines faces several               • We conduct comprehensive experimental evaluations on multi-
+core challenges:                                                                ple public repository-level code completion benchmark datasets,
+                                                                                with results showing that the GRACE framework significantly
+                                                                                outperforms existing state-of-the-art methods. Using DeepSeek-
+   (1) Graph Construction: How to transform a large and complex                 V3 as the backbone LLM, GRACE surpasses the strongest graph-
+       code repository into a unified graph structure that can both             based RAG baselines by 8.19% EM and 7.51% ES points on four
+       comprehensively represent code entities (classes, methods,               datasets.
+       variables, etc.) and precisely characterize the complex re-
+       lationships between entities (calls, inheritance, data flows,          2 METHODOLOGY
+       etc.)?
+   (2) Graph Retrieval: How to design a high-performance retrieval            2.1 Multi-level Code Graph Construction
+       strategy on the constructed code graph that captures both              In repository-level code completion tasks, the hierarchical structure
+       structural similarity and semantic relevance to provide opti-          and multi-dimensional semantic relationships of code are crucial for
+       mal contextual information for the code completion task?               understanding code context. Code repositories inherently exhibit
+   (3) Graph Augmentation: How to effectively fuse the retrieved              hierarchical and multi-relational characteristics. From project file
+       graph structure information with the code-to-be-completed,             structures to function statements, code entities at different granu-
+       fully utilizing the structural associations between them to            larities (such as packages, modules, classes, and functions) carry
+       enhance the LLM’s code understanding and generation ca-                semantic information at different levels. Traditional graph represen-
+       pabilities?                                                            tations typically only use simple file structures and ASTs, failing to
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion                                         Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+
+
+                                                                     Traditional
+                                                                      semantic
+                                                                      retrieval
+     Generate a class to
+     validate the data of                                                                         Retrieved incorrect references class
+      payment service                                                                                                                                                      Sequential Concatenation
+
+             User Query
+                                                                                                 validators                                                  validators
+                                                                                                                                                                                      BaseClass       LLM
+                                                                                            PaymentData
+                                                                                                                                   PaymentValidator        PaymentData
+
+
+                                                                       Graph       Set Invalid                Rules Service
+                                                                                                                                                      Set Invalid          Rules Service
+                                                                      retrieval
+                                                                                                         Validation Result
+                                                                                                                                                                          Validation Result
+
+
+
+                                                                                   Retrived correct subgraph                                      Graph concatenation
+                                       Code Repository
+
+
+
+Figure 1: Comparison of standard RAG-based code completion with GRACE. Conventional RAG retrieves code solely by semantic
+similarity and fuses it via naive concatenation, ignoring structural relations and often producing inaccurate completions.
+
+
+comprehensively capture cross-level semantic dependencies, result-                   Table 1: Hierarchical graph representations leveraged by our
+ing in the loss of critical context during the retrieval-augmented                   RAG framework
+process. To fully capture this rich structured information, we pro-
+pose a multi-level, multi-semantic code graph construction method                    Level                               Graph Type                                         Semantics Captured
+that models the entire code repository as a unified hierarchical
+                                                                                                                                                                            Directory hierarchy; nodes
+graph structure through a three-level abstraction and structured
+                                                                                                                         Folder Structure Graph                             are folders/files, edges de-
+connection mechanism.
+                                                                                                                                                                            note containment.
+                                                                                     Repository
+2.1.1 Multi-level Code Graph Structure Design. We divide the repository-                                                                                                    Import and reference rela-
+level code graph structure into three levels, with each level focusing                                                   Cross-file Dep. Tree                               tions between files, reflect-
+on code semantics at different granularities:                                                                                                                               ing module coupling.
+2.1.2 Construction of Unified Hierarchical Graph. To achieve uni-                                                                                                           Call relations among func-
+fied representation and efficient retrieval across levels, we integrate                                                  Function Call Graph
+                                                                                                                                                                            tions.
+the extracted multi-granularity graph structures into a unified multi-
+                                                                                                                                                                            Dependencies between type
+relational hierarchical graph G = (V, E, T𝑣 , T𝑒 ), where V repre-                      Module                           Type Dep. Graph
+                                                                                                                                                                            definitions and their usages.
+sents the set of nodes across all levels, E represents the set of edges
+including both intra-level and cross-level edges, T𝑣 represents the                                                                                                         Inheritance,    implemen-
+set of node types, including files, classes, functions, statements,                                                      Class Inheritance Graph                            tation, and composition
+etc.; T𝑒 represents the set of edge types, including calls, inheritance,                                                                                                    relations among classes.
+definitions, uses, etc.                                                                                                  Abstract Syntax Tree                               Syntactic structure of code.
+   To avoid naming conflicts between different levels, we assign a
+globally unique identifier (UUID) to each node and maintain a map-                                                                                                          Possible execution paths of
+                                                                                      Function                           Control Flow Graph
+ping table that records the original information of nodes, including                                                                                                        the program.
+the graph type they belong to (e.g., 𝑔𝑟𝑎𝑝ℎ_𝑡𝑦𝑝𝑒 = "call_graph"),                                                                                                            Definition–use relations of
+node type, and attribute information. Node attributes include code                                                       Data Flow Graph
+                                                                                                                                                                            variables.
+text, location information (file path, line number), semantic type
+(such as variable types, function signatures), and structural features
+(such as cyclomatic complexity, nesting depth). Edge attributes
+include edge type, weight (such as call frequency, dependency                        declares, thereby localising definition sites; file-level dependencies
+strength), and context information (such as call parameters, condi-                  are further propagated to the corresponding inter-function calls,
+tional constraints). These attribute information not only preserve                   while cross-file type usages and inheritance relations are mapped to
+the original semantics of the code but also provide rich features for                explicit “type-reference” and “interface-inheritance” edges. Moving
+subsequent graph retrieval and matching.                                             down to the module-function boundary, each function in the call
+   To bridge the three granularities, we introduce a set of care-                    graph is anchored to the root of its abstract syntax tree, and variable
+fully designed cross-level edges (see Figure 2 (a)). At the reposi-                  types are aligned with data-flow vertices so that type information
+tory–module boundary, every file node is linked to the functions it                  constrains the data-flow analysis. Within a single function, AST
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                                                Trovato et al.
+
+
+
+              project_root
+                                                                                 Repo Level         Folder Structure       Cross-file Dependencies
+                       services
+                                  user_service
+                                                                                                         Cross-Module          Cross-file Type        Interface
+                                                                                         File Location                                               Integration
+                                  auth_service                                                            Invocation            Dependencies
+
+                                  product_service                               Module
+                                                                                              Call Graph       Class Inheritance Tree    Type Dependency Graph
+                                    payment                                      Level
+                                          payment_                                                                 Type Inference
+                                                                                              Method Invocation                          Class Hierarchy
+                                          processor
+                                          payment_        (a) Multi-level
+                                          gateway          Code Graph                                           Abstract Syntax Tree
+                       validators
+                                                           Construction           Function
+                                                                                                         Syntax Analysis
+                                 base
+                                                                                   Level          Control Flow Graph         Data Dependency
+                                 user_validator
+                                                                                                  Control Dependency
+                                 product_validator
+                                                                                                                   Data Flow Graph
+                                 auth_validator
+                 Code Repository                                                                          Multi-level Code Graph
+
+      Class PaymentData                                                                                                                               self.payment_
+          Validator:                          Encode                        Retrieve                Enhancement                         Predict      rules_service =
+                                                                                                                                                     payment_rules
+                User Code                                                                                                                                _service
+                                                         Hybird Graph                 Code Graph Fusion
+                                                                                                                           LLM
+                                                     Zoom Retriver                      Enhancement     Zoom
+                                                      In                                                 In
+                                                                               0.93
+
+
+             Code/Graph                     Retrived                                                                                Graph
+                                                                               0.76
+              Vector                       Subgraphs                                               Graph Attention Network         Structure
+                                                                               0.52
+                                                                                                                                    Fusion
+
+ Code/Graph                  Multi-Level             Graph -Aware
+  Encoder                                              Reranker   Ranked Subgraphs
+                             Graph Index
+                                                                     with Socre
+                                                                                                    Node Feature Fusion                           Fusion Graph
+                               (b) Hybird Graph Retriver                                            (c) Code Graph Fusion Enhancement
+
+Figure 2: Framework of GRACE, which consists of three main components: (a) multi-level code graph construction, (b) hybrid
+graph retriever, and (c) code graph fusion enhancement.
+
+
+nodes are connected to the control-flow graph to reflect the influ-                       how it interacts with other components (structural information).
+ence of syntax on execution order; control-flow vertices are then                         For instance, when completing a method call, knowing similar
+tied to data-flow vertices, capturing how branching and looping                           function implementations helps, but understanding the inheritance
+conditions restrict the propagation of values. These cross-level con-                     hierarchy, method overrides, and calling patterns provides crucial
+nections weave repository, module, and function views into one                            constraints for generating correct completions. Traditional retrieval
+heterogeneous graph, providing a unified and semantically rich                            methods that rely solely on textual similarity miss these structural
+backdrop for subsequent retrieval and code completion.                                    dependencies, leading to semantically plausible but structurally
+   Through the above multi-level graph construction method, we                            incorrect suggestions. To address this fundamental limitation, we
+transform complex code repositories into a structured, hierarchical                       propose the Hybrid Graph Retriever (HGR) (see Figure 2 (b)), which
+code knowledge base, providing a solid foundation for subsequent                          synergistically combines semantic retrieval for capturing functional
+graph retrieval and code completion tasks.                                                similarity and graph-based structural retrieval for understanding
+                                                                                          code relationships, thereby providing comprehensive context for
+                                                                                          more accurate code completion.
+2.2     Hybrid Graph Retriever
+After constructing the multi-level code graph, the key challenge
+lies in retrieving the most relevant context from this large-scale                        2.2.1 Dual-Path Encoding Mechanism. The Hybrid Graph Retriever
+graph database to assist code completion. In repository-level code                        employs a dual-path encoding strategy that captures both the se-
+completion scenarios, developers often need to understand not                             mantics and structure of code, each serving distinct but comple-
+only what a piece of code does (semantic information) but also                            mentary roles in code completion.
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion                   Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+   Semantic Encoding Path: For semantic information in code,                         Structural retrieval identifies code snippets with similar calling
+we employ the pre-trained Code embedding model (codet5p-110m-                     patterns, inheritance relationships, or control flow structures, which
+embedding) to encode code snippets. This model, pre-trained on                    is crucial for understanding the deep semantics of code.
+large-scale mixed code-natural language corpora, effectively cap-
+                                                                                  2.2.3 Graph-Aware Reranking Mechanism. The candidate sets re-
+tures functional semantics, variable naming conventions, and com-
+                                                                                  trieved from semantic and structural dimensions may overlap or
+ment information. For each code snippet 𝑐, the semantic encoder
+                                                                                  contain complementary information. To optimize the final retrieval
+generates a corresponding semantic vector v𝑐 ∈ R𝑑𝑠 :
+                                                                                  results, we design a graph-aware reranking mechanism. We first
+                    v𝑐 = EmbedCodeT5p (𝑐) ∈ R𝑑𝑠 ,                       (1)       merge the Top-𝑘𝑠 candidate set Csem from semantic retrieval with
+                                                                                  the Top-𝑘𝑔 candidate set Cstruct from structural retrieval, obtaining
+where 𝑑𝑠 denotes the semantic embedding dimension. The gener-
+                                                                                  the combined candidate set C = Csem ∪ Cstruct . For each candidate
+ated semantic vectors are indexed using Hierarchical Navigable
+                                                                                  𝑐𝑖 ∈ C in the merged set, we compute its relevance score:
+Small World (HNSW) graphs, supporting efficient approximate
+nearest neighbor search. Notably, the hierarchical nature of HNSW                       Score(𝑐𝑖 ) = 𝛼 · SemSim(𝑞, 𝑐𝑖 ) + (1 − 𝛼) · StructSim(𝐺𝑞 , 𝐺𝑐𝑖 ),
+aligns well with our multi-level code graph structure—upper layers                where 𝛼 ∈ [0, 1] is a balancing parameter controlling the relative
+provide fast navigation across different modules while lower layers               importance of semantic and structural similarity. In practice, we
+enable precise retrieval within specific code regions.                            employ an adaptive attention mechanism to dynamically adjust 𝛼:
+   Structural Encoding Path: For structural information in code,
+we encode this structural information through a combination of                                            𝛼 = 𝜎 (𝑊𝛼 [v𝑞 ; h𝐺𝑞 ] + 𝑏𝛼 ),
+node embeddings and Laplacian positional encoding: First, we uti-                 where 𝑊𝛼 and 𝑏𝛼 are learnable parameters, and 𝜎 is the sigmoid
+lize the code language model to encode the code content of each                   function. This adaptive mechanism automatically adjusts the weights
+node 𝑣 ∈ V in the graph, obtaining node embeddings v𝑐 ∈ R𝑑1 . Sec-                of semantic and structural information based on query.
+ond, to capture the global positional information of nodes within                    To avoid overly homogeneous retrieval results, we introduce
+the graph, we compute the normalized Laplacian matrix:                            diversity constraints. Through the Maximal Marginal Relevance
+                                                                                  (MMR) algorithm, we enhance result diversity while maintaining
+                      L = I − D −1/2 AD −1/2,                                     relevance:
+   where A is the adjacency matrix and D is the degree matrix. We                           MMR(𝑐𝑖 ) = 𝜆 · Score(𝑐𝑖 ) − (1 − 𝜆) · max Sim(𝑐𝑖 , 𝑐 𝑗 ),
+take the eigenvectors corresponding to the first 𝑑 2 smallest non-                                                                     𝑐 𝑗 ∈𝑆
+zero eigenvalues of L as the positional encoding v𝑠 ∈ R𝑑2 for each                where 𝑆 is the set of already selected candidates code snippets, and
+node. The final graph structural representation is obtained through               𝜆 controls the balance between relevance and diversity.
+concatenation:
+                                                                                  2.3       Code Graph Fusion Enhancement
+                    h𝑣 = [ v𝑐 ; v𝑠 ] ∈ R𝑑1 +𝑑2 ,               (2)                After obtaining high-quality retrieval results, effectively leveraging
+   This dual encoding mechanism preserves both the local semantic                 this structured information becomes a critical factor determining
+information of nodes and encodes their positional features within                 code completion quality. Traditional RAG approaches simply con-
+the global graph structure.                                                       catenate retrieved code snippets with the code to be completed,
+                                                                                  ignoring potential structural associations between them. This treat-
+2.2.2 Hybrid Retrieval Strategy. Based on the dual-path encoding,                 ment leads to the loss of valuable structural information (such
+the Hybrid Graph Retriever executes semantic and structural re-                   as cross-snippet call dependencies, shared type constraints, and
+trieval in parallel, fully leveraging the complementary advantages                similar control flow patterns) before being fed into the LLM.
+of both retrieval paradigms.                                                         To address this limitation, we propose a graph fusion enhance-
+   Semantic Similarity Retrieval: Given a query code snippet 𝑞,                   ment mechanism (see Figure 2 (c)). The core idea is to construct a
+we first generate the query vector v𝑞 through the semantic encoder.               query graph from the user’s incomplete code and then perform deep
+Using the HNSW index, we retrieve the Top-𝑘𝑠 most semantically                    fusion between multiple retrieved code subgraphs and the query
+relevant code snippets based on cosine similarity:                                graph across two dimensions: node features and graph structure.
+                                        v𝑞 · v𝑐                                   This creates a unified enhanced context graph that provides the
+                      SemSim(𝑞, 𝑐) =                                              LLM with more complete and structured contextual information.
+                                      ∥v𝑞 ∥∥v𝑐 ∥
+   Semantic retrieval effectively captures code snippets with similar             2.3.1 Fusion Mechanism Design. The query graph 𝐺𝑞 = (𝑉𝑞 , 𝐸𝑞 ) is
+functionality but different implementations, demonstrating good                   an AST graph structure constructed from the user’s current incom-
+generalization capability.                                                        plete code snippet. This graph contains local syntactic structures,
+   Structural Similarity Retrieval: In parallel, we parse the query               variable definitions, function calls, and other information from the
+code into a local graph structure 𝐺𝑞 and generate graph embeddings                code to be completed. However, due to the code’s incompleteness,
+h𝐺𝑞 through the structural encoder. We retrieve the Top-𝑘𝑔 most                   it often lacks necessary contextual dependencies.
+structurally matching subgraphs from the graph vector index:                          Rich structural associations exist between retrieved code sub-
+                                                                                  graphs and the query graph, which are invaluable for code comple-
+                                            h𝐺𝑞 · h𝐺𝑐                             tion tasks. Similar function implementations in retrieved subgraphs
+                 StructSim(𝐺𝑞 , 𝐺𝑐 ) =
+                                          ∥h𝐺𝑞 ∥∥h𝐺𝑐 ∥                            can provide implementation patterns and parameter constraints for
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                                    Trovato et al.
+
+
+incomplete functions in the query graph, offering crucial semantic                2.3.4 Graph-to-Text Serialization. In order to input the structured
+completion cues. Additionally, complete call paths in retrieved sub-              enhanced context graph into the LLM, we employ a semantic graph
+graphs can provide contextual validation for function calls in the                serialization method that preserves both structural and semantic
+query graph, ensuring call chain completeness.                                    information. Our serialization template explicitly expresses node
+   Our dual-dimensional fusion approach leverages these associ-                   types and relationship types, providing structural clarity that facili-
+ations through complementary mechanisms. Node feature fusion                      tates LLM comprehension. The representation maintains semantic
+aligns query graph nodes with retrieved graph nodes in seman-                     richness by preserving property information and weight informa-
+tic space, enabling the LLM to identify functionally similar code                 tion, while the natural language format ensures comprehensibility
+entities and generate semantically consistent completions. Simulta-               for effective LLM processing. The final prompt template combines
+neously, graph structure fusion preserves and extends dependencies                the serialized graph structure with the original code context:
+between code components, enabling the LLM to understand call
+constraints and data flow, thereby generating structurally correct
+completions.
+
+2.3.2 Node Feature Fusion. Node feature fusion aims to establish                      Prompt Template 2.1:
+correspondences between query graphs and retrieved graphs in
+semantic space. Given a query graph 𝐺𝑞 = (𝑉𝑞 , 𝐸𝑞 ) and 𝑘 retrieved                   1. [Role]
+subgraphs {𝐺 1, 𝐺 2, ..., 𝐺𝑘 }, we first obtain node representations for              You are a world-class AI code completion expert. Your purpose
+each graph through graph neural network encoders:                                     is to help developers write code faster and more accurately. You
+                                                                                      will be given the user’s current code context and a relevant code
+                                                                                      knowledge subgraph retrieved from the entire codebase. Your task
+                H𝑞 = GNN(𝐺𝑞 ) ∈ R |𝑉𝑞 | ×𝑑                                  (3)       is to predict the single most likely line of code to complete at the
+                                          |𝑉𝑖 | ×𝑑
+                                                                                      cursor position.
+                 H𝑖 = GNN(𝐺𝑖 ) ∈ R                   ,   𝑖 = 1, 2, ..., 𝑘   (4)
+                                                                                      2. [Context Information]
+  To integrate multiple retrieval results, we perform weighted                        2.1 User’s Current Code Context
+aggregation of retrieved graphs based on retrieval relevance scores:
+                                                                                          repo name : { repo_name }
+                                        𝑘
+                                       ∑︁                                                 File Path : { current_file_path }
+                                H𝑟 =          𝑤𝑖 · H𝑖                       (5)           { code_before_cursor }
+                                        𝑖=1
+                                                                                      2.2 Retrieved Code Context
+   where weights 𝑤𝑖 are obtained through normalization of re-                             { code_context }
+trieval relevance scores. Subsequently, we compute cross-attention
+                                                                                      2.3 Retrieved Code Knowledge Graph
+between query graph nodes and aggregated retrieved graph nodes:
+                                      !                                                   { graph_context }
+                               H𝑞 H𝑇𝑟
+                A = softmax √           ∈ R |𝑉𝑞 | × |𝑉𝑟 |       (6)                   2. [Task Instruction]
+                                  𝑑                                                   Analyze the user’s current code context to understand their im-
+                                                                                      mediate goal. Examine the provided code knowledge subgraph,
+   This attention mechanism enables the identification of function-
+                                                                                      focusing on class definitions, function signatures, and usage pat-
+ally similar code entities (e.g., functions with identical functionality)             terns. Synthesize this information to infer the most logical next
+and provision of semantic alignment foundation for subsequent                         line of code. Output exactly one line of code for insertion and a
+structural fusion.                                                                    concise explanation referencing specific nodes from the subgraph.
+
+2.3.3 Graph Structure Fusion. Building upon semantic alignment                        3. [Output Format]
+from node features, we further establish connections between query                    Return a single valid JSON object:
+graphs and retrieved graphs at the graph structure level. For node                        {
+                                                                                              " completed_code ": " The suggested code ." ,
+pairs (𝑣𝑞 , 𝑣𝑟 ) with attention weights exceeding threshold 𝜃 , we                            " explanation ": " Brief rationale referencing
+create cross-graph edges in the fusion graph:                                                 subgraph nodes ." ,
+                                                                                              " confidence_score ": 0.87 ,
+                                                                                              " referenced_nodes ": [
+                𝐸 fusion = 𝐸𝑞 ∪ 𝐸𝑟 ∪ {(𝑣𝑞 , 𝑣𝑟 )|A𝑣𝑞 ,𝑣𝑟 > 𝜃 }              (7)                  " node_id_of_relevant_function " ,
+                                                                                                 " node_id_of_relevant_class "
+   To ensure fusion graph quality and code semantic correctness,                              ]
+                                                                                          }
+we introduce several essential constraints. First, we enforce type
+consistency by only connecting type-compatible nodes, such as                         4. [Constraints and Rules]
+function calls with function definitions or variables of the same                     • The completed_code must contain exactly one line.
+type. Second, we preserve critical paths and dependency relation-                     • Explanations must remain concise and grounded in the subgraph.
+ships from original graphs to avoid disrupting code’s inherent logic.                 • If uncertain, lower the confidence_score; if impossible, return
+Finally, we eliminate redundancy by merging semantically equiva-                      an empty code line with confidence 0.0.
+lent nodes to avoid information duplication and confusion.
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion               Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+   Through this graph fusion enhancement mechanism, we provide                    Algorithm 1 GRACE: Graph-guided Repository-Aware Code Com-
+the LLM with rich context that encompasses both semantic similar-                 pletion Pipeline
+ity and structural consistency, thereby significantly improving the               Require: Incomplete code snippet C with cursor position; full
+accuracy and executability of code completion.                                      repository R
+                                                                                  Ensure: Predicted next line of code ℓˆ
+2.4    Algorithm Implementation                                                     // Phase 1: Query Graph Construction
+                                                                                    Build AST of C and extract local symbols
+The complete algorithmic flow for GRACE is presented in Algo-
+                                                                                    Construct query graph 𝐺𝑞 = (𝑉𝑞 , 𝐸𝑞 ) from AST nodes and edges
+rithm 1. The process can be decomposed into five distinct phases: (1)
+                                                                                    // Phase 2: Hybrid Graph Retrieval
+Query Graph Construction, (2) Hybrid Graph Retrieval, (3) Graph
+                                                                                    Encode 𝐺𝑞 semantically (CodeT5p) → vector v𝑞
+Fusion Enhancement, (4) Prompt Serialization, and (5) LLM Infer-
+                                                                                    Encode repository graphs structurally (GNN + Laplacian) →
+ence.
+                                                                                    index
+    Phase 1: Query Graph Construction. The process starts with
+                                                                                    Semantic path: HNSW search → top-𝑘𝑠 subgraphs Csem
+the user’s incomplete code snippet C, which is parsed into an Ab-
+                                                                                    Structural path: Graph similarity search → top-𝑘𝑔 subgraphs
+stract Syntax Tree (AST). From this AST, we build the query graph
+                                                                                    Cstruct
+𝐺𝑞 = (𝑉𝑞 , 𝐸𝑞 ).
+                                                                                    Merge Csem ∪ Cstruct and rerank
+    Phase 2: Hybrid Graph Retrieval. Our retrieval mechanism
+                                                                                    Select top-𝑘 retrieved subgraphs {𝐺 1, . . . , 𝐺𝑘 }
+adopts a hybrid approach that combines both semantic and struc-
+                                                                                    // Phase 3: Graph Fusion Enhancement
+tural similarity, aiming to leverage the complementary strengths of
+                                                                                    Obtain node embeddings {H𝑞 , H1, . . . , H𝑘 }
+the two retrieval methods.                                                                                                         Í
+                                                                                    Aggregate retrieved node features H𝑟 ← 𝑖 𝑤𝑖√H𝑖
+    For the semantic path, we first encode the query graph 𝐺𝑞 into
+a high-dimensional vector embedding v𝑞 using the CodeT5p model.                     Compute cross-attention A = softmax(H𝑞 H𝑟⊤ / 𝑑)
+We then use this embedding to retrieve the top-𝑘𝑠 semantically                      Add cross-graph edges (𝑣𝑞 , 𝑣𝑟 ) if A𝑞𝑟 > 𝜃 and type-consistent
+similar snippets via HNSW from the pre-indexed repository vectors.                  Form fused graph 𝐺 𝑓 = (𝑉𝑞 ∪ 𝑉𝑟 , 𝐸𝑞 ∪ 𝐸𝑟 ∪ 𝐸 cross )
+Concurrently, the structural path performs a graph similarity                       // Phase 4: Prompt Serialization
+search to find the top-𝑘𝑔 subgraphs, that are structurally analogous                Serialize 𝐺 𝑓 to natural-language triples; concatenate with code
+to the query graph 𝐺𝑞 . Finally, the candidate sets from both paths                 context to obtain prompt P
+are merged and reranked based on a combined score to select the                     // Phase 5: LLM Inference
+final top-𝑘 most relevant graphs for the next phase.                                Query LLM with prompt P; receive JSON output
+    Phase 3: Graph Fusion Enhancement. This phase integrates                        Parse field completed_code as prediction ℓˆ
+the retrieved knowledge with the original query context. We extract                 return ℓˆ
+dense node embeddings for the query graph H𝑞 and each retrieved
+graph H𝑖 , then aggregate them into a context matrix H𝑟 weighted
+by reranking scores. Next, we compute a cross-attention matrix A
+between query and retrieved nodes to identify relevant code parts.      LLMs: We use Qwen2.5-Coder-14B, GPT-4o mini and DeepSeek-V3
+If the attention score between nodes exceeds a threshold and their      as the backbone LLMs.
+types match, a cross-graph edge is added.                               Evaluation Metrics: We adopt four complementary measures:
+    Phase 4: Prompt Serialization. LLMs require linear text input,      exact-match accuracy (EM), edit similarity (ES), Recall, and the
+so we serialize the fused graph 𝐺 𝑓 into a sequence of natural-         token-level F1 score. EM counts character-wise equality with the
+language triples.                                                       reference. ES is 1 − Lev/max(|pred|, |ref|), where Lev denotes the
+    Phase 5: LLM Inference. The current prompt includes both the        Levenshtein distance. Recall quantifies the proportion of reference
+original contextual information and the retrieved relevant context,     tokens recovered, while F1 is the harmonic mean of precision and
+which are provided to the LLM.                                          recall.
+                                                                        Baselines: We compare GRACE against five representative meth-
+3 EXPERIMENT                                                            ods:No RAG (plain context completion),Vanilla RAG (sliding-
+                                                                        window retrieval), GraphCoder [30], RepoFuse [24], and RL-
+3.1 Experiment Setup                                                    Coder [48]. We try to adjust all baselines to the optimal parameters.
+Datasets: We employ two publicly available benchmarks that re-          Other Setup: The total input window is fixed at 2,048 tokens, split
+quire cross-file reasoning: RepoEval-Updated [30] and Cross-            evenly between retrieved context and local context. RAG-based
+CodeEval [13]. CrossCodeEval spans four languages (Python, Java,        methods retrieve at most 𝑘 = 10 code snippets; the maximum
+TypeScript, and C); the Python split contains 2,665 test cases from     generation length is 100 tokens. GRACE encodes both textual and
+471 repositories, each demanding inter-file context to obtain the       structural inputs via codet5p-110m-embedding (768-dim), followed
+ground-truth line. RepoEval-Updated refreshes the original RepoEval[53] by HNSW (semantic path, 𝑀=32, 𝑒 𝑓 _𝑠𝑒𝑎𝑟𝑐ℎ=256) and a flat Faiss
+by (i) removing repositories created before 2022-03-31 to mitigate      index (structural path) for efficient nearest-neighbour search. At-
+training-data leakage and (ii) adding new Python and Java projects      tention threshold 𝜃 is set to 0.4 and the adaptive fusion weight 𝛼 is
+created up to 2023-01-01. Tasks are categorised into line-level and     tuned on a held-out validation split. Experiments are conducted on
+API-level completion following [29].                                    NVIDIA A6000 GPU.
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                                                       Trovato et al.
+
+
+RQs: To comprehensively evaluate the performance of GRACE we              EM—because naïve concatenation fails to reconcile overlaps and
+propose the following research questions:                                 noise among retrieved snippets.
+                                                                             (3) Rich relations beyond AST are still needed. Limiting the graph
+      • RQ1-Effectiveness of GRACE: Does GRACE outperform                 to AST edges closes part of the gap but remains 2–3% behind full
+        state-of-the-art baselines on repository-level code-completion    GRACE, confirming that call-, data- and control-flow links offer
+        benchmarks?                                                       complementary cues.
+      • RQ2-Component Analysis: How do individual architec-                  Together, these ablations underline three indispensable pillars
+        tural choices influence performance?                              of GRACE: precise hybrid retrieval, hierarchical graph fusion, and
+      • RQ3-Model Scale Affection: How does the backbone LLM              a multi-relation code graph—all required to reach the state-of-the-
+        size affect GRACE’s effectiveness?                                art 80–83% F1 achieved by the complete system.
+      • RQ4-Hyperparameter Sensitivity: How sensitive is GRACE
+        to the retrieval depth 𝑘?                                         3.4                RQ3: Model Scale Affection
+                                                                         We examine how the capacity of the backbone LLM influences the
+3.2     RQ1: Effectiveness of GRACE                                      effectiveness of GRACE. Figure 3 reports results on six Qwen vari-
+Table 2 compares GRACE with six competitive baselines across two         ants ranging from 0.6B to 32B parameters. Key findings. Scaling
+realistic benchmarks (CrossCodeEval and RepoEval-Updated),               the Qwen backbone from 0.6B to 32B parameters boosts F1 by
+two programming languages (Python and Java), and three repre-            +56.3% (24.20% to 80.46%), EM by +15.1%, and ES by a remarkable
+sentative backbone LLMs (GPT4o-mini, Qwen2.5-Coder-14B, and              +75.7%. A closer inspection shows two distinct phases.
+DeepSeek-V3).                                                                 • Sub-billion to 7B. Gains are steady but moderate: every dou-
+    Overall superiority. Table 2 shows that GRACE secures the                   bling of model size yields roughly +10% in ES.
+top position in 35/48 metric–language–dataset combinations and                • 14B → 32B. Improvements accelerate; ES jumps by +12.4%
+ranks second in nine more, consistently outperforming all six                   and F1 by +12.8%, indicating that larger models extract and
+baselines. This demonstrates the robustness of graph-augmented                  leverage the graph-structured cues far more effectively.
+retrieval and hierarchical fusion for practical repository-level com-       Together with RQ1, this confirms that GRACE not only scales
+pletion.                                                                 gracefully but synergises with high-capacity LLMs, pointing to an
+    Effect of backbone size. Moving from a mid-size backbone             orthogonal avenue of progress relative to pure parameter scaling.
+(Qwen2.5-Coder-14B) to a larger one (DeepSeek-V3) widens the
+margin between GRACE and the best non-graph competitor from                                     ( 0
+                                                                                              ( 6
+2.3 pp to 5.4 pp (EM on Python/CrossCodeEval). This confirms                                    5 H F D O O
+our hypothesis that larger LLMs can better leverage the fine-grained                            ) 
+structural cues surfaced by graph retrieval.                                            
+    Dataset sensitivity. On CrossCodeEval, which stresses cross-
+                                                                          6 F R U H
+
+
+
+
+file reasoning, GRACE achieves the highest F1 on all 12% LLM–language
+                                                                                        
+pairs. On the more diverse RepoEval-Updated, it attains 83.95% re-
+call in the Python subset—4.7% higher than Vanilla RAG—showcasing
+strong generalizability.                                                                
+    Head-to-head with strong baselines. Although RepoFuse
+occasionally edges out GRACE in raw recall, its aggressive long-
+context retrieval inflates noise and lowers precision, depressing F1                     
+                                                                                                  %            %     %                          %      %         %
+by up to 8.6%. Under the largest backbone DeepSeek-V3, GRACE                                                                     4 Z H Q  6 L ] H
+delivers an average gain of +8.19% EM and +7.51% ES over Repo-
+Fuse, and +7.94% EM / +6.83% ES over RLCoder across all datasets,         Figure 3: Impact of Qwen backbone size on the performance
+highlighting its scalability advantages.                                  of GRACE on CrossCodeEval dataset.
+    Graph-structured retrieval coupled with hierarchical fu-
+sion boosts LLM code-completion accuracy, and the benefit
+                                                                          3.5                RQ4: Hyperparameter Sensitivity
+amplifies with model scale and dataset complexity.
+                                                                      We study how the retrieval depth 𝑘 affects GRACE’s performance
+                                                                      on RepoEval-Updated dataset. As shown in Figure 4, enlarging 𝑘
+3.3 RQ2: Component Analysis                                           from 1 to 3 consistently boosts all four metrics, because a broader
+Table 3 reveals the contribution of each design choice in GRACE.      candidate set increases the likelihood of retrieving truly relevant
+Key findings are as follows:                                          context. Beyond 𝑘 = 3, the curves flatten: F1 varies within 0.5%
+   (1) Hybrid Graph Retriever matters. Substituting it with a lexical and EM within 0.2% between 𝑘 = 3 and 𝑘 = 5. This plateau indi-
+BM25 search cuts F1 by 4–6% (e.g. 82.76% → 78.97% on CrossCodeEval- cates that our hierarchical fusion module is already able to distill
+Py), showing that purely textual retrieval cannot surface the struc-  sufficient information from the top-3 subgraphs, and that adding
+turally relevant context.                                             more neighbours mostly introduces redundant edges rather than
+   (2) Graph fusion is decisive. Removing the fusion stage (“w/o      novel cues. Therefore, we adopt 𝑘 = 3 as the default, striking a good
+Fusion”) causes the sharpest drop—up to –6.2% F1 and –5.4%            balance between accuracy and retrieval cost.
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion                                    Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+                 Table 2: Performance comparison between GRACE and baselines on Different LLMs and Datasets
+
+                                         GPT-4o mini                                 Qwen2.5-Coder-14b                                                                         DeepSeek v3
+                                 Code                   Identifier              Code                              Identifier                              Code                                      Identifier
+           Method        EM    ES Recall F1      EM     ES Recall F1     EM   ES Recall F1                   EM   ES Recall F1             EM          ES Recall F1                     EM          ES Recall F1
+           No RAG       5.59 55.40 77.79 75.92 10.47 55.85 44.56 42.73 1.16 35.89 83.64 68.44 1.84 38.48 40.77 27.77 9.53 44.48 88.49 73.09 14.07 47.22 53.52 37.46
+           Vallina RAG 9.31 58.54 78.74 77.39 15.95 58.97 48.80 47.28 2.85 40.53 83.68 70.19 4.47 42.62 45.11 32.96 13.32 47.31 88.05 73.95 18.87 50.58 53.95 40.80
+CrossCode-
+           GraphCoder 8.07 57.24 79.20 77.25 13.32 57.76 47.95 45.69 1.16 39.40 84.13 70.00 2.03 41.53 45.85 32.04 10.54 43.14 88.60 72.01 15.01 46.45 53.46 36.88
+Eval
+           RepoFuse    22.36 66.12 83.52 81.67 30.96 67.86 62.41 59.84 5.33 45.88 86.90 73.04 6.83 48.15 58.81 41.45 22.93 54.45 90.80 77.76 29.16 57.76 67.80 51.28
+Python
+           RLCoder     25.44 68.89 84.89 82.94 35.83 70.97 65.81 63.37 7.28 47.95 87.26 74.07 9.87 50.30 58.89 43.37 26.45 57.36 90.62 78.83 34.30 60.96 68.05 54.40
+           Grace      31.38 71.31 83.69 82.76 32.85 73.64 74.71 74.63 13.96 63.32 80.46 77.67 15.38 61.31 63.69 72.76 32.85 63.64 94.71 83.96 43.96 73.32 80.46 67.67
+           No RAG      12.01 63.52 79.01 79.55 19.82 62.80 52.66 52.69 9.21 59.64 79.42 77.81 16.78 60.62 52.37 50.42 21.18 68.22 84.61 83.29 29.27 68.33 62.11 59.74
+           Vallina RAG 15.85 65.57 79.75 80.32 24.17 64.77 55.50 55.76 11.64 61.54 81.11 79.26 20.29 62.66 54.80 52.71 25.99 70.23 84.91 83.91 35.06 70.44 64.41 62.72
+CrossCode-
+           GraphCoder 15.01 65.32 80.29 80.59 23.09 64.79 55.56 55.51 9.91 60.49 80.23 78.59 18.65 61.27 53.94 51.55 23.14 67.15 85.33 82.62 31.00 67.71 62.81 59.23
+Eval
+           RepoFuse    28.38 71.31 83.69 83.76 39.08 71.66 65.36 65.15 20.66 68.25 83.93 82.53 33.61 69.8 64.90 62.86 38.76 76.86 88.01 87.58 50.40 77.65 74.17 72.79
+Java
+           RLCoder     31.7 72.72 84.03 84.11 41.51 72.67 66.93 66.79 21.46 68.07 84.20 82.45 33.05 69.51 65.05 62.94 40.91 77.39 88.38 87.65 51.99 78.05 74.38 73.03
+           Grace       26.72 77.91 85.43 83.38 41.70 70.72 60.03 74.11 17.25 67.57 83.66 81.68 32.85 73.64 74.71 75.03 42.37 79.59 90.82 90.15 55.19 79.15 85.03 89.21
+
+          No RAG      21.35 50.07 74.53 69.51 29.50 53.30 54.11 46.92 22.20 50.06 76.23 70.29 29.65 53.53 54.68 46.91 29.45 59.41 84.07 77.57 37.90 62.43 66.75 57.21
+          Vallina RAG 30.70 56.59 79.24 74.34 38.55 59.90 60.46 53.52 29.60 54.09 80.26 73.67 36.55 57.47 59.14 51.18 37.45 62.81 86.86 80.02 44.65 66.10 70.55 61.15
+RepoEval-
+          GraphCoder 29.70 58.86 81.85 76.49 38.70 62.12 64.42 56.52 29.05 56.93 80.54 74.68 37.70 60.54 63.16 55.05 34.45 61.81 85.99 79.19 43.10 65.15 69.77 60.40
+Updated
+          RepoFuse 32.10 56.25 80.00 74.19 39.65 59.47 62.79 54.45 32.80 55.81 80.69 74.08 40.25 58.90 63.23 53.97 38.85 62.44 86.25 79.20 47.00 65.69 72.69 62.07
+Python
+          RLCoder     28.75 57.84 80.86 75.21 37.30 60.85 63.75 55.35 26.40 52.63 81.29 73.58 34.10 56.25 60.26 50.82 34.80 61.80 86.30 79.27 43.05 65.41 70.36 60.71
+          Grace       29.52 60.63 83.95 79.96 39.15 68.54 66.52 60.23 29.20 57.45 80.96 78.31 38.47 62.83 68.69 70.08 57.26 76.25 89.22 85.20 52.70 70.43 77.59 72.39
+          No RAG      17.70 56.25 75.29 75.22 26.50 57.08 55.80 51.08 17.80 55.95 76.29 75.30 26.95 57.39 57.30 51.84 26.10 63.85 80.45 79.59 36.15 64.62 65.85 60.02
+          Vallina RAG 23.45 58.81 76.43 76.19 31.40 59.25 58.80 53.94 21.80 56.43 76.75 75.43 29.65 57.37 57.56 51.88 30.60 63.77 80.98 79.62 39.50 64.80 66.68 60.35
+RepoEval-
+          GraphCoder 25.75 60.57 77.43 77.25 34.45 61.72 61.16 56.63 26.80 60.97 78.45 77.87 36.55 62.21 61.89 57.08 30.80 64.38 81.15 79.93 39.50 65.32 66.77 61.09
+Updated
+          RepoFuse    24.35 58.53 77.04 76.15 33.10 59.97 59.52 54.24 24.10 58.65 78.49 76.81 33.05 60.25 61.11 54.96 32.55 66.14 81.70 80.67 43.10 67.58 69.30 63.61
+Java
+          RLCoder     25.30 60.40 77.80 77.39 34.30 61.41 60.89 56.13 23.60 57.98 78.02 76.48 31.80 59.13 59.78 54.08 31.95 66.08 81.28 80.58 41.20 66.59 68.51 63.25
+          Grace       23.85 59.38 81.15 79.93 32.50 60.32 66.77 61.09 23.2 59.85 80.96 78.31 38.47 62.83 68.69 70.08 33.37 70.46 84.62 86.27 45.21 67.37 72.36 70.52
+
+
+Table 3: Ablation study of GRACE. BM25: replace hybrid                                                                               ( 0         ( 6                      5 H F D O O         ) 
+graph retriever with BM25; w/o Fusion: remove graph–fusion
+stage and simply concatenate retrieved code; AST-Only: build                                           
+graphs from abstract syntax trees only. Metrics are macro-
+averaged over Code and Identifier tasks.                                                               
+
+                                                                                                       
+                                                                                         6 F R U H
+
+
+
+
+Dataset             Metric GRACE BM25 w/o Fusion AST-Only
+                                                                                                       
+CrossCodeEval EM               31.38     27.36         25.98         28.22
+                                                                                                       
+Python        F1               82.76     78.97         76.59         79.48
+                                                                                                       
+CrossCodeEval EM               26.72     23.59         22.36         24.75
+Java          F1               83.38     80.33         79.11         81.24                                                                                                                                    
+                                                                                                                                            5 H W U L H Y D O  ' H S W K k
+RepoEval-      EM              29.52     26.48          25.7         27.52
+Updated Python F1              79.96     75.82         74.12         76.75
+                                                                                       Figure 4: Effect of retrieval depth 𝑘 on the macro performance
+RepoEval-           EM         23.85     21.40         20.30         21.19             of GRACE.
+Updated Java        F1         79.93     77.13         76.24         78. 89
+
+                                                                                       mainly from Python and Java projects. Results may not generalise
+4 DISCUSSION                                                                           to other languages (e.g., C/C++, Go, Rust) or industrial monore-
+                                                                                       pos with proprietary frameworks. Extending GRACE to additional
+4.1 Threats to Validity                                                                ecosystems forms part of future work. (2) Repository scale. Although
+Internal validity: (1) Implementation correctness. GRACE com-                          the chosen corpora contain hundreds of files, very large codebases
+prises several non-trivial components (graph extractor, hybrid re-                     (millions of LOC) could stress graph construction time or memory.
+triever, fusion module). Implementation bugs or sub-optimal en-                        Our complexity analysis highlights potential bottlenecks; we plan
+gineering choices could artificially inflate or deflate performance.                   incremental indexing strategies to mitigate this threat.
+We have released the full source code to facilitate auditing and                       Construct validity: (1) Evaluation metrics. We adopt standard
+reproduction.                                                                          EM, ES, F1 and Recall, which capture syntactic correctness but
+External validity: (1) Dataset representativeness. Our experiments                     not semantic soundness (e.g., compilation success). Complemen-
+rely on two public repository-level completion benchmarks drawn                        tary metrics such as pass@k on unit tests or human assessment
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                       Trovato et al.
+
+
+could yield different conclusions. (2) Baseline selection. We com-         31], and DeepSeek-Coder[16, 58].The prevailing paradigm for these
+pare against strong text-centric RAG baselines but omit approaches         models is to represent source code as a linear sequence of tokens,
+that leverage IDE signals or test-aware feedback. While orthogonal         with training centered on autoregressive objectives like Next Token
+to our contribution, their inclusion might narrow the observed             Prediction or Fill-in-the-Middle[7].
+performance gap.                                                              Despite their proficiency in generating syntactically correct code
+                                                                           snippets, these models perform suboptimally on repository-level
+4.2     Complexity Analysis                                                code completion tasks, which better reflect real-world software
+This section analyzes the complexity of the proposed graph fu-             development scenarios, due to their limited context windows[28].
+sion enhancement mechanism. Let 𝑛𝑞 = |𝑉𝑞 | and |𝐸𝑞 | denote the
+numbers of nodes and edges in the query graph, and 𝑛𝑟 = |𝑉𝑟 | =
+Í𝑘                  Í𝑘
+  𝑖=1 |𝑉𝑖 |, |𝐸𝑟 | = 𝑖=1 |𝐸𝑖 | those of the 𝑘 retrieved sub-graphs. 𝐿 is   5.2    Repository-level Code Completion
+the number of GNN layers and 𝑑 the hidden dimension.
+   Phase 1: Query graph construction. Parsing the incomplete               In real-world software development, coding often requires referenc-
+snippet into an AST and building local CFG/DFG is linear in the            ing the contextual information of the entire codebase. Consequently,
+source length, denoted 𝑂 (|C|). As |C| ≈𝑛𝑞 , we treat this as 𝑂 (𝑛𝑞 ).     the task of repository-level code completion, which effectively lever-
+   Phase 2: Hybrid graph retrieval. Semantic encoding of 𝐺𝑞                ages this information, is gaining increasing attention from both
+uses a GNN: 𝑂 (𝐿 |𝐸𝑞 | 𝑑). Semantic ANN search on an HNSW index            academia and industry[13, 29]. Although LLMs have demonstrated
+over 𝑁𝑠 snippets costs 𝑂 (log 𝑁𝑠 + 𝑘𝑠 ). Structural encoding of 𝐺𝑞         powerful capabilities in code generation, their inherent context
+(concatenating node embedding and Laplacian PE) is 𝑂 (𝐿 |𝐸𝑞 | 𝑑);          window limitations make it difficult for them to directly process
+graph-vector search over 𝑁𝑔 indexed sub-graphs is 𝑂 (log 𝑁𝑔 + 𝑘𝑔 ).        large-scale codebases[14, 53].
+Overall retrieval complexity:                                                  To overcome this limitation, researchers have introduced the
+                                                                          Retrieval-Augmented Generation (RAG) framework[18, 20, 22, 44,
+                  𝑂 𝐿 |𝐸𝑞 | 𝑑 + log 𝑁𝑠 + log 𝑁𝑔 + 𝑘𝑠 + 𝑘𝑔 .                50, 54]. AceCoder[22] finds relevant reference examples by search-
+   Phase 3: Graph fusion enhancement. Computing            node em-        ing the codebase for programs similar to the current requirement,
+                                                   
+beddings for the 𝑘 retrieved graphs: 𝑂 𝐿 |𝐸𝑟 | 𝑑 . Cross-attention         helping the model generate more accurate code. APICoder[50],
+between query and retrieved nodes dominates: 𝑂 (𝑛𝑞 𝑛𝑟 𝑑). Edge             which includes an APIRetriever and an APICoder, retrieves poten-
+construction and filtering add 𝑂 (𝑛𝑞 𝑛𝑟 ).                                 tially useful API information from a private library’s API docu-
+   Phase 4: Prompt serialization. Serialising the fused graph is           mentation based on the task; this information is then passed to the
+linear in its size: 𝑂 (𝑛𝑞 + 𝑛𝑟 + |𝐸𝑞 | + |𝐸𝑟 |).                           APICoder as a reference for code generation. kNN-TRANX[54] is a
+   Phase 5: LLM inference. This depends on prompt length 𝑇                 token-level retrieval-augmented code generation method that im-
+(tokens) and LLM architecture; we denote it 𝑂 (LLM(𝑇 )).                   proves code generation performance while reducing retrieval noise.
+   Overall time complexity. The end-to-end pipeline is therefore           RepoCoder[53] proposes an iterative retrieval-generation pipeline
+bounded by                                                                 to further enhance the performance of standard RAG methods.
+                                                                          While RAG effectively extends the model’s contextual scope, these
+𝑂 𝐿 (|𝐸𝑞 | + |𝐸𝑟 |) 𝑑 + 𝑛𝑞 𝑛𝑟 𝑑 + log 𝑁𝑠 +log 𝑁𝑔 +𝑘𝑠 +𝑘𝑔 + LLM(𝑇 ) .       methods primarily rely on semantic similarity for retrieval and
+In practice, the cross-attention term 𝑂 (𝑛𝑞 𝑛𝑟 𝑑) becomes the pri-         often overlook the structural information of the code.
+mary bottleneck when the retrieved context is large, while HNSW                Consequently, a growing body of research has attempted to repre-
+search and GNN encoding remain sub-linear or linear in repository          sent code as a graph structure to capture its complex dependencies.
+size due to indexing.                                                      For example, GraphCoder[30] captures the contextual information
+                                                                           of a codebase through a Code Context Graph (CCG) and then em-
+5 RELATED WORK                                                             ploys a two-stage coarse-to-fine retrieval strategy. RepoHyper[37]
+                                                                           constructs a repository-level semantic graph and performs graph
+5.1 Large Language Models for Code                                         expansion and retrieval operations upon it to obtain more precise
+In recent years, the rapid advancement of Large Language Models            structured context. CoCoMIC[14] utilizes a Dependency Graph
+(LLMs) has significantly enhanced the performance of software              search from the field of program analysis; during completion, it
+engineering tasks such as code completion[1, 16, 32, 47] . These           first locates the node corresponding to the segment to be completed
+models are broadly classified into closed-source and open-source           and then treats its neighboring nodes as supplementary context.
+variants.                                                                  RepoFuse[24] proposes a Repo-specific Semantic Graph, retrieves
+   Proprietary models, such as OpenAI’s GPT-4[34], which was de-           both Semantic Context and Similar Context, and filters for the most
+veloped upon its pioneering model Codex[8], along with Google’s            beneficial context through a Relevance-Guided Context Selection
+Gemini 2.5[17] and Anthropic’s Claude 3.5 Sonnet[4], have achieved         method[9, 37].
+leading positions on multiple code benchmarks like HumanEval[8]                Furthermore, another line of work focuses on how to integrate
+and MBPP[5]. Concurrently, the open-source community has wit-              the retrieved information into the generation model most efficiently.
+nessed the emergence of numerous high-performance models. This             For instance, methods like RepoFusion[42] and RepoPrompts[43]
+includes powerful general-purpose LLMs with strong coding capa-            have proposed different strategies to optimize the interaction be-
+bilities, such as Llama 3[15], Qwen 2.5[38], and DeepSeek-V3[26],          tween the retrieved information and the LLM, aiming to maximize
+as well as dedicated code models like Code Llama[40], StarCoder[23,        its assistive effect on the generation process.
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion   Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+6    CONCLUSION
+This paper presents GRACE, an innovative graph-based retrieval-
+augmented code completion framework that systematically ad-
+dresses the critical limitations of existing repository-level code
+completion techniques. By modeling code repositories as hierar-
+chical, semantically-rich code graph databases, we fundamentally
+transform the limited perspective of traditional RAG methods. The
+core innovations of the GRACE framework are manifested in three
+aspects: First, we construct a multi-level, multi-semantic hybrid
+code graph that comprehensively captures structural information
+at different granularities from repository-level to function-level;
+Second, our designed hybrid graph retriever significantly improves
+retrieval relevance by integrating GNN-based structural retrieval
+with text semantic retrieval; Finally, our proposed graph fusion
+enhancement mechanism achieves, for the first time, effective uti-
+lization of structural associations between retrieved code and code-
+to-be-completed. Experimental results validate the effectiveness of
+GRACE. Compared to existing state-of-the-art methods, GRACE
+demonstrate the critical value of graph structural information for
+repository-level code completion tasks. Future work will explore
+dynamic graph updating for evolving codebases and generalize
+GRACE to multilingual software environments.
+Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil                                                                                                     Trovato et al.
+
+
+REFERENCES                                                                                [22] Jia Li, Yunfei Zhao, Yongmin Li, Ge Li, and Zhi Jin. 2023. Acecoder: Utilizing
+ [1] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Floren-             existing code to enhance code generation. arXiv preprint arXiv:2303.17780 (2023).
+     cia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal             [23] Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas Muennighoff, Denis Kocetkov,
+     Anadkat, et al. 2023. Gpt-4 technical report. arXiv preprint arXiv:2303.08774             Chenghao Mou, Marc Marone, Christopher Akiki, Jia Li, Jenny Chim, et al. 2023.
+     (2023).                                                                                   Starcoder: may the source be with you! arXiv preprint arXiv:2305.06161 (2023).
+ [2] Lakshya A Agrawal, Aditya Kanade, Navin Goyal, Shuvendu K Lahiri, and Sri-           [24] Ming Liang, Xiaoheng Xie, Gehao Zhang, Xunjin Zheng, Peng Di, Hongwei
+     ram K Rajamani. 2023. Guiding language models of code with global context                 Chen, Chengpeng Wang, Gang Fan, et al. 2024. Repofuse: Repository-level code
+     using monitors. arXiv preprint arXiv:2306.10763 (2023).                                   completion with fused dual context. arXiv preprint arXiv:2402.14323 (2024).
+ [3] Loubna Ben Allal, Raymond Li, Denis Kocetkov, Chenghao Mou, Christopher              [25] Dianshu Liao, Shidong Pan, Qing Huang, Xiaoxue Ren, Zhenchang Xing, Huan
+     Akiki, Carlos Munoz Ferrandis, Niklas Muennighoff, Mayank Mishra, Alex Gu,                Jin, and Qinying Li. 2023. Context-aware code generation framework for code
+     Manan Dey, et al. 2023. Santacoder: don’t reach for the stars! arXiv preprint             repositories: Local, global, and third-party library awareness. CoRR (2023).
+     arXiv:2301.03988 (2023).                                                             [26] Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu, Cheng-
+ [4] Anthropic. 2024. Claude 3.5 Sonnet. https://www.anthropic.com/news/claude-3-              gang Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan, et al. 2024. Deepseek-v3
+     5-sonnet. 2024.                                                                           technical report. arXiv preprint arXiv:2412.19437 (2024).
+ [5] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk                     [27] Fang Liu, Ge Li, Yunfei Zhao, and Zhi Jin. 2020. Multi-task learning based pre-
+     Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le,                trained language model for code completion. In Proceedings of the 35th IEEE/ACM
+     et al. 2021. Program synthesis with large language models. arXiv preprint                 international conference on automated software engineering. 473–485.
+     arXiv:2108.07732 (2021).                                                             [28] Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua,
+ [6] Ramakrishna Bairi, Atharv Sonwane, Aditya Kanade, Vageesh D C, Arun Iyer,                 Fabio Petroni, and Percy Liang. 2023. Lost in the middle: How language models
+     Suresh Parthasarathy, Sriram Rajamani, Balasubramanyan Ashok, and Shashank                use long contexts. arXiv preprint arXiv:2307.03172 (2023).
+     Shet. 2024. Codeplan: Repository-level coding using llms and planning. Proceed-      [29] Tianyang Liu, Canwen Xu, and Julian McAuley. 2023. Repobench: Benchmarking
+     ings of the ACM on Software Engineering 1, FSE (2024), 675–698.                           repository-level code auto-completion systems. arXiv preprint arXiv:2306.03091
+ [7] Mohammad Bavarian, Heewoo Jun, Nikolas Tezak, John Schulman, Christine                    (2023).
+     McLeavey, Jerry Tworek, and Mark Chen. 2022. Efficient training of language          [30] Wei Liu, Ailun Yu, Daoguang Zan, Bo Shen, Wei Zhang, Haiyan Zhao, Zhi Jin, and
+     models to fill in the middle. arXiv preprint arXiv:2207.14255 (2022).                     Qianxiang Wang. 2024. Graphcoder: Enhancing repository-level code completion
+ [8] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde                          via code context graph-based retrieval and language model. arXiv preprint
+     De Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph,              arXiv:2406.07003 (2024).
+     Greg Brockman, et al. 2021. Evaluating large language models trained on code.        [31] Anton Lozhkov, Raymond Li, Loubna Ben Allal, Federico Cassano, Joel Lamy-
+     arXiv preprint arXiv:2107.03374 (2021).                                                   Poirier, Nouamane Tazi, Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,
+ [9] Wei Cheng, Yuhan Wu, and Wei Hu. 2024. Dataflow-guided retrieval augmen-                  et al. 2024. Starcoder 2 and the stack v2: The next generation. arXiv preprint
+     tation for repository-level code completion. arXiv preprint arXiv:2405.19782              arXiv:2402.19173 (2024).
+     (2024).                                                                              [32] Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xiubo Geng, Wenxiang Hu,
+[10] Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav                   Chongyang Tao, Jing Ma, Qingwei Lin, and Daxin Jiang. 2023. Wizardcoder:
+     Mishra, Adam Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Se-                   Empowering code large language models with evol-instruct. arXiv preprint
+     bastian Gehrmann, et al. 2023. Palm: Scaling language modeling with pathways.             arXiv:2306.08568 (2023).
+     Journal of Machine Learning Research 24, 240 (2023), 1–113.                          [33] Erik Nijkamp, Hiroaki Hayashi, Caiming Xiong, Silvio Savarese, and Yingbo
+[11] Fenia Christopoulou, Gerasimos Lampouras, Milan Gritta, Guchun Zhang, Yin-                Zhou. 2023. Codegen2: Lessons for training llms on programming and natural
+     peng Guo, Zhongqi Li, Qi Zhang, Meng Xiao, Bo Shen, Lin Li, et al. 2022. Pangu-           languages. arXiv preprint arXiv:2305.02309 (2023).
+     coder: Program synthesis with function-level language modeling. arXiv preprint       [34] OpenAI. 2024. Hello GPT-4o. https://openai.com/index/hello-gpt-4o/. 2024.
+     arXiv:2207.11280 (2022).                                                             [35] Md Rizwan Parvez, Wasi Uddin Ahmad, Saikat Chakraborty, Baishakhi Ray, and
+[12] Colin B Clement, Shuai Lu, Xiaoyu Liu, Michele Tufano, Dawn Drain, Nan Duan,              Kai-Wei Chang. 2021. Retrieval augmented code generation and summarization.
+     Neel Sundaresan, and Alexey Svyatkovskiy. 2021. Long-range modeling of source             arXiv preprint arXiv:2108.11601 (2021).
+     code files with eWASH: Extended window access by syntax hierarchy. arXiv             [36] Boci Peng, Yun Zhu, Yongchao Liu, Xiaohe Bo, Haizhou Shi, Chuntao Hong, Yan
+     preprint arXiv:2109.08780 (2021).                                                         Zhang, and Siliang Tang. 2024. Graph retrieval-augmented generation: A survey.
+[13] Yangruibo Ding, Zijian Wang, Wasi Ahmad, Hantian Ding, Ming Tan, Nihal Jain,              arXiv preprint arXiv:2408.08921 (2024).
+     Murali Krishna Ramanathan, Ramesh Nallapati, Parminder Bhatia, Dan Roth,             [37] Huy Nhat Phan, Hoang Nhat Phan, Tien N Nguyen, and Nghi DQ Bui. 2024.
+     et al. 2023. Crosscodeeval: A diverse and multilingual benchmark for cross-file           Repohyper: Better context retrieval is all you need for repository-level code
+     code completion. Advances in Neural Information Processing Systems 36 (2023),             completion. CoRR (2024).
+     46701–46723.                                                                         [38] Qwen, :, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen
+[14] Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Murali Krishna Ramanathan,                 Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang,
+     Ramesh Nallapati, Parminder Bhatia, Dan Roth, and Bing Xiang. 2022. Cocomic:              Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang
+     Code completion by jointly modeling in-file and cross-file context. arXiv preprint        Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue,
+     arXiv:2212.10007 (2022).                                                                  Pei Zhang, Qin Zhu, Rui Men, Runji Lin, Tianhao Li, Tianyi Tang, Tingyu Xia,
+[15] Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek              Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yu Wan,
+     Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex                  Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu. 2025. Qwen2.5 Technical
+     Vaughan, et al. 2024. The llama 3 herd of models. arXiv preprint arXiv:2407.21783         Report. arXiv:2412.15115 [cs.CL] https://arxiv.org/abs/2412.15115
+     (2024).                                                                              [39] Stephen Robertson, Hugo Zaragoza, et al. 2009. The probabilistic relevance
+[16] Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai Dong, Wentao Zhang,                     framework: BM25 and beyond. Foundations and Trends® in Information Retrieval
+     Guanting Chen, Xiao Bi, Yu Wu, YK Li, et al. 2024. DeepSeek-Coder: When the               3, 4 (2009), 333–389.
+     Large Language Model Meets Programming–The Rise of Code Intelligence. arXiv          [40] Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten Sootla, Itai Gat, Xiao-
+     preprint arXiv:2401.14196 (2024).                                                         qing Ellen Tan, Yossi Adi, Jingyu Liu, Romain Sauvestre, Tal Remez, et al. 2023.
+[17] Koray Kavukcuoglu. 2025. Gemini 2.5: Our most intelligent AI model.                       Code llama: Open foundation models for code. arXiv preprint arXiv:2308.12950
+     https://blog.google/technology/google-deepmind/gemini-model-thinking-                     (2023).
+     updates-march-2025/. 2025.                                                           [41] Freda Shi, Xinyun Chen, Kanishka Misra, Nathan Scales, David Dohan, Ed H Chi,
+[18] Urvashi Khandelwal, Omer Levy, Dan Jurafsky, Luke Zettlemoyer, and Mike                   Nathanael Schärli, and Denny Zhou. 2023. Large language models can be easily
+     Lewis. 2019. Generalization through memorization: Nearest neighbor language               distracted by irrelevant context. In International Conference on Machine Learning.
+     models. arXiv preprint arXiv:1911.00172 (2019).                                           PMLR, 31210–31227.
+[19] Seohyun Kim, Jinman Zhao, Yuchi Tian, and Satish Chandra. 2021. Code pre-            [42] Disha Shrivastava, Denis Kocetkov, Harm de Vries, Dzmitry Bahdanau, and
+     diction by feeding trees to transformers. In 2021 IEEE/ACM 43rd International             Torsten Scholak. 2023. Repofusion: Training code models to understand your
+     Conference on Software Engineering (ICSE). IEEE, 150–162.                                 repository. arXiv preprint arXiv:2306.10998 (2023).
+[20] Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin,    [43] Disha Shrivastava, Hugo Larochelle, and Daniel Tarlow. 2023. Repository-level
+     Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel,                  prompt generation for large language models of code. In International Conference
+     et al. 2020. Retrieval-augmented generation for knowledge-intensive nlp tasks.            on Machine Learning. PMLR, 31693–31715.
+     Advances in neural information processing systems 33 (2020), 9459–9474.              [44] Hanzhuo Tan, Qi Luo, Ling Jiang, Zizheng Zhan, Jing Li, Haotian Zhang, and
+[21] Jian Li, Yue Wang, Michael R Lyu, and Irwin King. 2017. Code completion with              Yuqun Zhang. 2024. Prompt-based code completion via multi-retrieval augmented
+     neural attention and pointer networks. arXiv preprint arXiv:1711.09573 (2017).            generation. ACM Transactions on Software Engineering and Methodology (2024).
+                                                                                          [45] Ze Tang, Jidong Ge, Shangqing Liu, Tingwei Zhu, Tongtong Xu, Liguo Huang,
+                                                                                               and Bin Luo. 2023. Domain adaptive code completion via language models and
+GRACE: Graph-Guided Repository-Aware Code Completion through Hierarchical Code Fusion                            Conference ICSE ’26, April 12-18, 2026, Rio de Janeiro, Brazil
+
+
+     decoupled domain databases. In 2023 38th IEEE/ACM International Conference on       [52] Daoguang Zan, Bei Chen, Fengji Zhang, Dianjie Lu, Bingchao Wu, Bei Guan,
+     Automated Software Engineering (ASE). IEEE, 421–433.                                     Yongji Wang, and Jian-Guang Lou. 2022. Large language models meet NL2Code:
+[46] Hongyuan Tao, Ying Zhang, Zhenhao Tang, Hongen Peng, Xukun Zhu,                          A survey. arXiv preprint arXiv:2212.09420 (2022).
+     Bingchang Liu, Yingguang Yang, Ziyin Zhang, Zhaogui Xu, Haipeng Zhang, et al.       [53] Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin Liu, Daoguang Zan, Yi Mao,
+     2025. Code Graph Model (CGM): A Graph-Integrated Large Language Model for                Jian-Guang Lou, and Weizhu Chen. 2023. Repocoder: Repository-level code com-
+     Repository-Level Software Engineering Tasks. arXiv preprint arXiv:2505.16901             pletion through iterative retrieval and generation. arXiv preprint arXiv:2303.12570
+     (2025).                                                                                  (2023).
+[47] Yue Wang, Hung Le, Akhilesh Deepak Gotmare, Nghi DQ Bui, Junnan Li, and             [54] Xiangyu Zhang, Yu Zhou, Guang Yang, and Taolue Chen. 2023. Syntax-aware
+     Steven CH Hoi. 2023. Codet5+: Open code large language models for code                   retrieval augmented code generation. In Findings of the Association for Computa-
+     understanding and generation. arXiv preprint arXiv:2305.07922 (2023).                    tional Linguistics: EMNLP 2023. 1291–1302.
+[48] Yanlin Wang, Yanli Wang, Daya Guo, Jiachi Chen, Ruikai Zhang, Yuchi Ma, and         [55] Ziyin Zhang, Chaoyu Chen, Bingchang Liu, Cong Liao, Zi Gong, Hang Yu, Jianguo
+     Zibin Zheng. 2024. Rlcoder: Reinforcement learning for repository-level code             Li, and Rui Wang. 2023. Unifying the perspectives of nlp and software engineering:
+     completion. arXiv preprint arXiv:2407.19487 (2024).                                      A survey on language models for code. arXiv preprint arXiv:2311.07989 (2023).
+[49] Sushma Reddy Yadavalli, Lokesh Chandra Das, and Myounggyu Won. 2023. Rlpg:          [56] Qinkai Zheng, Xiao Xia, Xu Zou, Yuxiao Dong, Shan Wang, Yufei Xue, Lei Shen,
+     Reinforcement learning approach for dynamic intra-platoon gap adaptation                 Zihan Wang, Andi Wang, Yang Li, et al. 2023. Codegeex: A pre-trained model for
+     for highway on-ramp merging. In 2023 IEEE/RSJ International Conference on                code generation with multilingual benchmarking on humaneval-x. In Proceedings
+     Intelligent Robots and Systems (IROS). IEEE, 5514–5521.                                  of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining.
+[50] Daoguang Zan, Bei Chen, Zeqi Lin, Bei Guan, Yongji Wang, and Jian-Guang Lou.             5673–5684.
+     2022. When language model meets private library. arXiv preprint arXiv:2210.17236    [57] Zibin Zheng, Kaiwen Ning, Yanlin Wang, Jingwen Zhang, Dewu Zheng, Mingxi
+     (2022).                                                                                  Ye, and Jiachi Chen. 2023. A survey of large language models for code: Evolution,
+[51] Daoguang Zan, Bei Chen, Dejian Yang, Zeqi Lin, Minsu Kim, Bei Guan, Yongji               benchmarking, and future trends. arXiv preprint arXiv:2311.10372 (2023).
+     Wang, Weizhu Chen, and Jian-Guang Lou. 2022. CERT: continual pre-training           [58] Qihao Zhu, Daya Guo, Zhihong Shao, Dejian Yang, Peiyi Wang, Runxin Xu,
+     on sketches for library-oriented code generation. arXiv preprint arXiv:2206.06888        Y Wu, Yukun Li, Huazuo Gao, Shirong Ma, et al. 2024. Deepseek-coder-v2:
+     (2022).                                                                                  Breaking the barrier of closed-source models in code intelligence. arXiv preprint
+                                                                                              arXiv:2406.11931 (2024).
+

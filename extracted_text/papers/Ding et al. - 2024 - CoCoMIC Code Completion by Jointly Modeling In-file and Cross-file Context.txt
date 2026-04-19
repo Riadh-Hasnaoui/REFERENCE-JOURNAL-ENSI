@@ -1,0 +1,792 @@
+                CoCoMIC: Code Completion By Jointly Modeling
+                        In-file and Cross-file Context
+            Yangruibo Ding1,∗,† , Zijian Wang2,∗,‡ Wasi Uddin Ahmad2,∗
+         Murali Krishna Ramanathan2 Ramesh Nallapati2 Parminder Bhatia2
+                                 Dan Roth2 Bing Xiang2
+                                      1
+                                Columbia University 2 AWS AI Labs
+                   yrbding@cs.columbia.edu {zijwan,wuahmad}@amazon.com
+
+                                                       Abstract
+While pre-trained language models (LM) for code have achieved great success in code completion, they
+generate code conditioned only on the contents within the file, i.e., in-file context, but ignore the rich semantics
+in other files within the same project, i.e., project-level cross-file context, a critical source of information that is
+especially useful in modern modular software development. Such overlooking constrains code LMs’ capacity in
+code completion, leading to unexpected behaviors such as generating hallucinated class member functions or
+function calls with unexpected arguments. In this work, we propose CoCoMIC, a novel framework that jointly
+learns the in-file and cross-file context on top of code LMs. To empower CoCoMIC, we develop CCFinder, a
+static-analysis-based tool that locates and retrieves the most relevant project-level cross-file context for code
+completion. CoCoMIC successfully improves the existing code LM with a 33.94% relative increase in exact match
+and 28.69% in identifier matching for code completion when the cross-file context is provided. Finally, we perform a
+series of ablation studies and share valuable insights for future research on integrating cross-file context into code LMs.
+
+Keywords: Code Completion, Code Generation, Repository-level Code Completion
+
+
+                 1.    Introduction
+In recent years, language models for source code
+like Codex (Chen et al., 2021) and CodeGen (Ni-
+jkamp et al., 2023) have shown promising perfor-
+mance in code completion tasks and have great
+potential to improve developer productivity (Barke
+et al., 2023). These code LMs are typically trained
+with causal language modeling loss and complete
+the code conditioning on the previous code tokens
+in the same file, which we refer to as in-file context.
+   Modular programming (Parnas, 1972; Parnas                   Figure 1: CodeGen-2B-mono fails to complete a
+et al., 1985; Sullivan et al., 2001) is a software             Python program correctly as in-file context does not
+design strategy that divides the complex software              provide sufficient information. The model needs
+functionality into several independent, interchange-           to know that TagHandler takes an argument
+able components (e.g., files, classes, and func-               raw_tags, which could be obtained through the
+tions), such that each component implements only               function list_tags of git. Generating the cor-
+one aspect of the desired functionality and conse-             rect code requires the presence of class and func-
+quently becomes easily reusable and testable. It               tion definitions as part of the context, which cannot
+has already been a well-adapted paradigm in mod-               be derived from the current file alone.
+ern software development and maintenance. De-
+veloping under the modular programming paradigm                ments of imported functions.
+requires knowledge from the current file and the                  In this work, we argue that code LMs should gen-
+whole project, to which we refer as cross-file con-            erate code conditioned jointly on in-file context and
+text. As shown in Figure 1, the cross-file context is          cross-file context. However, there are challenges in
+critical for code completion: the CodeGen Python               developing such models. First, the project defines
+model (Nijkamp et al., 2023) with 2 billion parame-            its individual and complex hierarchy and could be
+ters fails to generate the correct code since it only          of varied sizes. Thus, given a piece of code, it is
+considers in-file context and lacks visibility to var-         critical yet challenging to efficiently identify the most
+ious crucial references for code completion, e.g.,             relevant and useful cross-file context. Second, we
+member functions of imported classes and argu-                 must carefully design a framework for aggregating
+
+                                                          3433
+                                         LREC-COLING 2024, pages 3433–3445
+                      20-25 May, 2024. © 2024 ELRA Language Resource Association: CC BY-NC 4.0
+the information from the in-file and cross-file context.   LM, CodeGen (Nijkamp et al., 2023), by 33.94%
+Naïvely concatenating code from in-file and cross-         in exact match and 28.69% identifier matches rela-
+file context is not feasible for two reasons. First,       tively. Our main contributions are as follows.
+they represent distinct types of contextual informa-         1. Our work sheds light on the importance of
+tion, as the former presents the local dependencies              project-level cross-file context, a critical yet
+and human intentions (e.g., code comments) for                   overlooked resource in the era of language
+code completion, while the latter compensates for                models for code completion.
+the project-level dependencies that do not exist in          2. We present CoCoMIC, a novel framework built
+the surrounding lines. Thus, the model should not                on top of code LMs that jointly learns in-file
+always treat them equally. Second, the model’s in-               and cross-file context to enhance code comple-
+put length is limited, so concatenating all contexts             tion (§4). To empower CoCoMIC, we develop
+as input will exceed its context length.                         CCFinder, an effective static-analysis-based
+   Besides, unlike third-party packages, which are               tool that collects the most relevant cross-file
+mostly available in the pre-training dataset of code             context to be integrated into CoCoMIC (§3).1
+LMs, the project-level context is likely to be private       3. We show that CoCoMIC with cross-file con-
+to the model, given its under-development nature.                text from CCFinder significantly outperforms
+As illustrated in Figure 1, code LMs demonstrate                 fine-tuned baselines by up to +33.94% in ex-
+diminished performance and hallucination when                    act match. We additionally conduct extensive
+code completion necessitates cross-file dependen-                ablation studies to show the contribution of
+cies from the ongoing private project.                           different components (§5 & 6).
+   To address the aforementioned challenges, we
+propose CoCoMIC, a novel framework that jointly                           2.    Preliminaries
+learns in-file and cross-file context to improve code      For the convenience of discussion, we define con-
+completion. To automatically retrieve the most rel-        cepts that will be used throughout the paper.
+evant cross-file context, we further build a static-
+analysis-based cross-file context finder, CCFinder,        Project Entities Project entities are code com-
+that effectively fulfills this task.                       ponents that constitute the skeleton of software
+                                                           projects; developers frequently import and reuse
+Cross-file Context Finder We design and im-                these entities as cross-file context. We focus on
+plement CCFinder, a static code analysis tool, to          four types of entities: file, function, class, and global
+retrieve the most relevant cross-file context for code     variable. In particular, file contains the file name
+completion. CCFinder parses the project hierarchy          and file docstring; class contains the class signa-
+and code components to extract project informa-            ture, docstring, and attributes; function contains
+tion. CCFinder further builds a project context            function signature, docstring, and body; global vari-
+graph to represent the details of each component           able contains the variable name and its value.
+(i.e., entity) and the interactions among them (i.e.,
+relation). When an incomplete program requests             Entity Relations Entity relations represent the
+completion, the tool will first analyze its import         interactions among project entities. We consider
+statements and pinpoint the related entities from          two categories of relations: intra-file and inter-file.
+the built context graph. Then, the tool will retrieve      Intra-file relations describe the in-file code hierar-
+the neighbors of the pinpointed entities from the          chies pre-defined by the programming language
+graph as the cross-file context of the current file.       grammar. For example, a class is at the first level of
+                                                           the hierarchy while its member functions are at the
+Jointly Modeling In-file and Cross-file Context            second level. Inter-file relations define the file-to-
+We propose CoCoMIC, a novel framework built on             file dependencies. Under each category, we further
+top of existing code LMs with joint attention to in-file   define several types of relations.
+and retrieved cross-file context. We realize this in
+                                                           Locale We define locale as the entity’s relative
+two steps: First, the model will compress cross-
+                                                           code location within the software project. For
+file context and build its representations. Second,
+                                                           example, the locale of class entities is defined
+when generating code completion, the model will
+                                                           as file_name.class_name. The locale is as-
+attend to both the compressed cross-file context
+                                                           signed a unique name according to the specific
+and the concrete in-file context.
+                                                           location of a project entity, so we maintain the one-
+   We evaluate the effectiveness of CCFinder and
+                                                           to-one mapping between each entity and its locale.
+CoCoMIC on a code completion dataset we built
+                                                           The locale benefits CoCoMIC in two ways: (1)
+from the Python Package Index (PyPI), a repos-
+                                                           when we construct cross-file context, the locale
+itory of open-source Python projects. We show
+                                                           efficiently maps the relative path of a code snippet
+that CCFinder can retrieve 27.07% more relevant
+                                                           to its project entity CCFinder builds (§3.2), and (2)
+context for code completion than in-file context. By
+integrating the retrieved context from CCFinder,             1
+                                                               We will release our code at https://github.
+CoCoMIC improves the backbone pre-trained code             com/amazon-science/cocomic
+
+                                                      3434
+Figure 2: Overview of CCFinder. First, CCFinder builds the project context graph, including the bird’s-eye
+view of the whole project and the code details of each module. Then, given the incomplete program,
+CCFinder retrieves a set of the most relevant project entities as cross-file context from the graph.
+
+it indicates hierarchical relations among project en-       CCFinder’s overall workflow is shown in Fig-
+tities and helps model with code completion (§6.4).      ure 2. It has two main steps: (1) Analyze the pro-
+In-file & Cross-file Context For an incomplete           gram dependencies to build a bird’s-eye view of
+source file S, we define two types of context: in-file   the whole project and parse the source code to
+and cross-file. In-file context represents code snip-    extract code details of each module. With these,
+pets included in the current file, i.e., code tokens     CCFinder builds the project context graph: graph
+before the predicting position. Cross-file context       nodes represent code components that constitute
+C represents the relevant code information (e.g.,        the project’s backbone, and edges indicate the rela-
+classes, functions) from the same project that is        tions among components. (2) Given an incomplete
+out of but imported by the current file. Concretely,     program, the tool retrieves the most relevant cross-
+cross-file context refers to a collection of relevant    file context from the built graph. In this work, we
+project entities that might assist with the missing      focus on Python as the proof-of-concept to show-
+code prediction but are not in S.                        case our main arguments. However, CCFinder’s
+                                                         conceptual design is extensible to other languages.
+         3.   Cross-file Context Finder
+Software projects typically have complex structures
+(Parnas et al., 1985) representing the dependen-
+cies among distinct code components. To retrieve         3.1.   Project Context Graph
+the most relevant cross-file context as the code
+LM’s additional reference, we need a tool with three     CCFinder parses the project structure and corre-
+main characteristics. First, it should be able to nav-   sponding source files to identify the project entities
+igate the project structure to identify the file and     and entity relations. Then, CCFinder uses enti-
+module dependencies. Second, it can zoom into            ties and entity relations to build graph nodes and
+the dependencies and extract detailed code com-          directed edges, respectively. The context graph is
+ponents. Third, given a code sample, the process         built top-down. First, we create a root node for the
+of cross-file context retrieval should be stable and     project and connect it with all file nodes. Second,
+automated for large-scale training and inference.        each file node will build its own sub-graph, wrapping
+Unfortunately, a single off-the-shelf tool could not     code components within the file, and also build con-
+meet all three requirements. For example, module         nections with other files that it depends on, i.e., it
+dependency analysis tools 2,3 can only provide the       imports code from these files. Third, nodes will link
+module interactions while missing the hierarchical       to others within the file-level sub-graph based on
+details inside each module and cannot directly out-      the dependencies or scope. For example, a class
+put the concrete code. Therefore, we develop a           node will have edges to its member functions.
+new static-analysis-based tool, CCFinder, to auto-          Formally, CCFinder builds the multi-relational,
+matically collect the most relevant cross-file context   directed context graph G = (V, E) for the project,
+that will be integrated into code LMs (§4).              where V is the set of nodes representing code com-
+   2
+       https://github.com/google/importlab               ponents, and E is the set of edges that indicate the
+   3
+       https://github.com/thebjorn/pydeps                interactions among code components.
+
+                                                    3435
+3.2.    Cross-file Context Retrieval                           the representations of the [SUM] tokens for each
+                                                               cross-file entity. We compare it with mean pooling
+In the project context graph, the closer a graph               in §6.3 and show that [SUM] works better.
+neighbor is to a specific code snippet (i.e., entity),
+the more relevant that neighbor is. For example,
+the detailed information of an imported file entity,
+                                                               4.2.   Encoding Cross-file Context
+such as its defined functions or classes, should be            The computational cost of Transformers increases
+only 1 or 2 hops away. Therefore, we first analyze             exponentially w.r.t. the input length, so it is impracti-
+the import statements of an incomplete program                 cal to prepend all the retrieved entities as plain text,
+to pinpoint entities related to its cross-file depen-          as they typically contain thousands of tokens. Also,
+dencies. Then we retrieve their neighbors within 2             only a few keywords in an entity (e.g., identifiers)
+hops using the depth-first graph search. We justify            play an important role in assisting code comple-
+that 2-hop neighbors include comprehensive con-                tion. Thus, CoCoMIC encodes each entity into a
+text for code completion in Section 6.5. The set of            single token to balance the space limitation and the
+retrieved nodes is used as cross-file context, which           information needed.
+will maintain their relative order according to the
+                                                                 hci = fθ (ci ) ∈ Rdh ; HC = (hc1 , ..., hcn ) ∈ Rn×dh
+original source file.
+                                                                 Specifically, for each entity ci , the model fθ will
+       4.   The CoCoMIC Framework                              encode its code sequence into one representation
+                                                               hci ∈ Rdh , where dh is the hidden dimension. Then,
+Figure 3 presents the high-level overview of the
+                                                               CoCoMIC takes the hidden state of the last token,
+CoCoMIC framework. CoCoMIC uses an autore-
+                                                               [SUM], as the entity representation. Finally, the
+gressive LM to encode 1) in-file code snippet and
+                                                               model will output a list of entity embeddings, HC ,
+2) retrieved cross-file context, then predicts the
+                                                               representing the retrieved cross-file context.
+next code token conditioning on both. CoCoMIC is
+model-agnostic and we use CodeGen, one of the
+most popular code LMs, to demonstrate later (§5).              4.3.   In-file and Cross-file Context
+                                                               After getting representations of cross-file context,
+4.1.    Input Representation                                   CoCoMIC continues to encode the in-file context
+                                                               and train the model to learn both contexts jointly.
+As shown in Figure 3, the model input includes                 In-file Context CoCoMIC utilizes the causal lan-
+two parts: source code sample S and its cross-file             guage model setting to support the code comple-
+context C. Specifically, the source code sample S              tion task, where each token will consider its for-
+consists of a sequence of tokens x1 , ..., xT , where          mer texts as in-file context. Specifically, the in-file
+xt is a code token and T is the length of S; the               context of source code S, at time step t, will be
+cross-file context, as introduced in §3, is a list of          st = (x1 , ..., xt−1 ). We pass these tokens through
+entities, C = (c1 , ..., cn ), retrieved from the project      the model and get the embeddings of each token to
+context graph. Each entity, ci , is a short piece              construct the representation of the in-file context.
+of code sequence describing the details of that
+entity, i.e., ci = (localei , wi1 , ..., wim , [SUM]), where      HS (t) = fθ (st ) = fθ (x1 , ..., xt−1 ) ∈ R(t−1)×dh
+wij is a code token within the entity, localei is the          Joint attention to In-file and Cross-file Context
+locale (§2) of ci , and [SUM] is a special token.              Different layers of a Transformer model have been
+Representing Entity Relations with Locales As                  shown to capture different language components
+introduced in §2, each project entity is paired with           (e.g., lower layers learn language syntax or gram-
+a locale that indicates its hierarchical relationship.         mar while upper layers capture language semantics
+We explore the benefits of prepending locales to               (Jawahar et al., 2019)). We hypothesize that both
+provide entities with such relational hints (§6.4).            in-file and cross-file contexts contribute to forming
+Specifically, for each cross-file entity, we prepend           the understanding of language components. There-
+its locale to its code text as a comment, followed             fore, we fuse the in-file and cross-file context at
+by a new line character: for the example in Fig-               each Transformer layer so that generating the next
+ure 3, the retrieved entity def list_tags() will               token’s hidden state will always depend on both
+be prepended with #git.list_tags\n.                            contexts. At each time step t, for the l-th layer, we
+Better Entity Representation with [SUM] We                     first compute the keys and values for cross-file and
+append a special token [SUM] to entity descrip-                in-file context, using their (l − 1)-th hidden states.
+                                                                                 [l−1]                [l−1]
+tions. We expect [SUM] token to learn the summa-                        KC = HC          WK , VC = HC         WV
+rization of the entity since the causal attention (Rad-
+ford et al., 2019; Brown et al., 2020) allows it to at-          KS (t) = HS (t)[l−1] WK , VS (t) = HS (t)[l−1] WV
+tend to all the previous tokens describing the entity.           Then, we concatenate the keys and values from
+When completing code, the model will attend to                 both contexts so that, at time step t, the generating
+
+                                                          3436
+Figure 3: The CoCoMIC framework. Bottom: Given incomplete code, CoCoMIC leverages CCFinder to
+identify the corresponding entities in the project context graph (§3.1) and retrieve their k-hop neighbors
+as cross-file entities (§3.2). Up: CoCoMIC first generates representations for cross-file entities using
+the appended [SUM] token (§4.2). Then it completes the current code by jointly attending to in-file and
+cross-file context (§4.3).
+
+token can jointly attend them.                                                  Mean       Max    Median   Min
+       K(t) = KC ||KS (t), V (t) = VC ||VS (t),            Prompts              1,354    32,599      758    7
+                              [l−1]    Q
+                                                           Cross-file Context   4,485   186,339    1,928   22
+                Q(t) = fθ (xt )       W ,
+                                                         Table 1: Number of tokens using CodeGen’s tok-
+                              Q(t)K(t)⊤
+       Attn(t) = softmax(       √       )V (t),          enizer of prompts and cross-file context of the test
+                                  dK                     set.
+where || indicates the concatenation of vectors.
+                                                         diction on local APIs (i.e., APIs defined within the
+           5.     Experiment Setup                       project), we further filter out the samples that either
+                                                         can not be parsed by the AST parser or do not in-
+5.1.   Data                                              clude local API calls in the target statement (to be
+                                                         completed). Finally, we ended up with the 6,888
+Our data stem from the Python Package Index
+                                                         held-out prompts for evaluation.
+(PyPI). We collect permissively licensed projects
+and filter out those with ≤5 python files or ≥5k
+nodes in project context graph, ending up with           5.2.     Implementation Details
+60,891 projects. Then, we divide the dataset into
+                                                         Cross-file Context CCFinder uses tree-sitter4 to
+80%/10%/10% train, validation, and test sets. We
+                                                         parse source code files. Tree-sitter is a widely used
+notice that popular packages, such as numpy, are
+                                                         source code parser that generates the abstract
+used as dependencies by many packages and will
+                                                         syntax tree (AST) given a program. CCFinder
+cause potential information leakage if numpy is
+                                                         will traverse the AST to extract information as de-
+part of the test set. Thus, we only include projects
+                                                         scribed in §3. Then, CCFinder analyzes the im-
+that were not used as dependencies by any train-
+                                                         port statements on top of import-dep5 to build the
+ing projects in the test set. We create prompts by
+                                                         project context graph. In this work, we retrieve 2-
+cutting the source file at the location where com-
+                                                         hop neighbors with at max 128 project entities as
+pletion requires cross-file context. We present the
+                                                         cross-file context, and each entity contains up to
+sequence length statistics in Table 1. For cross-
+                                                         128 tokens. These thresholds are data-driven to
+file context, we concatenate the text of all retrieved
+                                                         ensure the model input covers most of the relevant
+entities as a sequence and count the length.
+                                                         cross-file context.
+    Figure 1 shows an example prompt we create:
+                                                         Model The backbone of CoCoMIC is CodeGen
+it requires the details of TagHandler and git to
+                                                         (Nijkamp et al., 2023) and we use CodeGen-350M-
+complete the code accurately. In this work, we
+                                                         Mono for all experiments. In all settings, we fine-
+consider statement-level code completion, so the
+                                                            4
+ground truth of the test sample is built accordingly.           https://tree-sitter.github.io
+                                                            5
+For the convenience of studying the model’s pre-                https://pypi.org/project/import-deps
+
+                                                    3437
+tune the model for 5 epochs with a max sequence             Besides, we see no degradation when the cross-
+length of 2,048 tokens and a learning rate of 5e-5       file context is not explicitly required. We calculate
+with 5% warm-up steps, then cosine annealing.            the perplexity of all tokens in the test samples, re-
+  Our code is based on Transformers (Wolf et al.,        gardless of whether they require cross-file context.
+2020). We train our models on a machine with 8           We see that CoCoMIC achieves the lowest per-
+Nvidia A100s. Each job takes around 50 hours (i.e.,      plexity, indicating cross-file context in CoCoMIC is
+400 GPU hours) to train all models.                      generally beneficial for code completion.
+
+5.3.   Baselines & Evaluation Metrics                    6.2.   Effectiveness of CCFinder
+CodeGen We consider two variations of the                The objective of CCFinder is to locate and retrieve
+vanilla CodeGen model with the in-file context only:     relevant code context from other source files in the
+(1) zero-shot, where we directly evaluate the pre-       project. Identifiers (e.g., function names and pa-
+trained CodeGen model on our test dataset, and           rameters) are presumably one of the most critical
+(2) finetuned, where we finetune CodeGen on our          API information. Therefore, we study the effec-
+dataset first and then evaluate.                         tiveness of CCFinder by assessing whether their
+CodeGen w/ Cross-file Context We also con-               retrieved-context increases recall of the identifiers
+sider a prompting baseline where we prepend the          that appear in the ground truth. We hypothesize
+cross-file context to the input sequence and fine-       that the inclusion of identifiers needed to complete
+tune. Similar to the configuration of CoCoMIC, we        a code is likely to benefit CoCoMIC.
+reserve the first 128 tokens of the input for the code      Table 3 shows that the in-file context covers (re-
+tokens from the cross-file context and use the rest      call) 75.19% identifiers that appear in the ground
+tokens for the in-file context.                          truth. In comparison, prompts augmented with re-
+                                                         trieved cross-file identifiers bring up identifier recall
+Evaluation Metrics We compute exact match
+                                                         to 95.55%. This indicates that CCFinder can re-
+(EM) and BLEU-4 (Papineni et al., 2002) to assess
+                                                         trieve most of the cross-file context that can help LM
+the accuracy of the generated code. While code
+                                                         complete the input code. Note that while CCFinder
+match indicates the overall correctness of code
+                                                         increases identifier recall by 27.07%, Table 2 shows
+completion, we want to zoom into the cases where
+                                                         only an 8.97% improvement in identifier recall. This
+cross-file context could most contribute, which is
+                                                         indicates that more intelligent prompting techniques
+API usage. Therefore, we measure the identifier
+                                                         or training better LMs to use cross-file context can
+match to evaluate whether cross-file context im-
+                                                         lead to better performances. Further, Table 4 shows
+proves the model’s ability to predict the right APIs.
+                                                         that random entities from the same project do not
+To this end, we extract the identifiers from the
+                                                         provide useful information since they are not nec-
+model prediction and the ground truth, resulting in
+                                                         essarily related to the input code, and 2-hop re-
+two ordered lists of identifiers. Then, we compare
+                                                         trieval outperforms 1-hop retrieval. These verify
+them and report the identifier prediction accuracy
+                                                         that CCFinder retrieves relevant cross-file context
+in terms of exact match, precision, and recall.
+                                                         and thus helps CoCoMIC.
+    Besides, we compute the perplexity of all the
+tokens on the test set to study whether adding cross-
+file context degrades performance when the cross-        6.3. [SUM] Token Representing Entities
+file context is not explicitly required.                 We append a special token [SUM] to cross-file con-
+                                                         text to summarize their information (Figure 3). Now,
+         6.   Results and Analysis                       we study the importance of the [SUM] token for
+6.1.   Main Results                                      a better representation of cross-file context. As a
+                                                         comparison, we apply the widely-used mean pool-
+We present the results in Table 2. CoCoMIC out-          ing that takes the mean over every cross-file to-
+performs all baselines on all metrics with a clear       ken’s embedding as the cross-file representation.
+margin, demonstrating the effectiveness of our pro-      We train a CoCoMIC model with mean pooling and
+posed framework. We notice that when the cross-          keep the rest of the settings the same. The result
+file context is prepended as a plain text prompt,        is in Table 5: our proposed [SUM] token effectively
+CodeGen outperforms the other two baselines with-        summarizes cross-file context and significantly out-
+out cross-file context. However, limited by the max-     performs the mean pooling strategy.
+imum input length, it can only include a very limited
+amount of cross-file context, which significantly re-
+                                                         6.4.   Impact of Locales in CoCoMIC
+stricts its capacity. In contrast, CoCoMIC encodes
+the code sequence of an entity into one single to-       As introduced in §4.1, we prepend locales as re-
+ken, enabling the model to incorporate more cross-       lational hints for better entity representations. We
+file context while saving the input length.              study the effectiveness of such relational signals.
+
+                                                    3438
+                                               Cross-file       Code Match                 ID Match
+  Model                        Finetuned        Entities                                                        PPL (↓)
+                                                               EM       BLEU-4      EM      Prec.     Rec.
+  CodeGen                            ✗               ✗        14.56      33.12     22.91    47.74     50.75       2.88
+    + Finetune                       ✓               ✗        15.97      35.11     24.29    50.46     53.07       2.87
+      + Cross-file context           ✓               ✓        17.00      36.34     25.80    48.91     54.76       2.77
+  CoCoMIC (Ours)                     ✓               ✓        21.39      41.65     31.26    55.45     57.83       2.69
+
+Table 2: Performance of CoCoMIC compared with baselines. We show that using the text prompt for
+cross-file entities (row 3) helps marginally compared to the in-file-only baseline (row 2). On the contrary,
+CoCoMIC with cross-file context (row 4) improves the performance by a large margin (+33.94% Code
+Match EM and +28.69% ID Match EM) compared to the in-file only baseline. In addition, we show that
+there is no degradation in perplexity (PPL) when evaluating all the tokens in the test set where the cross-file
+context is not always required, suggesting that adding cross-file context helps in general.
+
+
+     Code Context Type               ID Recall (%)                                  Code Match              ID Match
+                                                                    CoCoMIC
+     In-file context                     75.19                                      EM BLEU-4 EM             Prec. Rec.
+     In-file + Cross-file context        95.55                      No Relations   20.27   40.62    30.02    55.44 57.46
+Table 3: CCFinder retrieves 27.07% more identi-                     MTL            20.01   40.00    29.53    55.51 56.68
+fiers when compared to only in-file contexts.                       Locale         21.39   41.65    31.26    55.45 57.83
+                                                                    Locale + MTL   21.25   41.44    31.05    55.83 58.03
+                      Code Match            ID Match            Table 6: Locales improve performance while learn-
+ Entities From
+                     EM    BLEU-4     EM     Prec.    Rec.      ing cross-file relations with multi-task learning only
+ Random           15.68     35.23    24.07 49.75 52.69          provides CoCoMIC marginal improvement.
+ CCFinder (1-hop) 18.47     38.09    28.14 53.20 55.63
+ CCFinder (2-hop) 21.39     41.65    31.26 55.45 57.83
+                                                                rics. We hypothesize that this is due to locales
+Table 4: Entities retrieved from CCFinder are more              providing an exact and direct signal as text (e.g.,
+useful than random entities, and 2-hop retrieval                class_name.method_name). Thus the model
+help achieve better performance.                                could use them as short-cut in code completion.
+                   Code Match              ID Match
+ CoCoMIC
+                 EM       BLEU-4    EM      Prec.    Rec.       6.5. k-hop Retrieval
+ Mean pooling 16.78       36.02     25.01 50.50 52.61           As we see from Table 4, k = 1 underperforms
+ [SUM]        21.39       41.65     31.26 55.45 57.83           compared to k = 2. This is because k = 1
+Table 5: [SUM] token representing cross-file con-               fetches less comprehensive context. For exam-
+text significantly outperforms mean pooling.                    ple, with the import statement import FileA as
+                                                                A, we can access class X’s static member function
+                                                                Y as: A.classX.funcY through 2-hop retrieval,
+As a comparison, we further study multi-task learn-             whereas 1-hop retrieval will not fetch. In fact, 1-hop
+ing that encourages embedding relational informa-               retrieval won’t fetch any class member function if
+tion into entity representations.                               only the file is imported, which frequently happens
+Multi-task w/ Edge Prediction We use multi-                     in Python. Given the great coverage of k = 2 (Table
+task learning (MTL) to encode cross-file relations.             3) and given we found too many unrelated entities
+Specifically, we train the model with an auxiliary              were retrieved if we use k > 2, we decided to use
+edge prediction task among cross-file entities. We              k = 2 throughout the work.
+take representations of two cross-file entities gener-
+ated by the LM layers and ask the model to predict
+what edge type connects them.
+                                                                6.6.    Re-ranking Cross-file Entities
+Results Table 6 presents the results. While MTL                 The cross-file entities are organized and presented
+achieves 97.2% accuracy in the auxiliary edge                   to CoCoMIC following their import order in the pro-
+prediction task, it hardly improves CoCoMIC in                  posed design (§3.2). We also explore the effects of
+code completion. Such a gap suggests that even                  re-ranking cross-file entities according to their rele-
+if MTL fulfills the expectation of embedding edge               vance to the prompt. Specifically, we use the Jac-
+information, this information is not directly useful            card index-based (Jaccard, 1912) ranking and use
+for code completion. In contrast, adding locales                the last 10 lines of code in the prompt as the query
+consistently improves CoCoMIC across all met-                   to re-rank all the entities obtained by CCFinder.
+
+                                                             3439
+                        Code Match             ID Match            file context, while CoCoMIC is capable of com-
+                       EM     BLEU-4    EM      Prec.   Rec.       pressing up to 16,384 (=128x128) tokens of cross-
+ CodeGen + Ft.        17.00    36.34   25.80    48.91   54.76      file context into only 128 vectors, making cross-file
+   + re-ranked ent.   17.76    36.98   26.31    48.27   55.87      context readily available for the model to use.
+ CoCoMIC              21.39    41.65   31.26    55.45   57.83
+   + re-ranked ent.   21.62    41.89   31.69    55.96   58.19
+
+Table 7: Re-ranking cross-file entities marginally                                7.   Related Work
+improves the performance of CoCoMIC and Code-
+Gen model finetuned with cross-file context.
+                                                                   In the last couple of years, a significant effort has
+                       Code Match              ID Match            been made to pretrain Transformer language mod-
+                      EM      BLEU-4   EM       Prec.   Rec.       els using unlabeled source code (Feng et al., 2020;
+ CodeGen + Ft.                                                     Ahmad et al., 2021; Wang et al., 2021b; Guo et al.,
+   + CFC (full)  17.00        36.34    25.80 48.91 54.76           2022; Ding et al., 2022b) to facilitate software en-
+   + CFC (simp.) 17.49        37.57    26.76 51.71 54.88           gineering applications (Husain et al., 2019; Iyer
+ CoCoMIC         21.39        41.65    31.26 55.45 57.83
+                                                                   et al., 2018; Tufano et al., 2019; Zhou et al., 2019).
+Table 8: CoCoMIC significantly outperforms all                     Among these efforts, developing code generation
+baselines even when more cross-file context (CFC)                  models is noteworthy (Chen et al., 2021; Xu et al.,
+is included in the prompt for baselines.                           2022; Wang and Komatsuzaki, 2021; Black et al.,
+                                                                   2021a, 2022; Nijkamp et al., 2023; Fried et al., 2023;
+                                                                   Li et al., 2022). Since most of these models are au-
+    The detailed results are shown in Table 7. Re-
+                                                                   toregressive language models, they can be directly
+ranking cross-file entities does not significantly im-
+                                                                   used in code completion - given a code snippet as a
+prove the CoCoMIC’s performance. The improve-
+                                                                   prompt, generate the next N tokens. Until recently,
+ment is only marginal due to (1) CoCoMIC effi-
+                                                                   existing works in the literature use code snippets
+ciently encodes sufficient (up to 128 cross-file en-
+                                                                   from the current file (where the user is writing code)
+tities) cross-file context, so re-ranking could not
+                                                                   to prompt the code generation models.
+bring more information, and (2) CoCoMIC’s cross-
+context attention could make use of both in-file and
+cross-file context flexibly, so the input order of cross-             While the use of in-file or class context is rigor-
+file entities does not matter much. The baseline                   ously studied for software engineering applications
+model, CodeGen finetuned with cross-file context,                  in the literature, the use of cross-file context is rel-
+reports slightly more improvement when the cross-                  atively under-explored in code completion backed
+file entities are re-ranked. This is because the base-             by code LMs. Earlier works (Henninger, 1991;
+line model takes plain text as cross-file context, and             Rosson and Carroll, 1996; Michail, 2001; Ye et al.,
+a large portion of such information is truncated due               2000; Ye and Fischer, 2002; Cubranic and Murphy,
+to the limited input length, and thus prioritizing the             2003; Inoue et al., 2003; Hill and Rideout, 2004;
+most relevant entities to the prompt brings more                   Holmes and Murphy, 2005) in software engineer-
+useful information to the front and is included by                 ing literature focused on developing tools to ex-
+the model input. However, the performance of the                   tract information from software repositories to help
+re-ranked and finetuned baseline is still far behind               developers complete code fragments (e.g., vari-
+CoCoMIC, highlighting CoCoMIC is effective in                      able, method name or body completion). On the
+modeling both in-file and cross-file context.                      other hand, recent works focus on modeling cross-
+                                                                   file information in neural approaches. Wang et al.
+6.7.   Additional Baseline Variants                                (2021a) proposed to model intra- and inter-class
+                                                                   context for code summarization by extracting the
+In addition to the CodeGen w/ Cross-file Context                   Unified Modeling Language (UML) class diagrams.
+baseline (§5.3), which uses the same cross-file                    Shrivastava et al. (2023) proposed a prompt en-
+context tokens as in CoCoMIC, we experimented                      gineering technique that learns a repository-level
+with a simplified setting that only takes the locales              prompt generator to generate example-specific
+and the signature prototypes (name, arguments,                     prompts. Zhang et al. (2023) proposed an iterative
+and default return types, if present) to fit in more               retrieval-generation framework to augment prompt
+cross-file context within the input length budget.                 with cross-file context. Our work has the same
+   From Table 8, we see the performance only im-                   spirit as we propose to retrieve cross-file context
+proves marginally when using simplified cross-file                 given a source code. However, the fundamental
+context, and it still underperforms CoCoMIC signif-                difference are 1) we utilize the import statements
+icantly. This suggests that baseline models have                   for structured retrieval, and 2) we optimize in-file
+substantial limitations of sequence lengths that the               and cross-file context jointly in modeling instead of
+performance is subpar even if we simplify the cross-               simple prompting.
+
+                                                                3440
+                8.    Conclusion                         the finetuned CodeGen model. Development of
+                                                         training strategies to bridge this performance gap
+The absence of project-level cross-file context for
+                                                         is needed, and we leave this as future work.
+code LMs limits their practicality in modern soft-
+ware development. In this work, we propose Co-           Impact on different sized language models Al-
+CoMIC, a framework that incorporates both in-file        though we use CodeGen-350-mono model in this
+and cross-file context for code completion based         work which consists of 350M parameters, we hy-
+on autoregressive code LMs. We build CCFinder,           pothesize that larger LMs (e.g., 2B, 6B, or 16B vari-
+a static code analysis tool that builds the project      ants of CodeGen) would result in similar or higher
+context graph and finds the most relevant cross-file     performance boost due to modeling cross-file con-
+context based on import statements. Empirical            text. However, we acknowledge that our work does
+results show that CCFinder retrieves 27.07% more         not substantiate that our proposed technique would
+context that is not in the current file, and with the    boost the performance of LMs of any size.
+retrieved context, CoCoMIC achieves 33.94% rel-
+ative improvement over the baseline. We further               9.   Bibliographical References
+perform various ablations and analysis of various
+                                                         Ibrahim Abdelaziz, Julian Dolby, James P Mc-
+components in CoCoMIC, presenting valuable in-
+                                                           Cusker, and Kavitha Srinivas. 2021. A toolkit
+sights for future research in this direction. Our data
+                                                           for generating code knowledge graphs. The
+and code will be made available upon acceptance.
+                                                           Eleventh International Conference on Knowledge
+              Ethics Statement                             Capture (K-CAP).
+
+Our work aims at improving code LMs in code gen-         Ibrahim Abdelaziz, Julian Dolby, Jamie McCusker,
+eration with cross-file context. We highlight the           and Kavitha Srinivas. 2022. Can machines read
+limitations of our work in the following section. We        coding manuals yet? – a benchmark for building
+do not expect our work to have a negative broader           better language models for code understanding.
+impact, though using code LMs always comes with             In Proceedings of the AAAI Conference on Artifi-
+certain risks, e.g., generating biased, toxic, and in-      cial Intelligence (AAAI 2022).
+secure code. We refer readers to Sec. 7 in (Chen         Wasi Ahmad, Saikat Chakraborty, Baishakhi Ray,
+et al., 2021) for a detailed discussion on the broader    and Kai-Wei Chang. 2021. Unified pre-training
+impact of code LMs.                                       for program understanding and generation. In
+                                                          Proceedings of the 2021 Conference of the North
+                     Limitations                          American Chapter of the Association for Compu-
+Extension to other languages and third-party              tational Linguistics: Human Language Technolo-
+packages Our work focuses on Python language,             gies, pages 2655–2668, Online. Association for
+which is widely used and has great availability           Computational Linguistics.
+of open-sourced software projects through PyPI.
+However, the main concept introduced in our work         Jacob Austin, Augustus Odena, Maxwell Nye,
+should be extensible to other languages. In addi-          Maarten Bosma, Henryk Michalewski, David Do-
+tion, we focus on the project (repo) context in this       han, Ellen Jiang, Carrie Cai, Michael Terry, Quoc
+work, and a potential extension is to incorporate          Le, et al. 2021. Program synthesis with large lan-
+third-party packages and building models to sug-           guage models. ArXiv preprint, abs/2108.07732.
+gest the right third-party libraries to use. We leave    Shraddha Barke, Michael B. James, and Nadia
+these as future work.                                      Polikarpova. 2023. Grounded copilot: How pro-
+Model performances with the absence of cross–              grammers interact with code-generating models.
+file context In this work, we assumed that Co-             Proc. ACM Program. Lang., 7(OOPSLA1).
+CoMIC could access the other source code files
+within the project to understand source code depen-      Sid Black, Leo Gao, Phil Wang, Connor Leahy, and
+dencies and utilize them accordingly to generate           Stella Biderman. 2021a. Gpt-neo: Large scale
+the target code completion. However, CoCoMIC               autoregressive language modeling with mesh-
+may not access the code files in many cases, e.g.,         tensorflow. If you use this software, please cite it
+users do not want an AI code LM to read their              using these metadata, 58.
+private or sensitive project APIs. Therefore, it is      Sid Black, Leo Gao, Phil Wang, Connor Leahy, and
+valid to ask – how CoCoMIC performs when the               Stella Biderman. 2021b. GPT-Neo: Large Scale
+cross-file context is absent. We evaluate CoCoMIC          Autoregressive Language Modeling with Mesh-
+without access to cross-file context and compare           Tensorflow.
+with the finetuned CodeGen model (second row
+in Table 2). The results show that CoCoMIC per-          Sidney Black, Stella Biderman, Eric Hallahan,
+forms 5–7% lower (relative performance drop) than          Quentin Anthony, Leo Gao, Laurence Golding,
+
+                                                     3441
+  Horace He, Connor Leahy, Kyle McDonell, Ja-          Yangruibo Ding, Luca Buratti, Saurabh Pujar,
+  son Phang, Michael Pieler, Usvsn Sai Prashanth,        Alessandro Morari, Baishakhi Ray, and Saikat
+  Shivanshu Purohit, Laria Reynolds, Jonathan            Chakraborty. 2022c. Towards learning (dis)-
+  Tow, Ben Wang, and Samuel Weinbach. 2022.              similarity of source code from program contrasts.
+  GPT-NeoX-20B: An open-source autoregressive            In Proceedings of the 60th Annual Meeting of the
+  language model. In Proceedings of BigScience           Association for Computational Linguistics (Vol-
+  Episode #5 – Workshop on Challenges & Per-             ume 1: Long Papers), pages 6300–6312, Dublin,
+  spectives in Creating Large Language Models,           Ireland. Association for Computational Linguis-
+  pages 95–136, virtual+Dublin. Association for          tics.
+  Computational Linguistics.
+                                                       Yangruibo Ding, Zijian Wang, Wasi Uddin Ah-
+Tom B. Brown, Benjamin Mann, Nick Ryder,                 mad, Hantian Ding, Ming Tan, Nihal Jain, Mu-
+  Melanie Subbiah, Jared Kaplan, Prafulla Dhari-         rali Krishna Ramanathan, Ramesh Nallapati,
+  wal, Arvind Neelakantan, Pranav Shyam, Girish          Parminder Bhatia, Dan Roth, and Bing Xiang.
+  Sastry, Amanda Askell, Sandhini Agarwal, Ariel         2023. Crosscodeeval: A diverse and multilingual
+  Herbert-Voss, Gretchen Krueger, Tom Henighan,          benchmark for cross-file code completion.
+  Rewon Child, Aditya Ramesh, Daniel M. Ziegler,
+  Jeffrey Wu, Clemens Winter, Christopher Hesse,       Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan,
+  Mark Chen, Eric Sigler, Mateusz Litwin, Scott          Xiaocheng Feng, Ming Gong, Linjun Shou, Bing
+  Gray, Benjamin Chess, Jack Clark, Christopher          Qin, Ting Liu, Daxin Jiang, and Ming Zhou. 2020.
+  Berner, Sam McCandlish, Alec Radford, Ilya             CodeBERT: A pre-trained model for program-
+  Sutskever, and Dario Amodei. 2020. Language            ming and natural languages. In Findings of
+  models are few-shot learners. In Advances in           the Association for Computational Linguistics:
+  Neural Information Processing Systems 33: An-          EMNLP 2020, pages 1536–1547, Online. Asso-
+  nual Conference on Neural Information Process-         ciation for Computational Linguistics.
+  ing Systems 2020, NeurIPS 2020, December
+  6-12, 2020, virtual.                                 Jeanne Ferrante, Karl J. Ottenstein, and Joe D.
+                                                         Warren. 1987. The program dependence graph
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming              and its use in optimization. ACM Trans. Program.
+ Yuan, Henrique Ponde de Oliveira Pinto, Jared           Lang. Syst., 9(3):319–349.
+ Kaplan, Harri Edwards, Yuri Burda, Nicholas
+ Joseph, Greg Brockman, et al. 2021. Evaluating        Daniel Fried, Armen Aghajanyan, Jessy Lin, Sida
+ large language models trained on code. ArXiv           Wang, Eric Wallace, Freda Shi, Ruiqi Zhong,
+ preprint, abs/2107.03374.                              Scott Yih, Luke Zettlemoyer, and Mike Lewis.
+                                                        2023. Incoder: A generative model for code infill-
+Davor Cubranic and Gail C Murphy. 2003. Hipikat:        ing and synthesis. In The Eleventh International
+  Recommending pertinent software development           Conference on Learning Representations.
+  artifacts. In 25th International Conference
+  on Software Engineering, 2003. Proceedings.,         Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming
+  pages 408–418. IEEE.                                   Zhou, and Jian Yin. 2022. UniXcoder: Unified
+                                                         cross-modal pre-training for code representation.
+Hantian Ding, Jinrui Yang, Yuqian Deng, Hongming         In Proceedings of the 60th Annual Meeting of the
+  Zhang, and Dan Roth. 2022a. Towards open-              Association for Computational Linguistics (Vol-
+  domain topic classification. In Proceedings of the     ume 1: Long Papers), pages 7212–7225, Dublin,
+  2022 Conference of the North American Chap-            Ireland. Association for Computational Linguis-
+  ter of the Association for Computational Linguis-      tics.
+  tics: Human Language Technologies: System
+  Demonstrations, pages 90–98, Hybrid: Seattle,        Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng,
+ Washington + Online. Association for Computa-          Duyu Tang, Shujie Liu, Long Zhou, Nan Duan,
+  tional Linguistics.                                   Jian Yin, Daxin Jiang, et al. 2021. Graphcode-
+                                                        bert: Pre-training code representations with data
+Yangruibo Ding, Luca Buratti, Saurabh Pujar,            flow. In International Conference on Learning
+  Alessandro Morari, Baishakhi Ray, and Saikat          Representations.
+  Chakraborty. 2022b. Towards learning (dis)-
+  similarity of source code from program contrasts.    Sakib Haque, Alexander LeClair, Lingfei Wu, and
+  In Proceedings of the 60th Annual Meeting of the       Collin McMillan. 2020. Improved automatic sum-
+  Association for Computational Linguistics (Vol-        marization of subroutines via attention to file con-
+  ume 1: Long Papers), pages 6300–6312, Dublin,          text. In Proceedings of the 17th International Con-
+  Ireland. Association for Computational Linguis-        ference on Mining Software Repositories, pages
+  tics.                                                  300–310.
+
+                                                   3442
+Scott Henninger. 1991. Retrieving software objects      Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu,
+  in an example-based programming environment.            Dan Su, Yan Xu, Etsuko Ishii, Yejin Bang, An-
+  In Proceedings of the 14th annual international         drea Madotto, and Pascale Fung. 2022. Survey
+  ACM SIGIR conference on Research and devel-             of hallucination in natural language generation.
+  opment in information retrieval, pages 251–260.         ACM Computing Surveys.
+
+Rosco Hill and Joe Rideout. 2004. Automatic             Urvashi Khandelwal, Omer Levy, Dan Jurafsky,
+ method completion. In Proceedings. 19th In-              Luke Zettlemoyer, and Mike Lewis. 2020. Gener-
+ ternational Conference on Automated Software             alization through memorization: Nearest neigh-
+ Engineering, 2004., pages 228–235. IEEE.                 bor language models. In 8th International Confer-
+                                                          ence on Learning Representations, ICLR 2020,
+Abram Hindle, Earl T. Barr, Zhendong Su, Mark             Addis Ababa, Ethiopia, April 26-30, 2020. Open-
+  Gabel, and Premkumar Devanbu. 2012. On the              Review.net.
+  naturalness of software. In Proceedings of the
+  34th International Conference on Software Engi-       Donald E. Knuth. 1984. Literate programming.
+  neering, ICSE ’12, page 837–847. IEEE Press.           Comput. J., 27(2):97–111.
+
+Reid Holmes and Gail C Murphy. 2005. Using              Alexandre Lacoste, Alexandra Luccioni, Victor
+ structural context to recommend source code ex-          Schmidt, and Thomas Dandres. 2019. Quan-
+ amples. In Proceedings of the 27th international         tifying the carbon emissions of machine learning.
+ conference on Software engineering, pages 117–           arXiv preprint arXiv:1910.09700.
+ 125.
+                                                        Agathe Lherondelle, Yash Satsangi, Fran Silavong,
+Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit,                Shaltiel Eloul, and Sean Moran. 2022. Top-
+ Miltiadis Allamanis, and Marc Brockschmidt.              ical: Learning repository embeddings from
+ 2019. Codesearchnet challenge: Evaluating the            source code using attention. ArXiv preprint,
+ state of semantic code search. arXiv preprint            abs/2208.09495.
+ arXiv:1909.09436.
+                                                        Yujia Li, David Choi, Junyoung Chung, Nate
+Importlab. 2018. importlab: A library for python that     Kushman, Julian Schrittwieser, Rémi Leblond,
+  automatically infers dependencies and calculates        Tom Eccles, James Keeling, Felix Gimeno,
+  a dependency graph. https://github.com/                 Agustin Dal Lago, et al. 2022. Competition-level
+  google/importlab.                                       code generation with alphacode. ArXiv preprint,
+                                                          abs/2203.07814.
+Katsuro Inoue, Reishi Yokomori, Hikaru Fujiwara,
+  Tetsuo Yamamoto, Makoto Matsushita, and               Yuxian Meng, Shi Zong, Xiaoya Li, Xiaofei Sun,
+  Shinji Kusumoto. 2003. Component rank: Rel-             Tianwei Zhang, Fei Wu, and Jiwei Li. 2022. GNN-
+  ative significance rank for software component          LM: Language modeling based on global con-
+  search. In 25th International Conference on Soft-       texts via GNN. In International Conference on
+  ware Engineering, 2003. Proceedings., pages             Learning Representations.
+  14–24. IEEE.
+                                                        Amir Michail. 2001. Codeweb: Data mining library
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung,          reuse patterns. In Proceedings of the 23rd In-
+  and Luke Zettlemoyer. 2018. Mapping language           ternational Conference on Software Engineering.
+  to code in programmatic context. In Proceedings        ICSE 2001, pages 827–828. IEEE.
+  of the 2018 Conference on Empirical Methods
+  in Natural Language Processing, pages 1643–           Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu,
+  1652, Brussels, Belgium. Association for Com-           Huan Wang, Yingbo Zhou, Silvio Savarese, and
+  putational Linguistics.                                 Caiming Xiong. 2023. Codegen: An open large
+                                                          language model for code with multi-turn program
+Paul Jaccard. 1912. The distribution of the flora in      synthesis. In The Eleventh International Confer-
+  the alpine zone. 1. New phytologist, 11(2):37–50.       ence on Learning Representations.
+
+Ganesh Jawahar, Benoît Sagot, and Djamé Sed-            Kishore Papineni, Salim Roukos, Todd Ward, and
+ dah. 2019. What does BERT learn about the                Wei-Jing Zhu. 2002. Bleu: A method for auto-
+ structure of language? In Proceedings of the             matic evaluation of machine translation. In Pro-
+ 57th Annual Meeting of the Association for Com-          ceedings of the 40th Annual Meeting on Associa-
+ putational Linguistics, pages 3651–3657, Flo-            tion for Computational Linguistics, ACL ’02, page
+ rence, Italy. Association for Computational Lin-         311–318, USA. Association for Computational
+ guistics.                                                Linguistics.
+
+                                                    3443
+D. L. Parnas. 1972. On the criteria to be used in     Yanlin Wang, Ensheng Shi, Lun Du, Xiaodi Yang,
+  decomposing systems into modules. Commun.             Yuxuan Hu, Shi Han, Hongyu Zhang, and Dong-
+  ACM, 15(12):1053–1058.                                mei Zhang. 2021a. Cocosum: Contextual code
+                                                        summarization with multi-relational graph neural
+D.L. Parnas, P.C. Clements, and D.M. Weiss.             network. ArXiv preprint, abs/2107.01933.
+  1985. The modular structure of complex systems.
+  IEEE Transactions on Software Engineering, SE-      Yue Wang, Weishi Wang, Shafiq Joty, and
+  11(3):259–266.                                        Steven C.H. Hoi. 2021b. CodeT5: Identifier-
+                                                        aware unified pre-trained encoder-decoder mod-
+Pydeps. 2021. Python module dependency graphs.          els for code understanding and generation. In
+  https://github.com/thebjorn/pydeps.                   Proceedings of the 2021 Conference on Empir-
+                                                        ical Methods in Natural Language Processing,
+Alec Radford, Jeff Wu, Rewon Child, David Luan,         pages 8696–8708, Online and Punta Cana, Do-
+  Dario Amodei, and Ilya Sutskever. 2019. Lan-          minican Republic. Association for Computational
+  guage models are unsupervised multitask learn-        Linguistics.
+  ers. OpenAI preprint.
+                                                      Wikipedia. 2022.  Modular programming.
+Stephen Robertson and Hugo Zaragoza. 2009. The         https://en.wikipedia.org/wiki/
+  probabilistic relevance framework: Bm25 and          Modular_programming.
+  beyond. Found. Trends Inf. Retr., 3(4):333–389.
+                                                      Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+Mary Beth Rosson and John M Carroll. 1996. The          Chaumond, Clement Delangue, Anthony Moi,
+ reuse of uses in smalltalk programming. ACM            Pierric Cistac, Tim Rault, Remi Louf, Morgan
+ Transactions on Computer-Human Interaction             Funtowicz, Joe Davison, Sam Shleifer, Patrick
+ (TOCHI), 3(3):219–253.                                 von Platen, Clara Ma, Yacine Jernite, Julien Plu,
+                                                        Canwen Xu, Teven Le Scao, Sylvain Gugger,
+Disha Shrivastava, Hugo Larochelle, and Daniel          Mariama Drame, Quentin Lhoest, and Alexan-
+  Tarlow. 2023. Repository-level prompt genera-         der Rush. 2020. Transformers: State-of-the-art
+  tion for large language models of code. In Pro-       natural language processing. In Proceedings of
+  ceedings of the 40th International Conference on      the 2020 Conference on Empirical Methods in
+  Machine Learning, volume 202 of Proceedings           Natural Language Processing: System Demon-
+  of Machine Learning Research, pages 31693–            strations, pages 38–45, Online. Association for
+  31715. PMLR.                                          Computational Linguistics.
+Kevin J. Sullivan, William G. Griswold, Yuan-         Frank F Xu, Uri Alon, Graham Neubig, and Vin-
+  fang Cai, and Ben Hallen. 2001. The struc-            cent Josua Hellendoorn. 2022. A systematic
+  ture and value of modularity in software design.      evaluation of large language models of code.
+  ESEC/FSE-9, page 99–108, New York, NY, USA.           In Proceedings of the 6th ACM SIGPLAN Inter-
+  Association for Computing Machinery.                  national Symposium on Machine Programming,
+                                                        pages 1–10.
+Michele Tufano, Cody Watson, Gabriele Bavota,
+  Massimiliano Di Penta, Martin White, and Denys      Fabian Yamaguchi, Nico Golde, Daniel Arp, and
+  Poshyvanyk. 2019. An empirical study on learn-        Konrad Rieck. 2014. Modeling and discovering
+  ing bug-fixing patches in the wild via neural ma-     vulnerabilities with code property graphs. In 2014
+  chine translation. ACM Transactions on Soft-          IEEE Symposium on Security and Privacy, pages
+  ware Engineering and Methodology (TOSEM),             590–604.
+  28(4):1–29.
+                                                      Yunwen Ye and Gerhard Fischer. 2002. Supporting
+Petar Velickovic, Guillem Cucurull, Arantxa             reuse by delivering task-relevant and personal-
+  Casanova, Adriana Romero, Pietro Liò, and             ized information. In Proceedings of the 24th in-
+  Yoshua Bengio. 2018. Graph attention net-             ternational conference on Software engineering,
+  works. In 6th International Conference on Learn-      pages 513–523.
+  ing Representations, ICLR 2018, Vancouver, BC,
+  Canada, April 30 - May 3, 2018, Conference          Yunwen Ye, Gerhard Fischer, and Brent Reeves.
+  Track Proceedings. OpenReview.net.                    2000. Integrating active information delivery and
+                                                        reuse repository systems. ACM SIGSOFT Soft-
+Ben Wang and Aran Komatsuzaki. 2021. GPT-               ware Engineering Notes, 25(6):60–68.
+  J-6B: A 6 Billion Parameter Autoregressive
+  Language Model. https://github.com/                 Fengji Zhang, Bei Chen, Yue Zhang, Jin Liu,
+  kingoflolz/mesh-transformer-jax.                      Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+
+                                                  3444
+  Weizhu Chen. 2023. Repocoder: Repository-
+  level code completion through iterative retrieval
+  and generation. arXiv preprint arXiv:2303.12570.
+
+Shuyan Zhou, Uri Alon, Frank F. Xu, Zhengbao
+  Jiang, and Graham Neubig. 2023. Docprompting:
+  Generating code by retrieving the docs. In The
+  Eleventh International Conference on Learning
+  Representations.
+
+Yaqin Zhou, Shangqing Liu, Jingkai Siow, Xiaoning
+  Du, and Yang Liu. 2019. Devign: Effective vulner-
+  ability identification by learning comprehensive
+  program semantics via graph neural networks. In
+  Advances in Neural Information Processing Sys-
+  tems, volume 32, pages 10197–10207. Curran
+  Associates, Inc.
+
+
+
+
+                                                  3445
+

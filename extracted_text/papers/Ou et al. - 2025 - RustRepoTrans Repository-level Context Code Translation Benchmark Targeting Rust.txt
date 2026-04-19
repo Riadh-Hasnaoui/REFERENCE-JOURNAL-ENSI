@@ -1,0 +1,1114 @@
+                                                                                                                                                                                             2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)
+
+
+
+
+                                                                                                                                                                                  RustRepoTrans: Repository-level Context Code
+  2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) | 979-8-3503-5733-2/25/$31.00 ©2025 IEEE | DOI: 10.1109/ASE63991.2025.00057
+
+
+
+
+                                                                                                                                                                                      Translation Benchmark Targeting Rust
+                                                                                                                                                                                            Guangsheng Ou1 , Mingwei Liu*1 , Yuxuan Chen 1 , Yanlin Wang 1 , Xin Peng2 , and Zibin Zheng1
+                                                                                                                                                                                                                       1
+                                                                                                                                                                                                                         Sun Yat-sen University, Zhuhai, China.
+                                                                                                                                                                         1
+                                                                                                                                                                             Email: ougsh3@mail2.sysu.edu.cn, liumw26@mail.sysu.edu.cn, chenyx677@mail2.sysu.edu.cn, {wangylin36,zhzibin}@mail.sysu.edu.cn
+                                                                                                                                                                                                                          2
+                                                                                                                                                                                                                            Fudan University, Shanghai, China.
+                                                                                                                                                                                                                             2
+                                                                                                                                                                                                                               Email: pengxin@fudan.edu.cn
+
+                                                                                                                                                                           Abstract—Recent advancements in large language models                                    In real-world projects, translation rarely rewrites an en-
+                                                                                                                                                                        (LLMs) have demonstrated impressive capabilities in code transla-                        tire repository at once. Developers typically incrementally
+                                                                                                                                                                        tion, typically evaluated using benchmarks like CodeTransOcean                           translate new or modified modules from the source to
+                                                                                                                                                                        and RepoTransBench. However, dependency-free benchmarks fail
+                                                                                                                                                                        to capture real-world complexities by focusing primarily on simple                       the target language [12]–[15]. Newly translated code must
+                                                                                                                                                                        function-level translations and overlooking repository-level con-                        integrate with existing modules, including components migrated
+                                                                                                                                                                        text (e.g., dependencies). Full-repository translation benchmarks                        earlier or manually refined, to preserve functional correctness
+                                                                                                                                                                        significantly exceed the current capabilities of existing models,                        and consistency. Incremental workflows also arise when the
+                                                                                                                                                                        resulting in performance bottlenecks that fail to provide actionable                     source project evolves after partial migration, requiring new
+                                                                                                                                                                        insights for guiding model development. Furthermore, existing
+                                                                                                                                                                        benchmarks do not account for the scenario of incrementally                              features to be ported into the target repository. Such repository-
+                                                                                                                                                                        translating new or modified modules from the source to the                               level migration demands careful handling of repository-
+                                                                                                                                                                        target language, which demands careful handling of repository-                           level context such as dependencies, cross-module references,
+                                                                                                                                                                        level contexts such as dependencies, cross-module references,                            and architectural divergence. It further supports human-in-
+                                                                                                                                                                        and architectural divergence. Moreover, LLMs’ effectiveness in                           the-loop workflows, where developers refine each step under
+                                                                                                                                                                        translating to newer, low-resource languages like Rust remains
+                                                                                                                                                                        largely underexplored.                                                                   non one-to-one code mapping, reflecting the realities of cross-
+                                                                                                                                                                           To address these gaps, we introduce RustRepoTrans, the first                          language migration.
+                                                                                                                                                                        repository-level context code translation benchmark targeting                               While large language models (LLMs) have shown promise in
+                                                                                                                                                                        incremental translation, comprising 375 tasks translating into                           translating widely used languages like Java and Python [1], [16],
+                                                                                                                                                                        Rust from C, Java, and Python. Using this benchmark, we                                  but their effectiveness in translating to newer, lower-resource
+                                                                                                                                                                        evaluate seven representative LLMs, analyzing their errors to
+                                                                                                                                                                        assess limitations in complex translation scenarios. Among them,                         languages like Rust has not been thoroughly explored. Rust
+                                                                                                                                                                        DeepSeek-R1 performs best with 51.5% Pass@1, excelling in                                is increasingly chosen for migration due to its memory safety
+                                                                                                                                                                        both basic functionality and additional translation abilities, such                      and reliability benefits [17], yet its strict ownership model and
+                                                                                                                                                                        as noise robustness and syntactical difference identification.                           limited training data pose significant challenges for automated
+                                                                                                                                                                        However, even DeepSeek-R1 experiences a 22.2% performance                                translation [8].
+                                                                                                                                                                        drop (Pass@1 from 73.7% to 51.5%) when handling repository-
+                                                                                                                                                                        level context compared to previous benchmarks without such                                  Existing benchmarks can be categorized into dependency-
+                                                                                                                                                                        context. Meanwhile, we propose a set of more fine-grained                                free and full repository, however, both categories of
+                                                                                                                                                                        evaluation metrics and an enhanced evaluation framework,                                 datasets only partially capture these requirements. Most
+                                                                                                                                                                        enabling a more comprehensive analysis of LLMs’ performance                              focus on function-level translation [18]–[21], where self-
+                                                                                                                                                                        in repository-level context code translation tasks to provide fine-                      contained snippets have minimal dependencies, and even
+                                                                                                                                                                        grained insights that can effectively inform the development of
+                                                                                                                                                                        code translation techniques.                                                             file-level benchmarks [22]–[24] provide limited repository
+                                                                                                                                                                                               I. I NTRODUCTION                                                  context. Many benchmarks are also sourced from online
+                                                                                                                                                                                                                                                                 platforms or synthetic examples, diverging from real-world
+                                                                                                                                                                           Code translation, or code migration, is the process of
+                                                                                                                                                                                                                                                                 development practices [18]–[24]. In contrast, practical Rust
+                                                                                                                                                                        converting a software project from one programming language
+                                                                                                                                                                                                                                                                 migration demands repository-level reasoning, dependency
+                                                                                                                                                                        to another [1], often driven by the need to adapt to different
+                                                                                                                                                                                                                                                                 management, and incremental integration—factors largely
+                                                                                                                                                                        runtime environments, improve performance, or enhance secu-
+                                                                                                                                                                                                                                                                 absent from dependency-free benchmarks.
+                                                                                                                                                                        rity [2]–[7]. The rise of languages like Rust [8] and Cangjie [9]
+                                                                                                                                                                                                                                                                    While repository-level translation benchmarks have
+                                                                                                                                                                        has increased demand for translation. However, migrating
+                                                                                                                                                                                                                                                                 emerged [25], [26] (e.g., RepoTransBench), fully translating
+                                                                                                                                                                        legacy code remains challenging due to semantic mismatches,
+                                                                                                                                                                                                                                                                 entire repositories remains highly challenging for current
+                                                                                                                                                                        differences in standard libraries, and the need to maintain
+                                                                                                                                                                                                                                                                 LLMs. In RepoTransBench [25], for example, the best model,
+                                                                                                                                                                        functional equivalence [10], [11].
+                                                                                                                                                                                                                                                                 Claude-3.5, achieves only 7.33% Success@1, highlighting a
+                                                                                                                                                                             * M. Liu is the corresponding author.                                               large performance gap. Moreover, full-repository translation
+                                                                                                                                                                          1 G. Ou, M. Liu, Y. Chen, Y. Wang, Z. Zheng are with the School of Software
+                                                                                                                                                                                                                                                                 complicates fine-grained evaluation, as errors may result from
+                                                                                                                                                                        Engineering and the Zhuhai Key Laboratory of Trusted Large Language Models,              the model or from differences in target-language libraries,
+                                                                                                                                                                        Sun Yat-sen University, Zhuhai, China.
+                                                                                                                                                                          2 X. Peng is with the College of Computer Science and Artificial Intelligence,         making it difficult to pinpoint their source. Furthermore,
+                                                                                                                                                                        Fudan University, Shanghai, China.                                                       existing repository-level benchmarks generally assume
+
+
+                                                                                                                                                                    2643-1572/25/$31.00 ©2025 IEEE                                                         610
+                                                                                                                                                                    DOI 10.1109/ASE63991.2025.00057
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                      Different Dependencies                                                             capabilities. While we focus on Rust due to its growing
+                        Source Function：                                                                 adoption and inherent challenges of translating to it, our
+                        def __init__(self, results: Optional[List[CharsetMatch]] = None):
+                          self._results: List[CharsetMatch] = sorted(results) if results else []         methodology is generalizable to other programming languages,
+                        Target Function:                                                                 paving the way for broader repository-level evaluation.
+                        pub fn new(items: Option<Vec<CharsetMatch>>) -> Self {
+                          let mut items = items.unwrap_or_default();                                        Building on RustRepoTrans, our experiments of seven
+                          CharsetMatches::resort(&mut items);                                            representative LLMs show that LLMs struggle with repository-
+                          CharsetMatches { items }
+                        }                                                                                level context code translation, with compilation errors reaching
+                      Different Function Signature                                                       92.3%, exposing the gap between current evaluations and
+                        Source Function：                                                                 real-world performance. DeepSeek-R1 performs best with
+                        def mess_ratio( decoded_sequence: str, maximum_threshold: float = 0.2,           51.5% Pass@1, excelling in both basic functionality and
+                        debug: bool = False ) -> float:
+                          …                                                                              additional translation abilities like noise robustness and syn-
+                          if debug:
+                             …
+                                                                                                         tactical difference identification. However, even DeepSeek-R1
+                        Target Function:                                                                 experiences a 22.2% performance drop (Pass@1 from 73.7%
+                        pub(crate) fn mess_ratio( decoded_sequence: String, maximum_threshold:           to 51.5%) when handling repository-level context. Dependency-
+                        Option<OrderedFloat<f32>>) -> f32 {
+                          …                                                                              related errors, including function and variable resolution issues,
+                          if log_enabled!(log::Level::Trace) {                                           account for 67.6% of failures, highlighting the challenge
+                             …
+                          }                                                                              of interconnected code. Meanwhile, we propose a set of
+                        }
+                                                                                                         more fine-grained evaluation metrics such as evaluating noise
+                  Fig. 1. Motivation Examples from RustRepoTrans of Different Architecture               robustness, syntactical difference handling, and code simplicity
+                  Between Source Language (Python) And Target Language (Rust) Version                    during translation and an enhanced evaluation framework,
+                  ideal conditions, where function dependencies and project                              enabling a more comprehensive analysis of LLM performance
+                  architecture are perfectly aligned between source and target                           in repository-level context code translation tasks (in RQ4).
+                  languages. In practice, however, differences in language                                  The contributions of this paper are as follows. Data and
+                  features, optimization goals, and coding idioms often lead to                          code are publicly available at [27] and [28].
+                  divergent architectures. Consequently, one-to-one mapping                                 • The first repository-level context code benchmark, Rus-
+                  between source and target codebases is rare, reflecting realistic                            tRepoTrans, targeting incremental translation with 375
+                  context shifts. As illustrated in Fig. 1, the same function                                  tasks from C, Java, and Python to Rust, is introduced for
+                  may have different dependencies (e.g., built-in vs. custom                                   realistic evaluation;
+                  utilities) or distinct signatures (e.g., parameter-driven vs.                             • Seven representative LLMs are evaluated, assessing their
+                  global configuration) across languages. These limitations                                    performance in real-world incremental translation;
+                  show that current repository-level benchmarks reveal                                      • LLMs’ errors are categorized into 10 types, revealing
+                  performance gaps but fail to fully assess LLMs’ ability to                                   limitations, especially in handling dependencies;
+                  handle repository-level context, dependency interactions,                                 • A set of more fine-grained evaluation metrics of code
+                  and incremental translation. Therefore, an intermediate                                      translation and an enhanced evaluation framework.
+                  benchmark is needed—one that incorporates repository-level
+                  context while remaining tractable for current models. Such                                                II. R ELATED W ORK
+                  a benchmark can bridge the gap between dependency-free                                 A. Code Translation
+                  function-level translation and full-repository translation,                               Code translation promotes software interoperability and
+                  enabling fine-grained evaluation and better guiding the                                legacy system modernization, enhancing productivity and
+                  development of robust code translation techniques.                                     reducing manual effort [19], [22]. Early approaches employed
+                     To bridge this gap, we introduce RustRepoTrans, the first                           rule-based and machine learning [29]–[33] to capture frequent
+                  benchmark to evaluate code translation with repository-                                code patterns. Although LLMs have advanced the field,
+                  level context, specifically targeting Rust. Unlike function-                           challenges remain in handling translation errors and adapting
+                  level benchmarks that assess translation in isolation, RustRe-                         to complex scenarios [24], [34]. Jiao et al. [21] underscored
+                  poTrans captures the complexities of real-world migration by                           LLMs’ difficulty with intricate cases, while Pan et al. [16]
+                  incorporating repository-level context, including dependencies,                        demonstrated that context-rich prompts improve reliability.
+                  cross-file interactions, and architectural constraints. These                          Prompt engineering strategies by Yang et al. [35] and Macedo
+                  elements are crucial for ensuring that translated code integrates                      et al. [36] further enhanced translation consistency and accuracy.
+                  seamlessly into existing projects rather than functioning isolat-                      LLM have also been applied to the translation of entire
+                  edly. Compared to full repository benchmarks, RustRepoTrans                            repository [37]–[39]. Nitin et al. [37] leverage C2Rust to
+                  focuses on incremental translation scenarios which demands                             convert C into unsafe Rust and then apply an LLM for safer,
+                  the careful handling of non one-to-one code mapping such as                            idiomatic translation. Zhang et al. [38] translate Go to Rust
+                  different dependencies or distinct function signatures. Overall,                       via predefined rules, code partitioning, and localized checks.
+                  RustRepoTrans comprises 375 curated translation tasks derived                          However, the evaluation data used in these works are not
+                  from real-world projects spanning C, Java, and Python to Rust,                         composed of ground-truth code pairs, only the source language
+                  providing a more faithful assessment of LLMs’ translation                              version is genuinely available.
+
+
+
+
+                                                                                                   611
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                           Functions Pair                                                                     Dependencies                                                                                   Test Case
+
+                                                                                                         fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {                     #[cfg(test)]
+                    Function Path：
+                    projects/incubator-milagro-crypto/rust/src/rsa.rs                                      if sha == SHA256                                                                    mod tests {
+                    Function Code：                                                                            ……                                                                Function         use super::*;
+                                                                                                                                                                             1 Dependencies
+                    pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p:                          }                                                                                       use crate::test_utils::*;
+                    Option<&[u8]>, f: &mut [u8]) -> bool {                                               pub fn mgf1(sha: usize, z: &[u8], olen: usize, k: &mut [u8]) {
+                      ……                                                                                   let hlen = sha;                                                                         #[test]
+                      hashit(sha, p, -1, f);                                         1 Target Function     ……                                                                                      fn test_rsa() {
+                      mgf1(sha, &seed, olen - seedlen, &mut dbmask);                                     }                                                                                           let mut rng = create_rng();
+                      for i in (d..RFS).rev() {                                                          ……                                                                                          let sha = super::HASH_TYPE;
+                         f[i] = f[i - d];                                                                pub struct RAND {                                                                           let message: &[u8] = b"Hello World\n";
+                      }                                                                                    ira: [u32; RAND_NK], /* random number... */                                               const RFS: usize = super::RFS;
+                      ……                                                                                   rndptr: usize,                                                                            let mut e: [u8; RFS] = [0; RFS];
+                    }                                                                                      borrow: u32,                                                                              ……
+                    Function Path：                                                                                                                                           2 Data Type             oaep_encode(sha, &message, &mut rng, None, &mut e);
+                                                                                                           pool_ptr: usize,                                                     Dependencies
+                    projects/incubator-milagro-crypto/c/src/rsa_support.c                                  pool: [u8; 32],                                                                           ……
+                    Function Code：                                                                       }                                                                                         }
+                    int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet   2 Source Function                                                                                         }
+                                                                                                         pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;        3 Variable
+                    *p,octet *f){                                                                                                                                               Dependencies
+                          ……                                                                             use crate::rand::RAND;                                                Library
+                    }                                                                                    ……                                                                  4 Dependencies
+
+                                                                                                         Fig. 2. RustRepoTrans Format Example
+
+                    We propose RustRepoTrans, a benchmark that incorporates                                                                 B. Benchmark Construction Method
+                 repository-level context and dependencies, enabling more                                                                      The construction process is divided into two parts: Func-
+                 realistic evaluation of LLMs and their capacity to handle                                                                  tionally Equivalent Code Pairs Extraction and Dependency
+                 complex code translation tasks.                                                                                            Extraction, enabling us to obtain functionally equivalent code
+                 B. Code Translation Benchmarks                                                                                             pairs along with their corresponding dependencies and test
+                    Existing code translation datasets are generally classified into                                                        cases from real open-source projects.
+                 dependency-free, function-level [18]–[21] (or single-file [22]–                                                            Functionally Equivalent Code Pairs Extraction In this part,
+                 [24]) datasets and full repository-level datasets [25], [26].                                                              we focus on extracting functionally equivalent source–target
+                 The former are often mined from Q&A platforms—e.g.,                                                                        function pairs. The pipeline consists of five stages:
+                 CodeTransOcean from Rosetta Code, XCodeEval from Geeks-                                                                       Migration Project Selection. In this step, we select
+                 ForGeeks—but fail to reflect real-world software development,                                                              projects that have been rewritten in Rust from other languages,
+                 lacking the architectural and dependency complexities critical                                                             specifically C, Java, and Python, due to their popularity and
+                 for faithful translation across files. In contrast, RepoTrans-                                                             likelihood of having such rewritten versions. We identify
+                 Bench [25] introduces a repository-level benchmark with                                                                    suitable projects by searching GitHub for terms like “Rust
+                 executable tests, while TRANSREPO-BENCH [26] proposes                                                                      version” and “implemented in Rust”, focusing on larger projects
+                 a Skeleton-Guided-Translation framework for Java-to-C# trans-                                                              (applying qualifier “size:>1000”) to ensure sufficient function
+                 lation, leveraging coarse-grained architectural guidance for                                                               pairs. After locating these projects, we verify their versions
+                 holistic evaluation. Nevertheless, full repository translation                                                             through documentation and code review. In this way, we
+                 remains highly challenging; for example, the best model                                                                    identify pairs of source project and target project.
+                 on RepoTransBench achieves only 7.33% Success@1 [25],                                                                         Functions Pools Extraction. In this step, we extract all
+                 underscoring current LLM limitations. Additionally, full-                                                                  functions from a pair of projects (source and target). For the
+                 repo evaluation hinders fine-grained assessment due to cross-                                                              source project, we extract all implemented functions. For the
+                 language inconsistencies such as library discrepancies.                                                                    Rust target project, we focus on candidate functions with
+                    RustRepoTrans, the first repo-level context benchmark,                                                                  associated test cases to ensure verifiability. We first identify
+                 bridges the gap between function-level and full-repo trans-                                                                all test cases and then extract the functions they cover by the
+                 lation by offering a repository-level context benchmark with                                                               static code analysis tool tree-sitter [40]. As a result, we obtain
+                 manageable complexity.                                                                                                     two sets of functions: the source functions pool and the target
+                                                                                                                                            functions pool with test cases.
+                              III. RUST R EPOT RANS B ENCHMARK
+                                                                                                                                               Similarity-based Candidate Function Pair Extraction. In
+                    We introduce the benchmark format, construction method,                                                                 this step, we extract function pairs from the source and target
+                 and the resulting RustRepoTrans.                                                                                           function pools using a similarity-based approach. Developers
+                 A. Benchmark Format                                                                                                        often translate code at the function level while maintaining
+                    Each task in RustRepoTrans consists of a pair of functions                                                              a similar structure across languages. Thus, equivalent pairs
+                 with their dependencies and test cases, formatted as <source                                                               usually come from files with similar paths and function
+                 function, target function, target function dependencies, target                                                            signatures [41]. For example, the Rust function pbkdf 2 at
+                 function test cases> (Fig. 2). The function pairs represent                                                                src/ecdh.rs corresponds to P BKDF 2 in the C project at
+                 functionally equivalent code snippets from source and target                                                               src/ecdh_support.c. We use the BM25 algorithm [42] to
+                 languages, with dependencies relevant to target function such                                                              calculate the similarity for each target function, identifying the
+                 as functions, data types, variables, and libraries. LLMs use                                                               top 10 candidate source functions. This produces a list of Rust
+                 the source function, target function signature, and associated                                                             target functions with their top-10 source function candidates.
+                 dependencies to generate the target function, which is verified                                                               LLM-based Equivalent Function Pair Identification. In
+                 for correctness using the test cases.                                                                                      this step, we identify the most equivalent function for each Rust
+
+
+
+
+                                                                                                                                     612
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                  You are a professional who is expert in programming language {Target Language} and programming language {Source Language}.
+                  You will be provided with 1 Target function written in {Target Language} and 10 Possible matching functions written in {Source
+                                                                                                                                                         translation to Rust in realistic programming scenarios. Next,
+                  Language}(delimited with XML tags). Please select a function that has the same functionality as the Target function from 10
+                  Possible matching functions. You should only response the serial number of the matching function or "None" if it doesn't exit.
+                                                                                                                                                         we will discuss these features in more detail.
+                  <Target function>
+                  …
+                                                                                                                                                         Repository-level Dependency. RustRepoTrans focuses on
+                  </Target function>
+                  <Possible matching functions>
+                                                                                                                                                         code translation tasks with rich repository context, setting it
+                  <Function 1>
+                  …
+                                                                                                                                                         apart from previous benchmarks. Unlike artificially constructed
+                  </Function 10>
+                  </Possible matching functions>                                                                                                         data or data from Q&A websites, real project data exhibits
+                                                                                                                                                         more complex dependency relationships, including function,
+                                 Fig. 3. Prompt for Identifying Equivalent Function Pairs
+                                                                                                                                                         data type, and variable dependencies, which are absent in
+                  target function from its top-10 source function candidates using                                                                       existing datasets as shwon in Table I, revealing that only
+                  an LLM, leveraging their code implementation and contextual                                                                            RustRepoTrans includes these crucial elements. This inclusion
+                  information (such as file paths). LLMs like GPT-4 excel in code                                                                        makes RustRepoTrans a more realistic benchmark, suitable
+                  understanding [43]. The prompt used for this identification is                                                                         for evaluating LLMs that must account for intricate file-level
+                  shown in Fig. 3. We employ GPT-4o due to its effective balance                                                                         interactions and contextual dependencies.
+                  of efficiency and performance. If none of the candidates are                                                                           Rust Programming in Realistic Scenarios. RustRepoTrans
+                  functionally equivalent, the LLM is instructed to select "None."                                                                       and CodeTransOcean are the only benchmarks specifically
+                     Manual Verification. Due to the limitations of LLMs, such                                                                           targeting code translation to Rust, as listed in Table I. However,
+                  as the potential for hallucinations, two of the authors with                                                                           RustRepoTrans is derived from GitHub projects, making it more
+                  4-6 years of coding experience are involved as participants                                                                            reflective of real-world development than CodeTransOcean,
+                  to manually double check the equivalent of verified function                                                                           which relies on data from programming competition websites.
+                  pair by LLMs to ensure actual functional equivalence. Since                                                                                                    IV. E VALUATION
+                  functionally equivalent project pairs in different programming                                                                            Based on RustRepoTrans, we further investigate the perfor-
+                  languages, sharing the same version, have already been identi-                                                                         mance of studied LLMs on repo-level code translation task for
+                  fied during the Migration Project Selection phase using project                                                                        Rust. Specifically, we focus on the following RQs.
+                  documentation, participants only need to validate whether                                                                              • RQ1 (LLMs Performance): How do the studied LLMs per-
+                  substantial project architectural refactoring has occurred, which                                                                         form on RustRepoTrans in terms of translation effectiveness?
+                  results in the absence of functionally equivalent function pairs                                                                       • RQ2 (RustRepoTrans Effectiveness): How effectively
+                  or in cases where functions with identical names implement                                                                                does our new benchmark pose greater challenges in code
+                  different functionalities across the two projects.                                                                                        translation compared to existing benchmarks?
+                  Dependencies Extraction. In this part, we complement the                                                                               • RQ3 (Failure Analysis): What types of errors do LLMs
+                  extracted pairs of functionally equivalent functions (source                                                                              encounter on RustRepoTrans, and what factors contribute to
+                  function, target function, test cases) with dependencies from                                                                             these translation failures?
+                  the target projects. This approach adds a unique repository-                                                                           • RQ4 (Key Capabilities): Beyond translation accuracy, what
+                  level context for code translation, distinguishing real-world                                                                             essential capabilities do LLMs demonstrate on RustRepo-
+                  functions from those manually constructed or sourced from                                                                                 Trans, including noise robustness, syntactical difference
+                  programming Q&A websites.                                                                                                                 identification, and code simplicity?
+                     Dependencies are classified into three categories: function
+                                                                                                                                                         A. Experimental Setup
+                  dependencies, variable dependencies, and data type dependen-
+                  cies. To identify these, we perform static analysis on the entire                                                                      Model Selection. As shown in Table II, we selected seven
+                  project to extract custom functions, data types, and global                                                                            presentative LLMs that have been widely studied in recent
+                  variables. For the target function, we gather import statements,                                                                       research including general LLM and code LLM, open-source
+                  call function identifiers, variable dependencies, and data type                                                                        and closed-source models, as well as reasoning models and
+                  dependencies. We match in-file dependencies and, using the                                                                             non-reasoning models to conduct a comprehensive evaluation
+                  import statements, match cross-file dependencies to compile a                                                                          of LLM’s code translation capabilities in real-world scenarios.
+                  complete list for the function. Due to tree-sitter’s limitations,                                                                      Implementation Details. Due to resource constraints, for
+                  we manually reviewed the automatically extracted dependencies                                                                          open-source models with sizes below 20B parameters, we
+                  to correct any errors or omissions, ensuring each function has                                                                         obtained and executed the released versions from their official
+                  a complete and accurate set of dependencies.                                                                                           repositories with greedy sampling [44] as our generation
+                  C. Resulting Benchmark                                                                                                                 strategy. All evaluations were conducted on an NVIDIA
+                     This process constructs RustRepoTrans with 375 repository-                                                                          A800 80GB GPU. For closed-source LLMs and other open-
+                  level translation tasks. Table I compares it with existing                                                                             source models, we accessed each model through their official
+                  benchmarks. Similar in size to prior datasets, each task includes                                                                      API interface [45]–[49]. To achieve results similar to greedy
+                  a manually verified ground truth translation and unit tests,                                                                           decoding, we set the “temperature” hyperparameter to 0.
+                  achieving over 90% test coverage, ensuring high quality.                                                                               B. RQ1: LLMs Performance
+                     RustRepoTrans has two key features that distinguish it from                                                                            We evaluated studied LLMs on RustRepoTrans to assess their
+                  previous benchmarks: 1) it is the first repository-level context                                                                       translation accuracy and self-debugging abilities for repository-
+                  code translation benchmark and 2) it specifically targets code                                                                         level context code translation tasks targeting Rust.
+
+
+
+
+                                                                                                                                                   613
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                                                                                      TABLE I
+                                                                           C OMPARISON OF D IFFERENT B ENCHMARKS FOR C ODE T RANSLATION
+                                                                                                                                                           Average number    Target Languages   Unit Tests   Golden Answer
+                           Dataset                  Source                Task Level       #Tokens   # Tasks              Source Languages
+                                                                                                                                                           of Dependencies     Include Rust?    Included ?      Verified?
+                      CodeXGLUE [19]        Lucune, POI, JGit, Antlr    Function Level       42.3     1,000                    Java, C#                           0                  ✗               ✗             ✗
+                        XLCOST [24]                  G4G                Program Level        202       901     C++, Java, C#, PHP, JavaScript, Python, C          0                  ✗               ✗             ✗
+                     TransCoder-test [18]            G4G                Function Level      107.0      948                C++, Java, Python                       0                  ✗            Partial          ✗
+                      HumanEval-X [20]            HumanEval             Program Level        97.7      164        C++, Java, Go, JavaScript, Python               0                  ✗              ✓              ✓
+                                              HumanEval, G4G,
+                      G-TransEval [21]                                  Function Level       95.1     400          C++, Java, C#, JavaScript, Python             0                  ✗               ✓             ✓
+                                                .NET samples
+                    CodeTransOcean [23]          Rosetta Code           Program Level       448.4    2,878*        Java, C++, C#, PHP, Python, Go                 0                 ✓               ✓             ✓
+                      RustRepoTrans                 Github              Function Level      150.1      375                 C, Java, Python                       5.4                ✓               ✓             ✓
+                   *Translation pairs in languages that could not be parsed by tree-sitter to count the number of tokens were filtered out.
+
+                                                           TABLE II
+                                                        S TUDIED LLM S
+                                                                                                                              than Qwen-2.5-coder-32B, 20.8% higher than GPT-4, 33.3%
+                                                                                                                              higher than DeepSeekCoderV2-16B, and 36.8% higher than
+                   Model Type        Model Name                        Open-source       reasoning   Time      Size
+                                     DeepSeek-R1-0528 [47]             ✓                 ✓           2025.5    671B           Llama-3.1-8B on the Pass@1 metric. However, even DeepSeek-
+                   General LLM
+                                     DeepSeek-V3-0324 [48]
+                                     Claude-3.5-Sonnet [52]
+                                                                       ✓
+                                                                       ✗
+                                                                                         ✗
+                                                                                         ✗
+                                                                                                     2025.3
+                                                                                                     2024.6
+                                                                                                               671B
+                                                                                                               -
+                                                                                                                              R1 achieved only a 51.5% Pass@1 score, emphasizing the
+                                     GPT-4 [53]                        ✗                 ✗           2023.6    -              difficulty of RustRepoTrans and the challenges inherent in
+                                     Llama-3.1-8B [54]                 ✓                 ✗           2024.7    8B
+                                     Qwen-2.5-coder-32B [55]           ✓                 ✗           2024.9    32B            translating code with complex dependencies.
+                   Code LLM
+                                     DeepSeekCoderV2-16B [56]          ✓                 ✗           2024.6    16B
+                                                                                                                              Self-debugging Performance. After a single round of self-
+                     1) Design: The evaluation involved testing each model                                                    debugging, each model’s DSR@1 score showed significant
+                  on RustRepoTrans using controlled prompts, with output                                                      improvement, confirming previous research that LLMs can
+                  correctness assessed through specific test cases.                                                           effectively leverage compiler feedback for code translation
+                  Evaluation Process. Each selected LLM was tasked with                                                       accuracy [23], [35]. The self-debugging performance rank-
+                  translating code into Rust, specifically focusing on 375 tasks.                                             ings revealed DeepSeek-R1 leading at 62.1%, followed by
+                  For each translation task, a corresponding set of test cases was                                            DeepSeek-V3 at 58.7%. Despite the strong performance of
+                  employed to evaluate the correctness of the generated outputs.                                              DeepSeek-R1, 37.9% of its cases remained unresolved, high-
+                  To ensure a fair comparison, the same prompt was used for each                                              lighting the inherent challenges of self-correction in intricate
+                  model, carefully designed based on established best practices                                               translation tasks. In terms of relative improvement, Claude-3.5
+                  in code translation tasks, as illustrated in Fig. 4. These best                                             exhibited the highest percentage gain at 29.9%, indicating its
+                  practices have been shown to enhance translation accuracy                                                   strong capabilities of self-debugging in repository-level context
+                  in similar studies [16], [35], [50], [51]. The prompt includes                                              code translation. Overall, even after self-debugging, DeepSeek-
+                  elements such as instruction for translation and translation’s                                              R1 maintained its leading position, emphasizing its robust
+                  required information(including source code, target function                                                 capabilities in incremental code translation scenario to Rust.
+                  signature and target function dependencies)                                                                    3) Summary: Results reveal that RustRepoTrans effectively
+                     Given that existing LLM-based code translation research                                                  challenges LLMs in complex code translation, as even the best
+                  often incorporates feedback on translation error messages to                                                model, DeepSeek-R1, only achieves a Pass@1 of 51.5%, and
+                  enhance performance [16], [35], further experiments were                                                    DSR@1 of 62.1%, highlighting the limitations of LLMs.
+                  conducted to understand the extent to which errors in the
+                                                                                                                              C. RQ2: RustRepoTrans Effectiveness
+                  generated code samples can be corrected by LLMs with feed-
+                  back. The debugging prompt (Prompt-Fix) in Fig. 4 includes                                                     To assess our benchmark’s effectiveness, a comparative
+                  instruction for previous translation, instruction for debugging,                                            analysis was conducted based on prior literature.
+                  incorrect translation and error details and translation’s required                                             1) Design: We evaluated performance on RustRepoTrans
+                  information, adapted from previous work [16], [35].                                                         and a prior Rust translation benchmark without repository-
+                  Metrics. In line with previous work [16], [23], two key metrics:                                            level context, demonstrating RustRepoTrans’s effectiveness in
+                  Pass@1 and DSR@1 were utilized. Pass@1 [57] reflects the                                                    assessing models for complex, real-world translation scenarios.
+                  LLMs’ ability to produce correct translation on the first attempt,                                          Our analysis is based on CodeTransOcean [23], which includes
+                  while DSR@1 [23] reflects the model’s ability to produce                                                    translation tasks across 45 programming languages, including
+                  correct translation allowing for one debugging attempt.                                                     Rust, without repository-level dependencies. To ensure a
+                     2) Results: Fig. 5 presents the Pass@1 and DSR@1 per-                                                    fair and efficient comparison, we constructed a subset of
+                  formance of each LLM on RustRepoTrans. This benchmark                                                       CodeTransOcean by selecting translation pairs where Rust is the
+                  challenges models with tasks that include complex depen-                                                    target language and C, Java, or Python is the source language,
+                  dencies, offering insights into each model’s initial translation                                            removing those with non-compilable Rust code. From the
+                  accuracy and self-debugging improvement potential.                                                          remaining pairs, we randomly sampled 300 (100 per language)
+                  Initial Translation Performance (Pass@1). In initial code                                                   to match our dataset’s scale for comparative experiments.
+                  translation task, DeepSeek-R1 substantially outperformed other                                                 We comprehensively evaluated top-performing models in
+                  LLMs, achieving 51.5% accuracy. Among non-reasoning LLMs,                                                   RustRepoTrans (DeepSeek-R1, DeepSeek-V3, Claude-3.5,
+                  DeepSeek-V3 achieving highest accuracy, only 1.4% lower than                                                Qwen-2.5-coder-32B) by comparing their average Pass@1 and
+                  DeepSeek-R1 and 6.6% higher than Claude-3.5, 15.7% higher                                                   DSR@1 on a CodeTransOcean subset with RQ1 results. The
+
+
+
+
+                                                                                                                        614
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                          Translating Prompt (C to Rust for example)                                                                             Debugging Prompt (C to Rust for example)
+                                                                                                                                             you were asked to translate the given c function to rust and execute your response and get some
+                                                                                                                                             error message.
+                        Translate the given C function to Rust according to the rust function
+                                                                                                                                             Fix the bug in your previous response according to previous response, error message, c function, rust   1 Instruction for
+                        signature, rust function dependencies(including function and variable                                                                                                                                                           debugging
+                                                                                                                                             function signature, rust function dependencies(including function and variable dependencies), and
+                        dependencies), and data type declarations and rust function
+                                                                                                                         Instruction for     data type declarations and rust function dependency libraries I provide(delimited with XML tags).
+                        dependency libraries I provide(delimited with XML tags).                                   1
+                                                                                                                         translation         Only response the function results.
+                        Make sure to call the relevant dependencies as much as possible in
+                        the translated function.                                                                                             pub fn oaep_encode(sha: usize, m: &[u8], rng: &mut RAND, p: Option<&[u8]>, f: &mut [u8]) -> bool {
+                        Only response the translated function results.                                                                         let slen = f.len() - 1;
+                                                                                                                                               …
+                        int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet
+                                                                                                                                             }                                                                                                        2 Previous response
+                                                                                                                                                                                                                                                        and error message
+                        *p,octet *f){                                                                              2 Source Function         error[E0435]: attempt to use a non-constant value in a constant
+                             ……
+                                                                                                                                             …
+                        }
+                                                                                                                                             int OAEP_ENCODE(int sha,const octet *m,csprng *RNG,const octet *p,octet *f){
+                        fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+                                                                                                                                                  ……                                                                                                  3 Source Function
+                          if sha == SHA256
+                                                                                                                       Function              }
+                             ……                                                                                    3   Dependencies
+                        }                                                                                                                    fn hashit(sha: usize, a: Option<&[u8]>, n: isize, w: &mut [u8]) {
+                        ……                                                                                                                     if sha == SHA256
+                                                                                                                                                  ……                                                                                                     Function
+                        pub struct RAND {                                                                                                                                                                                                             4 Dependencies
+                                                                                                                                             }
+                          ira: [u32; RAND_NK], /* random number... */
+                                                                                                                                             ……
+                          rndptr: usize,
+                          borrow: u32,                                                                                                       pub struct RAND {
+                                                                                                                   4 Data Type                 ira: [u32; RAND_NK], /* random number... */
+                          pool_ptr: usize,                                                                             Dependencies
+                          pool: [u8; 32],                                                                                                      rndptr: usize,
+                        }                                                                                                                      borrow: u32,
+                                                                                                                                                                                                                                                     5 Data Type
+                                                                                                                   5 Variable                  pool_ptr: usize,                                                                                         Dependencies
+                        pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;                                   Dependencies            pool: [u8; 32],
+                        use crate::rand::RAND;                                                                         Library               }
+                        ……                                                                                         6 Dependencies
+                                                                                                                                             pub const RFS: usize = (big::MODBYTES as usize) * ff::FFLEN;                                            6 Variable
+                                                                                                                                                                                                                                                       Dependencies
+                                                                                                                                             use crate::rand::RAND;                                                                                     Library
+                                                                                                                                             ……                                                                                                      7 Dependencies
+
+
+                                                                                                                   Fig. 4. Translating Prompt and Debugging Prompt
+                           Pass@1                                                                                                                 62.1
+                  60%      DSR@1(self-debugging)
+                                                                                                            56.5
+                                                                                                                               58.7                                                             TABLE III
+                                                                                                                                           51.5
+                                                                                                                                                                      PASS @1 AND DSR@1 C OMPARISON OF LLM S ’ PERFORMANCE ON
+                  50%                                                                                                   50.1
+                                                                                                                                                                                C ODE T RANS O CEAN AND RUST R EPOT RANS
+                                                                                                     43.5
+                  40%                                                                       38.9
+                                                                          37.1                                                                                               Model                      Dataset                Pass@1                    DSR@1
+                                                                                     34.4
+                  30%                                              29.3                                                                                                                             CodeTransOcean              73.7%                     89.0%
+                                                                                                                                                                        DeepSeek-R1
+                                                                                                                                                                                                    RustRepoTrans          51.5%(↓22.2%)             62.1%(↓26.9%)
+                                                          21.3                                                                                                                                      CodeTransOcean              66.3%                     85.0%
+                  20%              18.9                                                                                                                                 DeepSeek-V3
+                                                   16.8
+                            13.3                                                                                                                                                                    RustRepoTrans          50.1%(↓16.2%)             58.7%(↓26.3%)
+                  10%                                                                                                                                                                               CodeTransOcean              74.3%                     87.7%
+                                                                                                                                                                          Claude-3.5
+                                                                                                                                                                                                    RustRepoTrans          43.5%(↓30.8%)             56.5%(↓31.2%)
+                  0%                                                                                                                                                                                CodeTransOcean              56.7%                     77.3%
+                           Llama-3.1-8B      DeepSeekCoderV2-16B     GPT-4       Qwen2.5-Coder-32B   Claude-3.5     DeepSeek-V3-0324   DeepSeek-R1-0528             Qwen-2.5-coder-32B
+                                                                                                                                                                                                    RustRepoTrans          34.4%(↓22.3%)             38.9%(↓38.4%)
+
+                               Fig. 5. Pass@1, DSR@1(self-debugging) on RustRepoTrans
+                                                                                                                                                                indicates that existing stand-alone, function-level datasets can
+                 prompts (Fig. 4) excluded dependency instructions, and the                                                                                     only evaluate a model’s basic code translation capability and
+                 hyperparameters remained consistent with RQ1.                                                                                                  are insufficient for effectively distinguishing between models
+                    2) Results: The results presented in Table III reveal signifi-                                                                              with stronger code abilities. Therefore, a more challenging
+                 cant differences in the Pass@1 and DSR@1 scores of LLMs                                                                                        benchmark like RustRepoTrans, which incorporates repository-
+                 across various datasets. Notably, while LLMs achieve high                                                                                      level context and targets incremental translation scenarios, is
+                 accuracy rates—with DeepSeek-R1 being the top performer,                                                                                       necessary to provide a finer-grained and multifaceted evaluation
+                 attaining a Pass@1 of 73.7% and a DSR@1 of 89.0%—on                                                                                            of the models’ code translation capabilities.
+                 established benchmarks, their performance drastically drops                                                                                       3) Summary: Our benchmark’s repository-level context
+                 when evaluated on RustRepoTrans.                                                                                                               poses greater challenges for LLMs, reducing their Pass@1
+                    Specifically, the Pass@1 scores for RustRepoTrans are signif-                                                                               and DSR@1 scores by 16.2% to 30.8% and 26.3% to 38.4%,
+                 icantly lower, with a decline of approximately 16.2% to 30.8%                                                                                  respectively, while simultaneously providing greater differentia-
+                 compared to the higher scores observed on CodeTransOcean.                                                                                      tion between models that perform similarly on existing datasets.
+                 Moreover, after self-debugging, the accuracy gap further widens,                                                                               This underscores the benchmark’s effectiveness in evaluating
+                 with a decline of 26.3% to 38.4% in DSR@1. These notable                                                                                       real-world code translation capabilities and highlights the need
+                 decreases highlight the increased complexity and unique                                                                                        for models to better handle project dependencies.
+                 challenges posed by RustRepoTrans, reinforcing the need for                                                                                    D. RQ3: Failure Analysis
+                 models to effectively manage repository-level dependencies                                                                                        To understand the errors causing performance drops in
+                 and navigate intricate code structures in real-world scenarios.                                                                                LLMs during complex Rust code translation, we analyzed
+                 Furthermore, these complexities and challenges are less easily                                                                                 the erroneous results generated by the models.
+                 corrected through simple error message feedback.                                                                                                  1) Design: The analysis comprises two parts: an automatic
+                    It is also important to note that Claude-3.5 and DeepSeek-                                                                                  error outcome analysis and a manual error causes analysis.
+                 R1, which exhibit a clear performance gap on RustRepoTrans,                                                                                    Automatic Error Outcome Analysis. We collected all un-
+                 demonstrate very similar results on CodeTransOcean. This                                                                                       successful translations from LLMs in RQ1 (Section IV-B),
+
+
+
+
+                                                                                                                                                          615
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                  resulting in 1,748 code samples that failed to pass all test                                           TABLE IV
+                                                                                                 C OMPARISON OF THE PROPORTIONS OF ERROR TYPES BETWEEN
+                  cases. To identify where LLMs struggle in translating code                  RUST R EPOT RANS AND [16].CE: C OMPILATION E RRORS , RE: RUNTIME
+                  to Rust, we conducted an automated analysis following the                      E RRORS , FE: F UNCTIONAL E RRORS , NTE: N ON - TERMINATING
+                  methodology of Pan et al. [16], categorizing the unsuccessful                                          E XECUTION
+                  translations into four error outcomes: compilation errors (code                                        Source         Target    CE        RE      FE      NTE
+                  fails to compile), runtime errors (code compiles but encounters                                    Java, Python, C     C++     74.6%     2.0%    22.0%    1.3%
+                                                                                                                     C++, Python, C      Java    74.1%    13.3%    12.4%    0.2%
+                                                                                               Pan et al. [16]
+                  exceptions), functional errors (code executes successfully but                                      Java, C++, C      Python   58.3%    24.9%    16.4%    0.4%
+                                                                                                                    C++, Java, Python     C      83.3%     0.7%    15.5%    0.6%
+                  fails test cases), and non-terminating execution (code runs                 RustRepoTrans         C, Java, Python      Rust    92.3%      0%     7.7%      0%
+                  indefinitely or waits for input).
+                                                                                                                          TABLE V
+                  Manual Error Causes Analysis. We further conducted a                       T OP 10 C OMPILATION E RRORS BY RUST C OMPILER ON RUST R EPOT RANS
+                  manual analysis of the error causes for the unsuccessful
+                                                                                              Error Code         Frequency   Description
+                  translations with compilation errors (1,614 code samples),                                                 This error occurs when a method is used on a type
+                                                                                                E0599              4,079
+                  which accounted for the vast majority, 92.3%, of the failures                                              which doesn’t implement it.
+                                                                                                E0425              2,095     An unresolved name was used.
+                  as shown in Table IV (see Section IV-D2). Using an open                       E0308              1,035     Expected type did not match the received type.
+                  coding approach [58], we examined the error messages for each                 E0277              976
+                                                                                                                             You tried to use a type which doesn’t implement
+                                                                                                                             some trait in a place which expected that trait.
+                  failing result and classified each compilation error into specific            E0609              906       Attempted to access a nonexistent field in a struct.
+                  categories. If an error could not fit into an existing category,              E0433              639       An undeclared crate, module, or type was used.
+                                                                                                                             An invalid number of arguments was passed
+                  we created a new one or adjusted the definition of an existing                E0061              343
+                                                                                                                             when calling a function.
+                  category to include it, followed by revising and reannotating                 E0252              290
+                                                                                                                             Two items of the same name cannot be imported without
+                                                                                                                             rebinding one of the items under a new local name.
+                  all relevant samples. Notably, the same type of error could                   E0432              287       An import was unresolved.
+                  belong to different categories depending on the context. This                 E0616              187       Attempted to access a private field on a struct.
+
+                  iterative annotation process involved collaborative discussions
+                                                                                             the categories stabilized, ensuring consistent and reliable results.
+                  to refine the categories and ensure consistent classification. We
+                                                                                             We randomly selected 50 error cases and asked another author
+                  regularly reviewed and reorganized the categories to maintain
+                                                                                             to independently label them. The Cohen’s kappa [62] reached
+                  clarity in our classification system.
+                                                                                             0.885, which indicates almost perfect agreement, representing
+                     2) Results: Error Outcome Distribution. Table IV shows
+                                                                                             the validity and reproducibility of the error categories obtained.
+                  the error outcome distribution from RQ1 on RustRepoTrans,
+                                                                                              Fig. 6 shows the ten final error cause categories for failed
+                  alongside data from Pan et al. [16] for translations to other
+                                                                                             code translations with compilation errors in RustRepoTrans,
+                  programming languages (C, C++, Python, Java).
+                                                                                             further grouped into three main types:
+                     In RustRepoTrans, compilation errors account for 92.3% of
+                                                                                             • Failing to Understand Target Language Features. This
+                  failures, significantly higher than the 58.3% to 83.3% observed
+                  in other benchmarks. This emphasizes the challenge LLMs                      type includes errors stemming from the LLM’s insufficient
+                  face when translating to Rust, a language known for stringent                grasp of the syntax and semantics of the target programming
+                  compile-time checks due to its ownership model and borrow                    language. It encompasses limitations in understanding data
+                  checker. Unlike other benchmarks, RustRepoTrans recorded                     types, variable states, and contextual information.
+                                                                                             • Failing to Understand Differences Between Languages.
+                  no runtime or non-terminating errors, indicating that Rust
+                  translations primarily fail at compile-time, underscoring its                This type relates to the LLM’s inadequate comprehension
+                  strong emphasis on memory safety.                                            of the distinctions between the source and target languages.
+                     In unsuccessful translations, the number of compilation errors            It covers issues such as syntax variations, differences in
+                  ranged from 1 to 193 (average: 7.7, median: 3), complicating                 functions, variables, data types, and import paths.
+                                                                                             • Others. This type includes errors unrelated to the LLM’s
+                  debugging. In contrast to languages like Python, where the
+                  compiler stops at the first error, the Rust compiler reports                 code translation capabilities. Examples include missing
+                  all errors, making issue resolution more challenging. We                     punctuation marks and translations that do not adhere to
+                  categorized the types of compilation errors based on error                   the provided function signature.
+                  codes from [58]. Table V presents the top 10 compilation                      The detailed 10 error causes from the types are as following.
+                  errors encountered. Many of these stem from using non-                        Data Type Misinterpretation. This error cause reflects
+                  existent, unimplemented, unresolved, or undeclared elements,               the LLM’s limitations in type inference, particularly evident
+                  highlighting the hallucination phenomenon also seen in other               in Rust’s strict type system. Unlike Python, where variables
+                  repository-level code generation tasks [59], [60].                         can change types freely, or C, which allows implicit conver-
+                  Error Cause Taxonomy. We conduct open coding [61] with                     sions, Rust requires exact type matches, making translation
+                  an iterative consensus on error messages to annotate error                 errors more prominent. LLMs may attempt incompatible
+                  categories. During each iteration, two annotators with over                assignments, perform arithmetic on mismatched types, or
+                  6 years of programming experience independently labeled                    incorrectly treat non-collection variables (like integers) as if
+                  errors by fully considering the error description of the error             they were indexable. In the example below, the model interprets
+                  message and the context of the failed code translation and then            imap_connected_here as a boolean, causing a type
+                  resolved disagreements through discussion. After three rounds,             mismatch that Rust’s compiler disallows. This illustrates how
+
+
+
+
+                                                                                       616
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                                                                    Data type Misinterpretation                            LLM misinterprets the data type of variable, function return values, etc.
+
+                                                        Failing to Understand
+                                                      Target Language Features      Variable State Misinterpretation                       LLM misinterprets the state of variables, such as mutable or not.
+
+                                                                                                                                           LLM misinterprets the context, such as whether the current function is a
+                                                                                    Context Misinterpretation
+                                                                                                                                           built-in function within a struct.
+
+                                                                                                                                           LLM misinterprets the Syntactical differences between the source programming
+                                                                                    Syntactic Differences Misinterpretation
+                                                                                                                                           language and the target programming language
+
+                                                                                                                                           LLM misinterprets the Differences in available function dependencies between the
+                                                                                    Function Differences Misinterpretation
+                                                                                                                                           source programming language project and the target programming language project
+
+                              Error Causes               Failing to Understand                                                             LLM misinterprets the Differences in available variable dependencies between the
+                                                    Differences Between Languages   Variable Differences Misinterpretation
+                                                                                                                                           source programming language project and the target programming language project
+
+                                                                                    Data Type Differences Misinterpretation                LLM misinterprets the Differences in available data type dependencies between the
+                                                                                                                                           source programming language project and the target programming language project
+                                                                                                                                           LLM misinterprets the Differences in available import path and try to Import non-
+                                                                                    Dependency Resolution Differences Misinterpretation.
+                                                                                                                                           existent dependency libraries, data types, variables, or functions
+
+
+                                                                                    Missing Punctuation Marks                              LLM misses corresponding punctuation marks in expected positions.
+                                                                Others
+
+                                                                                    Function Signature Inconsistencies                     LLM doesn’t translated according to the provided target function's signature
+
+                                                          Fig. 6. Error Cause Taxonomy for Failed Code Translations on RustRepoTrans in LLMs
+
+                  Rust’s strict typing exposes LLM’s type inference limitations,                                                 Syntactic Differences Misinterpretation. This error cause
+                  often masked in more permissive languages like Python.                                                      relates to the LLM’s understanding of syntactic differences
+                                                                                                                              between programming languages. It occurs when the model
+                    let mut imap_connected_here = 0;
+                    ...                                                                                                       incorrectly assumes that syntax from the source language is
+                    if imap_connected_here {     # error: expected bool, found integer                                        valid in the target language. Examples include using chained
+                                                                                                                              assignments (allowed in Python, C, and Java), attempting to
+                     Variable State Misinterpretation. This error cause stems
+                                                                                                                              use the goto keyword from C, or employing an unsupported
+                  from the LLMs’ misunderstanding of variable states, leading
+                                                                                                                              operator “condition ? expr1 : expr2” in Rust.
+                  to several misinterpretations. Common issues include treating
+                                                                                                                                 Function Differences Misinterpretation. This error cause
+                  undeclared variables as declared, making simultaneous mu-
+                                                                                                                              pertains to the LLM’s understanding of functional dependency
+                  table borrows, using the same variable as both mutable and
+                                                                                                                              differences between programming languages. It arises when
+                  immutable, and incorrectly treating private variables as public.
+                                                                                                                              the model incorrectly assumes that callable functions in the
+                  In the example below, the model attempts to pass h as both an
+                                                                                                                              target language are identical to those in the source language.
+                  immutable reference (&h) and a mutable reference (&mut
+                                                                                                                              Common issues include assuming a function present in the
+                  h), which Rust’s strict borrowing rules prohibit, resulting
+                                                                                                                              source language also exists in the target language with identical
+                  in a compilation error. These instances highlight the LLM’s
+                                                                                                                              function calling way. In the example below, the first line results
+                  limitations in tracking variable states and usage contexts, often
+                                                                                                                              in an error because the LLM fails to recognize that get should
+                  leading to significant translation errors.
+                                                                                                                              be called within the Self prefix.
+                    Function Definition:
+                    fn hashit(sha: usize, n: usize, id: &[u8], w: &mut [u8]) -> bool # hashit                                   resort(&mut items_vec);       # error
+                    ...                                                                                                         Self::resort(&mut items_vec);      # correct
+                    Function Calling:
+                    hashit(sha, date, &h, &mut h); # error: using h as both mutable and immutable
+                                                                                                                                 Variable Differences Misinterpretation. This error cause
+                   Context Misinterpretation. This error cause arises from                                                    arises from the LLM’s understanding of variable dependency
+                 the LLM’s misunderstanding of context. It includes issues                                                    differences between programming languages. It involves errors
+                 such as failing to recognize when code is within a struct’s                                                  where the model incorrectly assumes that variables in the target
+                 built-in function, using asynchronous operations in a syn-                                                   language mirror those in the source language. Common issues
+                 chronous block, or attempting modifications inside a function                                                include presuming that parameters or declared variables from
+                 without the mutable modifier. In the example below, the                                                      the source language exist in the target language, that their
+                 model incorrectly assumes that batch is a built-in function                                                  scopes are the same, or that specific member variables exist
+                 of a struct. The error occurs when it tries to access                                                        within a struct.
+                 self.left(batch.clone()) with using the keyword                                                                 Data Type Differences Misinterpretation. This error cause
+                 self, which is unnecessary in this context.                                                                  arises from the LLM’s understanding of differences in available
+                                                                                                                              data types across programming languages. It reflects errors
+                    fn batch(batch: &RecordBatch) -> Result<RecordBatch> { # not a struct’s built-in                          where the model mistakenly assumes that data types in the
+                    function
+                         ...                                                                                                  source language are also present in the target language. For
+                         let left = self.left(batch.clone())?; # error: use the keyword self                                  instance, it may assume that a user-defined data type retains
+                         ...                                                                                                  the same name and meaning in both languages.
+                    }
+                                                                                                                                 Dependency Resolution Differences Misinterpretation.
+
+
+
+
+                                                                                                                       617
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                  This error cause relates to the LLM’s understanding of                                          38.6%
+                  differences in dependency resolution across programming                                                                                 Errors
+                                                                                                                                     Function Differences Misinterpretation
+                  languages. It highlights errors where the model incorrectly                                                        Variable Differences Misinterpretation
+                                                                                                                                     Data type Misinterpretation
+                  assumes that a specific import path is valid in the target                                                         Variable State Misinterpretation
+                                                                                                 24.9%                        0.8%
+                                                                                                                              0.9%   Data Type Differences Misinterpretation
+                  language, such as presuming the existence of a particular                                                   2.3%   Dependency Resolution Differences Misinterpretation
+                                                                                                                             2.9%    Function Signature Inconsistencies
+                  dependency library or that certain functions, data types, or                                             4.0%      Syntactic Differences Misinterpretation
+                                                                                                                                     Context Misinterpretation
+                  elements are present within the imported library.                                                     4.1%         Missing Punctuation Marks
+                                                                                                                    5.4%
+                                                                                                          16.1%
+                     Missing Punctuation Marks. This error cause arises from
+                  the LLM’s failure to include necessary punctuation in its output.                         Fig. 7. Overall Distribution of Error Causes
+                  Examples include incomplete parentheses, missing commas
+                  between parameters, and other critical punctuation omissions.               and Function Signature Inconsistencies, indicating superior
+                                                                                              understanding and adherence to instructions compared to others.
+                    if dc_param_exists(msg->param, DC_PARAM_SET_LATITUDE)) {
+                    # error: Redundant closing parenthesis                                       3) Conclusion: Existing LLMs struggle with code transla-
+                                                                                              tion tasks involving dependencies, particularly in distinguishing
+                     Function Signature Inconsistencies. This error cause arises              function and variable differences between source and target
+                  from the LLM’s failure to follow instructions to translate                  languages. When the target language is strongly typed, LLMs
+                  according to the provided function signature. Examples include              often lack understanding of data types. Their ability to
+                  inconsistencies in function modifiers, mismatches in parameter              recognize language differences is positively correlated with
+                  lists, or discrepancies in return values.                                   translation performance.
+                  Overall Distribution of Error Causes. As shown in Fig. 7,
+                  the most common error cause encountered by LLMs during                      E. RQ4: Key Capabilities
+                  the code translation task on RustRepoTrans is Failing to                       Beyond Pass@1 in RQ1, we analyze LLMs’ translation capa-
+                  Understand Differences Between Languages, which accounts                    bilities in noise robustness, syntactical difference identification,
+                  for 73.9% of the errors. This is followed by Failing to                     and code simplicity.
+                  Understand Target Language Features at 22.4%, and Others at                    1) Design: The key abilities for these three aspects were
+                  3.7%. These results indicate that the most significant challenge            tested by evaluating each model on a dataset extracted or
+                  for LLMs in code translation is effectively grasping the various            constructed from RustRepoTrans, tailored to the specific
+                  differences between the source and target languages, such as                capability being assessed. The same translation prompts used
+                  dependency and syntax differences.                                          in Section IV-B were applied. The experimental design for
+                     At a more detailed level, the top three error causes are                 each aspect is described as follows.
+                  Function Differences Misinterpretation (38.6%), Variable Dif-                  Noise Robustness. This capability evaluates the model’s
+                  ferences Misinterpretation (24.9%), and Data Type Misinter-                 capacity to identify necessary dependencies from provided
+                  pretation (16.1%). This distribution highlights that function               options, which is crucial in real-world scenarios where de-
+                  and variable dependencies constitute the largest portion of                 pendency information is often uncertain or incomplete. We
+                  the dependencies involved in RustRepoTrans code translation                 assessed this capability through two angles: redundancy and
+                  tasks. Furthermore, since RustRepoTrans targets a strongly                  incompleteness. For redundancy, we created a dataset by
+                  typed language, errors related to data types are ranked third.              selecting functions and data types with high text similarity
+                  Comparison of Error Causes Distribution across Different                    (using BLEU scores [63]) relative to the target function’s
+                  LLMs. Fig. 8 shows the distribution of error causes across                  dependencies, excluding those in the original set. We introduce
+                  various LLMs during code translation on RustRepoTrans. The                  a novel metric, Redundancy Impact Rate (RIR), to measure the
+                  Failing to Understand Target Language Features error causes                 ratio of successful translations between scenarios with Redun-
+                  are relatively evenly distributed among LLMs due to their                   dant Dependencies and All Dependencies. For incompleteness,
+                  similar training data, primarily derived publicly. This results             we created various datasets by randomly reducing the target
+                  in comparable understanding of the target language across                   function’s dependencies to 75%, 50%, 25%, and 0%. Using
+                  models. In contrast, Failing to Understand Differences Between              these new benchmarks, we assessed the success rates (Pass@1)
+                  Languages and Other errors are more common in LLMs                          of the LLMs and compared them to the original Pass@1 with
+                  with weaker translation capabilities. The former evaluates                  all dependencies. We introduce a novel metric, Incompleteness
+                  the model’s understanding of language differences, while the                Impact Rate (IIR), which measures the LLM’s performance by
+                  latter reflects its ability to follow instructions, both positively         calculating the average of the Pass@1 under 100%(i.e. All),
+                  correlating with translation performance.                                   75%, 50%, 25%, and 0% dependencies.
+                     Notably, DeepSeek-R1, the top-performing model on Rus-                      Syntactical Differences Identification. This capability
+                  tRepoTrans, exhibits the lowest rate of Syntactic, Function                 assesses the model’s skill in recognizing syntactical differences
+                  and Variable Differences Misinterpretation, representing its                between source and target languages, a key requirement for
+                  exceptional comprehension capabilities in capturing cross-                  accurate code translation. For instance, Rust, as a strongly-typed
+                  lingual discrepancies. Furthermore, Claude-3.5 made no errors               language, does not require checks such as memory exception
+                  on simpler error types such as Missing Punctuation Marks                    handling (common in C), type checks (in Python), or null
+
+
+
+
+                                                                                        618
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                                                   50% Y-axis omitted above 50%
+                   Proportion of bug types across different LLMs
+                                                                                                                                                                                                                                                                                      68.42%
+                                                                             Claude-3.5
+                                                                   40%       GPT-4
+                                                                             DeepSeekCoderV2-16B
+                                                                             Llama-3.1-8B
+                                                                   30%       DeepSeek-R1-0528
+                                                                             DeepSeek-V3-0324
+                                                                             Qwen2.5-Coder-32B
+                                                                   20%
+
+                                                                   10%
+
+                                                                    0%
+                                                                                              Data type           Variable State                Context             Syntactic Differences Function Differences   Variable Differences Data Type Differences Dependency Resolution     Missing        Function
+                                                                                          Misinterpretation      Misinterpretation         Misinterpretation          Misinterpretation     Misinterpretation     Misinterpretation     Misinterpretation        Differences        Punctuation      Signature
+                                                                                                                                                                                                                                                              Misinterpretation       Marks       Inconsistencies
+                                                                                                                                                         Fig. 8. Comparative Distribution of Error Causes in LLMs
+
+                  Memory exception handling:
+                  if (context->magic!=DC_CONTEXT_MAGIC){
+                                                                         Type checks:                                                                            Null pointer checks:                            noise robustness regarding redundant dependencies. From
+                  }
+                         ……                                              if not isinstance(other, CharsetMatch):
+                                                                                raise ValueError
+                                                                                                                                                                 Preconditions.checkNotNull(props, ...);         the perspective of incomplete dependencies, as shown in
+                  // Any correct operation on the struct will not modify
+                  context->magic. Therefore, if context->magic is not
+                                                                                                                                                                                                                 Fig. 10, DeepSeekCoderV2-16B and Llama-3.1-8B showed
+                  equal to the predefined value DC_CONTEXT_MAGIC,
+                  it indicates that a memory exception has occurred.                                                                                                                                             stable performance during gradual reductions, with drop ratios
+                                                                                                                                                                                                                 of 19.1% and 18.0% at the 25% level. Noticeable declines
+                 Fig. 9. Examples of checks from other languages that are not needed in Rust                                                                                                                     occurred only at the Without Dependencies stage. This is
+                                                                                    0.5
+                                                                                                                                                            Claude-3.5
+                                                                                                                                                            GPT-4
+                                                                                                                                                                                                                 because most successful translations for DeepSeekCoderV2-
+                                                                                                                                                            DeepSeekCoderV2-16B
+                                                                                                                                                            Llama-3.1-8B                                         16B and Llama-3.1-8B came from simpler data with fewer
+                                                                                                                                                            DeepSeek-R1-0528
+                                                                                                                                                            DeepSeek-V3-0324
+                                                                                    0.4
+                                                                                                                                                            Qwen2.5-Coder-32B                                    dependencies, ensuring consistent availability across stages
+                                                                                                                                                                                                                 except at the Without Dependencies stage. In contrast, other
+                                                                                    0.3
+                                                                           Pass@1
+
+
+
+
+                                                                                                                                                                                                                 LLMs faced significant drops at nearly every stage, likely
+                                                                                    0.2                                                                                                                          because their successfully translated tasks include those with
+                                                                                                                                                                                                                 multiple dependencies. As shown in Fig. 11, the IIR ranking
+                                                                                    0.1
+                                                                                                                                                                                                                 among models are almost the same as the Pass@1 under All
+                                                                                          All
+                                                                                      Dependencies
+                                                                                                              75%
+                                                                                                          Dependencies
+                                                                                                                                50%
+                                                                                                                            Dependencies
+                                                                                                                                                      25%
+                                                                                                                                                  Dependencies
+                                                                                                                                                                           Without
+                                                                                                                                                                         Dependencies
+                                                                                                                                                                                                                 Dependencies in IV-B, DeepSeek-R1 demonstrated the best
+                                                                                                                                                                                                                 performance with IIR values of 35.8%.
+                  Fig. 10. The Pass@1 of LLMs under different proportions of dependencies
+                                                                                                                                                                                                                 Syntactical Differences Identification. As shown in Fig. 11,
+                 pointer checks (in C and Java) shown in Fig. 9. We selected 89                                                                                                                                  DeepSeek-V3, DeepSeek-R1 and Claude-3.5 achieve high
+                 function pairs from RustRepoTrans that include these checks in                                                                                                                                  SDIR@1 at 97.8%, 96.6% and 95.5% separately, demonstrating
+                 the source language and evaluated whether the LLM correctly                                                                                                                                     a strong ability to identify syntactical differences between pro-
+                 identifies and omits in the target language. We introduce                                                                                                                                       gramming languages. This finding is consistent with the results
+                 a novel metric, Syntactical Differences Identification Rate                                                                                                                                     in Section IV-D regarding the distribution of error causes across
+                 (SDIR@K), which measures the LLM’s success in identifying                                                                                                                                       different LLMs (see Fig. 8). In contrast, DeepSeekCoderV2-
+                 these syntactical differences across K samples.                                                                                                                                                 16B has the lowest SDIR@1 at only 40.5%. This indicates that
+                    Code Simplicity. This capability assesses the simplicity of                                                                                                                                  DeepSeekCoderV2-16B often assumes the checks performed in
+                 translation results, as simpler code is preferred by developers.                                                                                                                                the source language are also necessary in the target language,
+                 We evaluate this by calculating token counts with tree-sitter [40]                                                                                                                              leading to errors by incorrectly treating those checks as valid
+                 and measuring cyclomatic complexity [64], where higher values                                                                                                                                   in the translation.
+                 indicate greater complexity. We apply rust-code-analysis [65]                                                                                                                                   Code Simplicity. Fig. 11 shows that among the success-
+                 to the reference and translated code that passed the test cases.                                                                                                                                fully translated tasks, the Token Rate for code generated
+                 A higher ratio suggests that the translated code is more concise                                                                                                                                by DeepSeek-R1 and DeepSeek-V3 reached 100.9% and
+                 and closely matches the reference. We introduce two metrics                                                                                                                                     99.5%, respectively, indicating high simplicity compared to the
+                 for code simplicity: Token Rate and CC Rate. These compare                                                                                                                                      reference code. In contrast, Llama-3.1-8B had the lowest Token
+                 the token counts and cyclomatic complexities of the reference                                                                                                                                   Rate at 63.1%, suggesting it requires more code to achieve the
+                 and translated code. Higher values for both metrics indicate                                                                                                                                    same functionality.
+                 simpler generated code and is more aligned with the original.
+                                                                                                                                                                                                                    In terms of CC Rate, Claude-3.5 and DeepSeek-R1 excel
+                   2) Results: Noise Robustness. From the perspective of                                                                                                                                         with a CC Rate of 103.7% and 103.2% separately, while
+                 redundant dependencies, after introducing interference depen-                                                                                                                                   Llama-3.1-8B is notably lower at 53.6%. This difference arises
+                 dencies, Claude-3.5 and DeepSeekCoderV2-16B demonstrated                                                                                                                                        because Claude-3.5 and DeepSeek-R1 often uses concise built-
+                 minimal fluctuations, with RIR values of 99.4% and 101.6%.                                                                                                                                      in functions in place of loops. For instance, as illustrated in
+                 These variations fall within the expected range for LLM                                                                                                                                         Fig. 12, when tasked with finding the first element in an array
+                 generation. In contrast, DeepSeek-R1 and DeepSeek-V3, the                                                                                                                                       that meets a condition, they employ the target language’s any
+                 two LLMs that ranked top-2 in terms of Pass@1 and DSR@1,                                                                                                                                        method from the iterator library, whereas other LLMs rely
+                 exhibited larger fluctuations, with RIR values of 92.7% and                                                                                                                                     on traditional loops. Furthermore, the CC Rate of Claude-
+                 86.2%, highlighting potential areas for improvement in their                                                                                                                                    3.5 and DeepSeek-R1 exceeding 1 indicates that, in terms of
+
+
+
+
+                                                                                                                                                                                                           619
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                                                                                                       Claude-3.5
+                                                                             SDIR@1
+                                                                                                                       GPT-4
+                                                                                                                       DeepSeekCoderV2-16B
+                                                                                                                                                              Limitations. In our evaluation, the provided information con-
+                                                                                                                       Llama-3.1-8B
+                                                                                                                       DeepSeek-R1-0528                       tains comprehensive and non-redundant contextual information.
+                                     Token Rate                                                                        DeepSeek-V3-0324
+                                                                                                                       Qwen2.5-Coder-32B
+                                                                                                                                                              We did not conduct in-depth assessments of two specific aspects:
+                                                                                                           1.0
+                                                                                              0.6
+                                                                                                     0.8                                                      the migration of global variables, type definitions, or function
+                                                                                        0.4
+                                                                            0.2
+                                                                                                                 IIR
+                                                                                                                                                              signatures, and the integration of LLMs with static/dynamic
+                                                                                                                                                              analysis. This is because the primary focus of this paper is to
+                                                                                                                                                              achieve a more authentic, practical, and fine-grained evaluation
+                                       CC Rate
+                                                                                                                                                              for the precise diagnosis and targeted improvement of LLMs’
+                                                                                                                                                              code translation capabilities under an incremental translation
+                                                                                  RIR                                                                         scenario. However, we provide the complete target codebase
+                                                                                                                                                              to enable any related future work incorporating such analyses.
+                   Fig. 11. The performance of LLMs on Key Abilities of code translation.
+                                                                                                                                                                               VI. T HREATS TO VALIDITY
+                   Claude-3.5 translation result: Without Loop                                      DeepSeek-R1-0528 translation result: Without Loop
+                   if characters.chars().any(|character| {character == primary_range)}) {           self.pool.fill(0);
+                        . . .}                                                                                                                                   One potential threat is data leakage between our benchmark
+                   Other LLMs translation result: With Loop
+                   for character in characters.chars() {
+                                                                                                    reference code: With Loop
+                                                                                                    for i in 0..32 {
+                                                                                                                                                              and model training data. However, the training data comprises
+                        if (character == primary_range){
+                               ...
+                                                                                                          self.pool[i] = 0;}                                  independent function code from different languages rather than
+                               break;}}
+                                                                                                                                                              functionally equivalent code pairs, which is crucial for code
+                                                                                                                                                              translation. Another concern is the limited size and variety of
+                  Fig. 12. Claude-3.5 and DeepSeek-R1 translation result compared to Other
+                  LLMs and reference code
+                                                                                                                                                              programming languages in our benchmark, which may impact
+                                                                                                                                                              the generalizability of our findings. We plan to extend our
+                  cyclomatic complexity, their generated code is simpler than                                                                                 benchmark in the future. Lastly, the reliability and completeness
+                  the reference code. Fig. 12 shows an example with C as the                                                                                  of the error causes taxonomy pose another potential threat.
+                  source language. This simplification likely results from Rust                                                                               We employed open coding to systematically identify and
+                  ground truth developers using the C2Rust migration tool [66],                                                                               categorize the error causes, adhering to established open coding
+                  which translates code through one-to-one pattern matching. It is                                                                            practices to ensure thoroughness and accuracy. Concurrently,
+                  also important to note that although DeepSeek-V3 outperforms                                                                                we constructed an iterative refining process, reducing individual
+                  Claude-3.5 in terms of pass@1, its CC Rate is 93.5%, which                                                                                  biases and ensuring more objective assessments. Finally, we
+                  is significantly lower than that of Claude-3.5. This suggests                                                                               engaged a non-participant to annotate the same error messages
+                  that a model with a lower pass@1 score does not necessarily                                                                                 based on the obtained error cause categories, achieving a
+                  indicate weaker code capabilities, and the quality of the code                                                                              Cohen’s kappa of 0.885, indicating almost perfect agreement.
+                  it generates may actually be higher.
+                                                                                                                                                                                    VII. C ONCLUSION
+                     These findings suggest that DeepSeek-R1 demonstrates
+                  a stronger code comprehension and implementation ability,                                                                                      This work makes the first attempt to evaluate LLMs on
+                  accurately understanding the source code’s functionality and                                                                                repository-level context code translation targeting Rust. We
+                  translating it concisely based on the target language’s features.                                                                           first manually construct the first repository-level context code
+                     3) Conclusion: The complexity of code generated by LLMs                                                                                  translation benchmark RustRepoTrans and evaluate seven
+                  reflects their translation capabilities: models with stronger                                                                               representative LLMs. We find that existing LLMs show much
+                  abilities produce code with lower complexity for equivalent                                                                                 worse performance on incremental repository-level context
+                  functionality. DeepSeek-R1, which excels on RustRepoTrans,                                                                                  code translation compared to standalone code translation and
+                  also shows superior performance in Noise Robustness, Syntacti-                                                                              exhibit more fine-grained deficiencies compared to end-to-end
+                  cal Differences Identification, and Code Simplicity. Meanwhile,                                                                             full repository translation. Besides, when the target language
+                  although Claude-3.5 does not achieve the highest pass@1,                                                                                    is a low-resource language with multiple syntactic constraints,
+                  it demonstrates exceptional performance in Code Simplicity,                                                                                 such as Rust, LLMs struggle to effectively identify the various
+                  highlighting the high quality of the code it generates.                                                                                     differences between the source and target languages, as well as
+                                                                                                                                                              understand the features of the target language. Meanwhile,
+                                                                  V. D ISCUSSION                                                                              we propose a set of more fine-grained evaluation metrics
+                     In this section, we further discuss the intended audience and                                                                            and an enhanced evaluation framework, enabling a more
+                  the limitation of RustRepoTrans.                                                                                                            comprehensive analysis of LLMs’ performance in repository-
+                  Intended Audience. The RustRepoTrans is designed to provide                                                                                 level context code translation tasks to provide fine-grained
+                  value to both researchers and practitioners in the field of                                                                                 insights that can effectively inform the development of code
+                  code translation. Not only do the error causes revealed by                                                                                  translation techniques.
+                  RustRepoTrans for different LLMs, along with the associated
+                                                                                                                                                                                   ACKNOWLEDGMENT
+                  analysis, offer fine-grained insights for researchers in future
+                  work, but the relative performance ranking of various LLMs can                                                                                 This work was supported in part by the National Natural
+                  also guide developers in choosing suitable base models when                                                                                 Science Foundation of China (No. 62032025, 62402113), CCF
+                  constructing their translation tools in real-world scenarios.                                                                               - Sangfor ’Yuanwang’ Research Fund.
+
+
+
+
+                                                                                                                                                        620
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                                                 R EFERENCES                                                   [23] W. Yan, Y. Tian, Y. Li, Q. Chen, and W. Wang, “Codetransocean:
+                                                                                                                     A comprehensive multilingual benchmark for code translation,” arXiv
+                   [1] R. Pan, A. R. Ibrahimzada, R. Krishna, D. Sankar, L. P. Wassi, M. Merler,                     preprint arXiv:2310.04951, 2023.
+                       B. Sobolev, R. Pavuluri, S. Sinha, and R. Jabbarvand, “Understanding                    [24] M. Zhu, A. Jain, K. Suresh, R. Ravindran, S. Tipirneni, and C. K. Reddy,
+                       the effectiveness of large language models in code translation,” CoRR,                        “Xlcost: A benchmark dataset for cross-lingual code intelligence,” arXiv
+                       2023.                                                                                         preprint arXiv:2206.08474, 2022.
+                   [2] “Upgrading github from rails 3.2 to 5.2.” https://github.blog/engineering/              [25] Y. Wang, Y. Wang, S. Wang, D. Guo, J. Chen, J. Grundy, X. Liu, Y. Ma,
+                       upgrading-github-from-rails-3-2-to-5-2/, 2018.                                                M. Mao, H. Zhang et al., “Repotransbench: A real-world benchmark
+                   [3] “Supporting linux kernel development in rust,” https://lwn.net/Articles/                      for repository-level code translation,” arXiv preprint arXiv:2412.17744,
+                       829858/, 2020.                                                                                2024.
+                   [4] “Transform monolithic java applications into microservices                              [26] X. Zhang, J. Wen, F. Yang, P. Zhao, Y. Kang, J. Wang, M. Wang,
+                       with the power of ai,” https://developer.ibm.com/tutorials/                                   Y. Huang, E. Nallipogu, Q. Lin et al., “Skeleton-guided-translation: A
+                       transform-monolithic-java-applications-into-microservices-with-the-power-of-ai/             , benchmarking framework for code repository translation with fine-grained
+                       2020.                                                                                         quality evaluation,” arXiv preprint arXiv:2501.16050, 2025.
+                   [5] “Will code move on to a language such as rust?” https://www.theregister.                [27] “Rustrepotrans,” https://github.com/SYSUSELab/RustRepoTrans/, 2024.
+                       com/2020/06/30/hard_to_find_linux_maintainers_says_torvalds/, 2020.                     [28] “Rustrepotrans,”             https://huggingface.co/datasets/SYSUSELab/
+                   [6] “Github’s journey from monolith to microservices,” https://www.infoq.                         RustRepoTrans, 2024.
+                       com/articles/github-monolith-microservices/, 2020.                                      [29] A. T. Nguyen, T. T. Nguyen, and T. N. Nguyen, “Lexical statistical
+                   [7] J. Thönes, “Microservices,” IEEE software, vol. 32, no. 1, pp. 116–116,                       machine translation for language migration,” in Proceedings of the 2013
+                       2015.                                                                                         9th Joint Meeting on Foundations of Software Engineering, 2013, pp.
+                   [8] “Rust,” https://doc.rust-lang.org/stable/book/print.html, 2024.                               651–654.
+                   [9] “Cangjie,” https://developer.huawei.com/consumer/cn/cangjie/, 2025.                     [30] X. Chen, C. Liu, and D. Song, “Tree-to-tree neural networks for program
+                  [10] K. Kontogiannis, J. Martin, K. Wong, R. Gregory, H. Müller, and                               translation,” Advances in neural information processing systems, vol. 31,
+                       J. Mylopoulos, “Code migration through transformations: An experience                         2018.
+                       report,” in CASCON First Decade High Impact Papers, 2010, pp. 201–                      [31] L. Dong and M. Lapata, “Language to logical form with neural attention,”
+                       213.                                                                                          arXiv preprint arXiv:1601.01280, 2016.
+                  [11] P. Jana, P. Jha, H. Ju, G. Kishore, A. Mahajan, and V. Ganesh, CoTran:                  [32] P. Yin and G. Neubig, “A syntactic neural model for general-purpose
+                       An LLM-Based Code Translator Using Reinforcement Learning with                                code generation,” arXiv preprint arXiv:1704.01696, 2017.
+                       Feedback from Compiler and Symbolic Execution. IOS Press, Oct.                          [33] ——, “Tranx: A transition-based neural abstract syntax parser for
+                       2024. [Online]. Available: http://dx.doi.org/10.3233/FAIA240968                               semantic parsing and code generation,” arXiv preprint arXiv:1810.02720,
+                  [12] J. Zhang, P. Nie, J. J. Li, and M. Gligoric, “Multilingual code co-                           2018.
+                       evolution using large language models,” in Proceedings of the 31st ACM                  [34] I. J. Rithy, H. Hossain Shakil, N. Mondal, F. Sultana, and F. M. Shah,
+                       Joint European Software Engineering Conference and Symposium on the                           “Xtest: A parallel multilingual corpus with test cases for code translation
+                       Foundations of Software Engineering, 2023, pp. 695–707.                                       and its evaluation*,” in 2022 25th International Conference on Computer
+                  [13] Copilot, “Using github copilot to migrate a project to another                                and Information Technology (ICCIT), 2022, pp. 623–628.
+                       programming language,” 2024. [Online]. Available: https://docs.github.                  [35] Z. Yang, F. Liu, Z. Yu, J. W. Keung, J. Li, S. Liu, Y. Hong, X. Ma, Z. Jin,
+                       com/en/copilot/tutorials/migrate-a-project                                                    and G. Li, “Exploring and unleashing the power of large language models
+                  [14] B. G. Mateus, M. Martinez, and C. Kolski, “Learning migration models                          in automated code translation,” Proceedings of the ACM on Software
+                       for supporting incremental language migrations of software applications,”                     Engineering, vol. 1, no. FSE, pp. 1585–1608, 2024.
+                       Information and Software Technology, vol. 153, p. 107082, 2023.                         [36] M. Macedo, Y. Tian, F. R. Cogo, and B. Adams, “Exploring the impact
+                  [15] J. Brant and D. Roberts, “The smacc transformation engine: how                                of the output format on the evaluation of large language models for
+                       to convert your entire code base into a different programming                                 code translation,” in 2024 IEEE/ACM First International Conference on
+                       language,” in Proceedings of the 24th ACM SIGPLAN Conference                                  AI Foundation Models and Software Engineering (Forge) Conference
+                       Companion on Object Oriented Programming Systems Languages and                                Acronym:, 2024, pp. 57–68.
+                       Applications, ser. OOPSLA ’09. New York, NY, USA: Association                           [37] V. Nitin, R. Krishna, L. L. d. Valle, and B. Ray, “C2saferrust: Trans-
+                       for Computing Machinery, 2009, p. 809–810. [Online]. Available:                               forming c projects into safer rust with neurosymbolic techniques,” arXiv
+                       https://doi.org/10.1145/1639950.1640026                                                       preprint arXiv:2501.14257, 2025.
+                  [16] R. Pan, A. R. Ibrahimzada, R. Krishna, D. Sankar, L. P. Wassi, M. Merler,               [38] H. Zhang, C. David, M. Wang, B. Paulsen, and D. Kroening, “Scalable,
+                       B. Sobolev, R. Pavuluri, S. Sinha, and R. Jabbarvand, “Lost in translation:                   validated code translation of entire projects using large language models,”
+                       A study of bugs introduced by large language models while translating                         Proceedings of the ACM on Programming Languages, vol. 9, no. PLDI,
+                       code,” in 2024 IEEE/ACM 46th International Conference on Software                             pp. 1616–1641, 2025.
+                       Engineering (ICSE), 2024, pp. 995–1007.                                                 [39] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Demystifying llm-based
+                  [17] R. Security, “Cisa’s 2026 memory safety deadline: What ot leaders                             software engineering agents,” Proceedings of the ACM on Software
+                       need to know now,” 2024. [Online]. Available: https://thenewstack.io/                         Engineering, vol. 2, no. FSE, pp. 801–824, 2025.
+                       feds-critical-software-must-drop-c-c-by-2026-or-face-risk/                              [40] tree sitter, 2023. [Online]. Available: https://github.com/tree-sitter/
+                  [18] B. Roziere, M.-A. Lachaux, L. Chanussot, and G. Lample, “Unsupervised                         tree-sitter
+                       translation of programming languages,” Advances in neural information                   [41] H. Zhong, S. Thummalapenta, T. Xie, L. Zhang, and Q. Wang, “Mining
+                       processing systems, vol. 33, pp. 20 601–20 611, 2020.                                         api mapping for language migration,” in Proceedings of the 32nd
+                  [19] S. Lu, D. Guo, S. Ren, J. Huang, A. Svyatkovskiy, A. Blanco, C. Clement,                      ACM/IEEE International Conference on Software Engineering-Volume 1,
+                       D. Drain, D. Jiang, D. Tang et al., “Codexglue: A machine learning                            2010, pp. 195–204.
+                       benchmark dataset for code understanding and generation,” arXiv preprint                [42] A. Trotman, A. Puurula, and B. Burgess, “Improvements to bm25 and
+                       arXiv:2102.04664, 2021.                                                                       language models examined,” in Proceedings of the 19th Australasian
+                  [20] Q. Zheng, X. Xia, X. Zou, Y. Dong, S. Wang, Y. Xue, Z. Wang,                                  Document Computing Symposium, 2014, pp. 58–65.
+                       L. Shen, A. Wang, Y. Li et al., “Codegeex: A pre-trained model for                      [43] D. Nam, A. Macvean, V. Hellendoorn, B. Vasilescu, and B. Myers,
+                       code generation with multilingual evaluations on humaneval-x,” arXiv                          “Using an llm to help with code understanding,” in 2024 IEEE/ACM
+                       preprint arXiv:2303.17568, 2023.                                                              46th International Conference on Software Engineering (ICSE), 2024,
+                  [21] M. Jiao, T. Yu, X. Li, G. Qiu, X. Gu, and B. Shen, “On the evaluation                         pp. 1184–1196.
+                       of neural code translation: Taxonomy and benchmark,” in 2023 38th                       [44] S. Chen, R. Varma, A. Sandryhaila, and J. Kovačević, “Discrete signal
+                       IEEE/ACM International Conference on Automated Software Engineering                           processing on graphs: Sampling theory,” IEEE Transactions on Signal
+                       (ASE), 2023, pp. 1529–1541.                                                                   Processing, vol. 63, no. 24, pp. 6510–6523, 2015.
+                  [22] R. Puri, D. S. Kung, G. Janssen, W. Zhang, G. Domeniconi, V. Zolotov,                   [45] OpenAI. (2024) Openai api interface. [Online]. Available: https:
+                       J. Dolby, J. Chen, M. Choudhury, L. Decker et al., “Codenet: A large-                         //platform.openai.com/docs/api-reference/introduction
+                       scale ai for code dataset for learning a diversity of coding tasks,” arXiv              [46] Claude. (2024) Claude api interface. [Online]. Available: https:
+                       preprint arXiv:2105.12655, 2021.                                                              //docs.anthropic.com/en/api/getting-started
+
+
+
+
+                                                                                                         621
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+                  [47] DeepSeek, “Deepseek r1 0528 release,” 2025. [Online]. Available:
+                       https://api-docs.deepseek.com/news/news250528
+                  [48] ——, “Deepseek-v3-0324 release,” 2025. [Online]. Available: https:
+                       //api-docs.deepseek.com/news/news250325
+                  [49] Aliyun, “Qwen coder api,” 2025. [Online]. Available: https://help.aliyun.
+                       com/zh/model-studio/qwen-coder#844e7528bbs7w
+                  [50] M. Macedo, Y. Tian, F. R. Cogo, and B. Adams, “Exploring the impact
+                       of the output format on the evaluation of large language models for
+                       code translation,” in 2024 IEEE/ACM First International Conference on
+                       AI Foundation Models and Software Engineering (Forge) Conference
+                       Acronym:, 2024, pp. 57–68.
+                  [51] M. A. M. Khan, M. S. Bari, D. Long, W. Wang, M. R. Parvez, and
+                       S. Joty, “Xcodeeval: An execution-based large scale multilingual multitask
+                       benchmark for code understanding, generation, translation and retrieval,”
+                       in Proceedings of the 62nd Annual Meeting of the Association for
+                       Computational Linguistics (Volume 1: Long Papers), 2024, pp. 6766–
+                       6805.
+                  [52] Anthropic, “Claude 3.5 sonnet,” https://www.anthropic.com/news/
+                       claude-3-5-sonnet, 2024.
+                  [53] OpenAI, “Gpt-4,” https://openai.com/index/gpt-4-research/, 2023.
+                  [54] Meta, “Llama-3.1-8b-instruct,” https://huggingface.co/meta-llama/
+                       Llama-3.1-8B-Instruct, 2024.
+                  [55] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu, J. Zhang,
+                       B. Yu, K. Lu et al., “Qwen2. 5-coder technical report,” arXiv preprint
+                       arXiv:2409.12186, 2024.
+                  [56] DeepSeek, “Deepseek-coder-v2-lite-instruct,” https://huggingface.co/
+                       deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct, 2024.
+                  [57] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan,
+                       H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large
+                       language models trained on code,” arXiv preprint arXiv:2107.03374,
+                       2021.
+                  [58] R. error codes, 2024. [Online]. Available: https://doc.rust-lang.org/error_
+                       codes/error-index.html
+                  [59] Q. Luo, Y. Ye, S. Liang, Z. Zhang, Y. Qin, Y. Lu, Y. Wu, X. Cong, Y. Lin,
+                       Y. Zhang et al., “Repoagent: An llm-powered open-source framework
+                       for repository-level code documentation generation,” arXiv preprint
+                       arXiv:2402.16667, 2024.
+                  [60] C. Wang, J. Zhang, Y. Feng, T. Li, W. Sun, Y. Liu, and X. Peng, “Teaching
+                       code llms to use autocompletion tools in repository-level code generation,”
+                       arXiv preprint arXiv:2401.06391, 2024.
+                  [61] S. H. Khandkar, “Open coding,” University of Calgary, vol. 23, no. 2009,
+                       p. 2009, 2009.
+                  [62] M. L. McHugh, “Interrater reliability: the kappa statistic,” Biochemia
+                       Medica, vol. 22, pp. 276 – 282, 2012. [Online]. Available:
+                       https://api.semanticscholar.org/CorpusID:5421278
+                  [63] K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu, “Bleu: a method for
+                       automatic evaluation of machine translation,” in Proceedings of the 40th
+                       annual meeting of the Association for Computational Linguistics, 2002,
+                       pp. 311–318.
+                  [64] G. Gill and C. Kemerer, “Cyclomatic complexity density and software
+                       maintenance productivity,” IEEE Transactions on Software Engineering,
+                       vol. 17, no. 12, pp. 1284–1288, 1991.
+                  [65] L. Ardito, L. Barbato, M. Castelluccio, R. Coppola, C. Denizet,
+                       S. Ledru, and M. Valsesia, “rust-code-analysis: A rust library
+                       to analyze and extract maintainability information from source
+                       codes,” SoftwareX, vol. 12, p. 100635, 2020. [Online]. Available:
+                       https://www.sciencedirect.com/science/article/pii/S2352711020303484
+                  [66] C2Rust, 2024. [Online]. Available: https://github.com/immunant/c2rust
+
+
+
+
+                                                                                                     622
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 20:45:35 UTC from IEEE Xplore. Restriction
+

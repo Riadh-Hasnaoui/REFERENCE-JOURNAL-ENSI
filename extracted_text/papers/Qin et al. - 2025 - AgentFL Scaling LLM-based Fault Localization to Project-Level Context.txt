@@ -1,0 +1,821 @@
+                                           AGENT FL: Scaling LLM-based Fault Localization
+                                                      to Project-Level Context
+                                             Yihao Qin∗ , Shangwen Wang∗ , Yiling Lou† , Jinhao Dong‡ , Kaixin Wang† , Xiaoling Li∗ , Xiaoguang Mao∗ ,
+                                                                                     ∗ National University of Defense Technology, China,
+
+                                                                              {yihaoqin, wangshangwen13, lixiaoling, xgmao}@nudt.edu.cn
+                                                                          † Fudan University, China, {yilinglou@, kxwang23@m.}fudan.edu.cn
+                                                                                   ‡ Peking University, China, dongjinhao@stu.pku.edu.cn
+arXiv:2403.16362v2 [cs.SE] 24 Feb 2025
+
+
+
+
+                                            Abstract—Fault Localization (FL) is an essential step during              the coverage information and prioritizes the program entities
+                                         the debugging process. With the strong capabilities of code                  covered by more failed tests and fewer passed tests. To better
+                                         comprehension, the recent Large Language Models (LLMs)                       utilize the coverage information, LBFL techniques such as
+                                         have demonstrated promising performance in diagnosing bugs
+                                         in the code. Nevertheless, due to LLMs’ limited performance                  GRACE [11] represent coverage with a graph structure and
+                                         in handling long contexts, existing LLM-based fault localization             leverage GNN models to learn useful features. Several state-of-
+                                         remains on localizing bugs within a small code scope (i.e., a                the-art techniques have also suggested incorporating auxiliary
+                                         method or a class), which struggles to diagnose bugs for a                   information, such as code complexity and code history, and
+                                         large code scope (i.e., an entire software system). To address               leveraging the combined features of such information with
+                                         the limitation, this paper presents AGENT FL, a multi-agent
+                                         system based on ChatGPT for automated fault localization.                    machine/deep learning models [8], [10].
+                                         By simulating the behavior of a human developer, AGENT FL                       The recent advance of Large Language Models (LLMs) has
+                                         models the FL task as a three-step process, which involves                   shed new light on fault localization. Having been trained on
+                                         comprehension, navigation, and confirmation. Within each step,               massive code and textual data, LLMs exhibit a strong capabil-
+                                         AGENT FL hires agents with diversified expertise, each of which              ity in code comprehension [12], [13], [14], including detecting
+                                         utilizes different tools to handle specific tasks. Particularly, we
+                                         adopt a series of auxiliary strategies such as Test Behavior                 and localizing bugs in the code [15]. Existing LLM-based fault
+                                         Tracking, Document-Guided Search, and Multi-Round Dialogue                   localization mainly remains on the preliminary application
+                                         to overcome the challenges in each step. The evaluation on the               of LLMs via basic prompting or fine-tuning. In particular,
+                                         widely used Defects4J-V1.2.0 benchmark shows that AGENT FL                   Wu et al. [15] prompt ChatGPT with simple instructions
+                                         can localize 157 out of 395 bugs within Top-1, which outperforms             (e.g., “Please analyze the following code snippet for potential
+                                         the other LLM-based approaches and exhibits complementarity
+                                         to the state-of-the-art learning-based techniques. Additionally, we          bugs...”) and test failure information to localize bugs in the
+                                         confirm the indispensability of the components in AGENT FL with              given method; LLMAO [16] fine-tunes LLMs with adapters
+                                         the ablation study and demonstrate the usability of AGENT FL                 on the fault localization dataset (i.e., the tuning input are 128
+                                         through a user study. Finally, the cost analysis shows that                  consecutive code lines while the output are the buggy line
+                                         AGENT FL spends an average of only 0.074 dollars and 97 seconds              labels). Although showing promising effectiveness, existing
+                                         for a single bug.
+                                            Index Terms—Large Language Model, Fault Localization                      techniques can only address a simplified fault localization
+                                                                                                                      scenario, i.e., localizing the buggy statements in the given
+                                                                  I. I NTRODUCTION                                    buggy method. The potential of LLMs under the project-level
+                                                                                                                      fault localization, i.e., localizing the buggy methods from an
+                                            Fault Localization (FL) is an important but time-consuming                entire project, has not been thoroughly studied, possibly due
+                                         phase in the software debugging process. In particular, de-                  to the following technical challenges. First, the codebase of
+                                         velopers can spend nearly half of the debugging time to                      a real-world project often contains millions of tokens, which
+                                         understand and localize the bug before they fix the buggy                    are far beyond the maximum input length of existing LLMs
+                                         code locations [1]. To release developers from the laborious FL              (e.g., the input lengths of the GPT-3.5 series models vary from
+                                         tasks, various techniques have been proposed to automatically                4,096 to 16,385 tokens). Therefore, it is often infeasible and
+                                         localize buggy program entities (e.g., classes, methods, or                  unacceptably resource-consuming to directly query LLMs with
+                                         statements), among which the spectrum-based fault localiza-                  the entire project for fault localization. Second, existing LLMs
+                                         tion (SBFL) [2], [3], [4], [5], [6] and learning-based fault                 exhibit deteriorating performance as the length of input context
+                                         localization (LBFL) [7], [8], [9], [10] have been extensively                increases and have a tendency to overlook critical information
+                                         studied and perform progressive effectiveness. As one of                     within the long inputs [17]. Therefore, simply feeding LLMs
+                                         the most famous FL techniques, SBFL statistically analyzes                   with as much code as possible might not be an optimal way
+                                                                                                                      to leverage the superior capabilities of the model.
+                                            * Our work has been accepted by Transactions on Software Engineering
+                                         (TSE) in 2025. For the latest version, please refer to “SOAPFL: A Standard      To scale up LLM-based fault localization to the project-level
+                                         Operating Procedure for LLM-based Method-Level Fault Localization”.          contexts, in this work, we propose to decompose the local-
+ization process into multiple phases and selectively enhance        AGENT FL also shows complementarity with existing learning-
+LLMs with different debugging information during each phase.        based techniques such as DeepFL [10] and GRACE [11]. We
+We are inspired by the debugging process of human develop-          further validate the importance of different components in
+ers, who often take various actions such as analyzing the fault     AGENT FL with an ablation study. In addition, through a user
+(comprehending an error trace or a core dump), browsing the         study, we show the usability of AGENT FL in practice with
+codebase (following each computational step in the execution        its ability to provide both suspicious methods and rationale.
+of the failing test), and examining the code (building mental       Finally, the cost analysis reveals that AGENT FL requires only
+representation by reading and understanding the code) [1],          an average of 0.074 dollars and 97 seconds to localize a fault.
+[18]. Specifically, by decomposing the localization process            The main contributions of this paper are:
+into several steps and achieving FL through the collaboration       • We propose to decompose the project-level fault localization
+of multiple LLM-driven agents (i.e., intelligent entities that         into three stages, i.e., comprehension, navigation, and confir-
+can perceive the environment, make decisions, and perform              mation. Such a process adheres to the developers’ debugging
+actions), the advantages we expect are twofold. On the one             practice and holds the potential for effectively managing the
+hand, this multi-step approach allows more controllable model          inputs of the LLMs.
+inputs, which avoids excessively long contexts by merely            • We present AGENT FL, a three-stage FL technique empow-
+providing essential information for the LLMs in each step. On          ered by multiple LLM-driven agents, capable of automati-
+the other hand, the capabilities of LLMs are further exploited         cally localizing faults within the entire software.
+since each agent focuses on processing specific tasks with their    • We extensively evaluate AGENT FL on both Defects4J-
+customized expertise.                                                  V1.2.0 and Defects4J-V2.0.0. AGENT FL outperforms the
+   Based on the above intuition, we propose a novel LLM-               other LLM-based approaches and shows complementarity
+based FL system, AGENT FL, which incorporates multiple                 with existing LBFL techniques on both datasets. Addi-
+LLM-driven agents to localize bugs for an entire project. To           tionally, we conduct the user study and cost analysis to
+mitigate the inherent limitations of LLMs in handling large-           demonstrate the usability of AGENT FL.
+scale codebases, AGENT FL decomposes the project-level fault
+localization into three stages, including Fault Comprehen-                      II. BACKGROUND & R ELATED WORK
+sion, Codebase Navigation, and Fault Confirmation, where
+                                                                    A. Statistic-Based Fault Localization
+each stage is driven by multiple specialized agents. (1) The
+fault comprehension stage leverages LLMs to analyze the                Spectrum-based and learning-based fault localization are
+potential causes of the exposed fault, which would serve            mainstream FL technologies that achieve prominent perfor-
+as the essential guidelines for the following two stages.           mance on the Defects4J [19] benchmark. Given the buggy
+Different from existing LLM-based FL techniques that only           program and a set of tests including both passed and failed
+provide LLMs with the error message and the failed test             instances, the spectrum-based fault localization (SBFL) local-
+code, AGENT FL incorporates a novel Test Behavior Tracking          izes suspicious program entities through the hypothesis that
+approach to collect the complete test execution behaviors (i.e.,    the fault location should be covered by more failed tests than
+the test utility code) via lightweight program instrumentation.     passed ones. To achieve this, SBFL first collects coverage in-
+(2) The codebase navigation stage then leverages LLMs to            formation for each program element e by recording the number
+identify suspicious methods in a gradual refinement way,            of passed tests Tp (e) and failed tests Tf (e) that cover e, then
+which first narrows down the faulty code space by finding           designs different formula such as Ochiai [20], DStar [21] and
+out the suspicious classes and then selects related methods         Jaccard [22] to calculate the suspiciousness scores for ranking
+from these classes. To achieve this, AGENT FL incorporates          all the elements. As an example, Ochiai computes the suspi-
+a novel Document-Guided Search approach, which utilizes             ciousness of an element e as Tf (e)/((Tf (e) + Tp (e))Tf )1/2 ,
+both existing documents and LLM-enhanced documents to               where Tf is the number of all failed tests.
+identify classes and methods related to the potential error            To use coverage more exhaustively and combine extra
+causes. (3) The fault confirmation stage lastly leverages LLM       valuable information such as code history, learning-based fault
+to revisit all the suspicious methods (identified in the previous   localization (LBFL) is also extensively studied. FLUCCS [8]
+stage) and decide the most suspicious one as the final result.      boosts SBFL with code and change metrics. DeepFL [10]
+In this stage, AGENT FL incorporates a novel Multi-Round            learns to combine four dimensions of knowledge from SBFL,
+Dialogue approach, which iteratively asks LLM to review each        mutation-based FL, code complexity, and text similarity
+suspicious method with its detailed information.                    through RNN [23] and MLP [24]. GRACE [11] integrates cov-
+   We evaluate AGENT FL on the Defects4J-V1.2.0 [19] bench-         erage with fine-grained code structures by a GNN [25] model.
+mark which includes 395 real-world bugs from 6 Java projects.       Other well-known LBFL techniques include CNNFL [9],
+To compare with the existing LLM-based FL techniques,               TraPT [26], CombineFL [27], and GNet4FL [28], etc.
+we empower them to achieve project-level localization with             Based on the high dependence of SBFL and LBFL on cov-
+Ochiai [20]. The results show that AGENT FL can localize 157        erage information and code features, we consider them both as
+bugs within Top-1, which significantly outperforms the LLM-         statistic-based fault localization (STBFL) to distinguish them
+based baselines ChatGPTOchiai [15] and LLMAOOchiai [16].            from the approaches based on the LLMs.
+B. LLM-Based Fault Localization                                     A. Overview
+   With the emergence of the Large Language Model (LLM),
+LLMs such as ChatGPT [29], Phind [30], CodeGen [31], and              The overall workflow of AGENT FL is shown in Figure 1.
+StarCoder [32] have shown remarkable power on aligning              In particular, AGENT FL consists of three steps; in each step,
+semantics between natural languages (NL) and programming            AGENT FL is supposed to tackle different tasks; to specialize
+languages (PL). In the ChatGPT-4 launch event, OpenAI               the LLMs to solve different tasks, four different agents are
+prompted the model to localize and fix errors by providing          constructed by enhancing the LLMs with domain knowledge
+program code and error log, which unveiled the potential and        and external components.
+applicability of ChatGPT-4 in fault localization.
+   However, due to the well-known context limitation issue             Inputs & Outputs. The inputs of AGENT FL include the
+as well as the decreasing performance on longer input con-          codebase of the entire project, the failed test methods (i.e.,
+texts [15], [17], existing LLM-based FL techniques primarily        the failed test cases), and the error message of the triggered
+concentrate on localizing buggy lines within a code snippet,        fault. As it is common for one fault to trigger multiple failed
+while neglecting the identification of bugs in an entire software   test methods (e.g., 22 test methods fail in the bug Chart-26
+project. Given a context of 128 code lines, LLMAO [16] trains       in Defects4J) and it is less efficient to diagnose each failed
+lightweight bidirectional adapters on top of LLMs to produce        test method separately, AGENT FL focuses on one failed test
+a suspiciousness score for each line. Wu et al. [15] prompts        class (i.e., the aggregation of the failed test methods in the
+ChatGPT with code and error logs, and instructs the model           same class) in each run, and the total number of runs is
+to identify the buggy lines. To assist developers from another      the number of failed test classes. The outputs of AGENT FL
+perspective, in this paper, we endow the LLMs with the ability      include the buggy location and the corresponding explanations,
+to automatically identify bugs in the entire software.              which consist of the following three parts: (i) the Top-1
+                                                                    Suspicious Method along with its reason for being buggy, (ii)
+C. LLM-driven agents & SOP                                          the suspicious Class, and (iii) other Suspicious Methods in the
+                                                                    class along with their reasons for being buggy.
+   Supported by the existing studies about human debugging
+behaviors [1], [18], we regard fault localization as a complex         Steps & Tasks. By mimicking the human debugging
+task, which is difficult to get desired results with only one       strategies [1], [18], AGENT FL models the fault localization
+LLM inference. Therefore, we inherited the design principles        process as an SOP which comprises three steps, including
+of LLM-driven agents and standard operating procedure (SOP)         (i) understanding the cause of the fault (Fault Comprehen-
+during the construction of AGENT FL.                                sion), (ii) browsing the relevant program elements (Codebase
+   LLM-driven agents are designed to solve complex tasks            Navigation), and (iii) validating the buggy location (Fault
+specified in natural language autonomously. Equipped with           Confirmation). In each step, AGENT FL tackles different tasks
+mechanisms including memory management [33], tool us-               (identified by ❶ - ❼ in Figure 1), e.g., the first step of fault
+age [34], and multi-agent communication [35], LLM-driven            comprehension involves the ❶ Test Behavior Analysis task and
+agents have been proposed to conduct various tasks such as          the ❷ Test Failure Analysis task.
+social behavior simulation [36], website tasks [37], and inter-        Agents. To specialize the LLMs to solve different tasks,
+active writing [33]. There are also LLM-driven agents such          AGENT FL incorporates four different LLM-driven agents (i.e.,
+as AutoGPT [38] and BabyAGI [39] that aim at conducting             Test Code Reviewer, Source Code Reviewer, Software Ar-
+arbitrary missions with user instructions. More recently, multi-    chitect, and Software Test Engineer), which enhance LLMs
+agent systems such as MetaGPT [40] and ChatDev [41] have            with task-specific knowledge and external capabilities (e.g.,
+started to move towards automated software development.             program analysis component). In particular, the Test Code
+   SOP is a concept from the real-world engineering domain,         Reviewer agent (used in Task 1) is designed for reviewing the
+for LLM-driven agents, SOP is a symbolic plan to make the           test code and summarizing the test behavior; the Source Code
+agents more controllable [40], [42]. For example, in MetaGPT,       Reviewer agent (used in Task 4) is designed for writing high-
+employed agents (e.g., product managers and engineers) work         quality code comments; the Software Architect agent (used in
+together by following a predefined and streamlined workflow,        Tasks 3&5) is designed for software architecture and adept
+where all intermediate outputs (e.g., the document and code)        at finding areas of the program that may be problematic;
+are structured and standardized. SOP plays a vital role in task     the Software Test Engineer agent (used in Tasks 2&6&7) is
+decomposition and effective coordination, which ensures the         designed for all the tasks associated with analyzing and vali-
+robustness of the multi-agent system.                               dating the test failures. Each LLM-driven agent is customized
+                                                                    by prompting LLMs with specific system instructions and
+                       III. A PPROACH
+                                                                    enabling LLMs to use external components. In particular, the
+   AGENT FL is a multi-agent fault localization system that         specific system instruction is typically provided at the start of
+localizes buggy methods for the given project in three steps.       the interaction to serve as the initial context or instruction for
+We first introduce an overview of AGENT FL and then explain         the LLMs. Due to space constraints, we present the system
+the detailed steps respectively.                                    instruction of the Software Test Engineer agent below:
+ You are a Software Test Engineer. We share a common interest in                                                          Agents
+ collaborating to successfully locate the buggy code that causes the                  Software Test Engineer                             Test Code Reviewer
+ test class to fail. Your main responsibilities include examining the
+                                                                                        Software Architect                              Source Code Reviewer
+ information of the failed tests to analyze the possible causes of the
+ test failures, and determining the method that needs to be fixed.
+                                                                                               Steps                                                               Inputs
+ To locate the bug, you must write a response that appropriately                1       Test Behavior Analysis
+ solves the requested instruction based on your expertise.                           Prompt                                            Test Class
+                                                                                                         Test Code                     Test Case
+                                                                              Failed Tests Test Code      Analysis                                                                                                      ···
+                                                                                                            Test                            ···
+   Components. The LLMs alone fall short in limited context                      Test Utility Code       Behavior
+length and unstable performance of hallucination [43]. There-
+                                                                                2       Test Failure Analysis
+fore, AGENT FL incorporates multiple components to enhance                            Prompt                                                            Components
+LLM-driven agents with memorization, reasoning, and tool                      Failed Tests Test Infos          Possible
+                                                                                                               Causes                                      Program Analysis
+usage capabilities. In other words, with the LLM as the brain                       Test Behavior
+
+of each agent, the other components provide LLMs with                                 Fault Comprehension                                               Instrumentation
+external capabilities of better utilizing debugging contexts.                   3       Search Suspicious Class
+In particular, the Program Analysis component is driven by                           Prompt                                                               Static Analysis
+                                                                                                        Source Code
+lightweight Instrumentation and Static Analysis, which equips                 Failed Tests Test Infos     Analysis
+                                                                                  Possible Causes        Suspicious
+the agents with the tools (Test/Source Code Analysis) to                         Covered Classes           Class
+
+perceive the test execution process; the components of Result                   4       Method Doc Enhancement                                                              LLM
+
+Parser, State Storage, and Prompt Generator enable a loop                             Prompt
+
+to drive the pipeline operations of multiple tasks. Specifically,              Class Name Class Doc           Enhanced
+                                                                                                             Method Doc                          Result                                              State
+the Prompt Generator collects material from the State Storage                       Methods Code                                                 Parser                                             Storage
+
+and generates the prompt according to a template predefined                     5        Find Related Methods
+for each task. After the agent returns the response, the Result                       Prompt
+                                                                                                                                                                       Prompt
+                                                                               Class Name Class Doc            Related                                                Generator
+Parser transforms the result into formatted data and sends it                   Covered Methods
+                                                                                                               Methods
+to the State Storage, where the result will be utilized in the                  （Doc Enhanced）
+
+downstream steps. Moreover, the data in State Storage can also                        Codebase Navigation
+                                                                                                                                                                 Results
+come from the Program Analysis component when the agent                         6       Method Review (Multiple)
+                                                                                      Prompt                                           Top-1 Method                                            Class
+calls a tool.                                                                 Failed Tests Test Infos                                      method1( ) is                                      ClassA
+                                                                                   Possible Causes
+                                                                                                             Suspicious
+                                                                                                                                         buggy, because ...                                  because ...
+                                                                                                              Methods
+                                                                              Class Info Method Info
+B. Fault Comprehension                                                         Related Method Code
+                                                                                                                                                Suspicious Methods
+   Aim. To guide the whole localization process, AGENT FL                       7        Get Top-1 Method
+                                                                                      Prompt                                                Method Full Name                                  Reason
+starts with the Fault Comprehension step to better understand                Possible Causes Test Class        Top-1                     com.google.JavaClassA::method1()               this method is suspicious ...
+
+
+
+the cause of the fault before starting to find it. Our intuition                Buggy Method Code
+                                                                                                               Method                    com.google.JavaClassB$InnerClass::method2() this method is suspicious ...
+
+
+                                                                                                                                                             ···                                   ···
+is that compared to direct reasoning, the “understanding-
+                                                                                       Fault Confirmation
+reasoning” manner bridges the test failure information and the
+buggy source code with intermediate thought, which is more                                          Fig. 1: Overview of AGENT FL.
+akin to the human mindset. Specifically, the Fault Comprehen-
+sion step consists of two tasks. Provided with the test code, the                                                   Test Method
+❶ Test Behavior Analysis task prompts the LLM to describe in                1 public void testNoThisInference() {
+                                                                            2   JSType thisType = createNullableType(OBJECT_TYPE);
+detail the behavior of the failed test cases. In the ❷ Test Failure         3   assumingThisType(thisType);
+                                                                            4   inFunction (“var out = 3; if (goog.isNull(this)) out = this;"); // error
+Analysis task, the test behavior we obtained before together                5   verify("out", createUnionType(OBJECT_TYPE, NUMBER_TYPE));
+with other test failure information (including error stack trace,           6 }
+
+test code, and test output) encourages the LLM to list the
+                                                                                                                Test Utility Methods
+possible causes of the fault. As the intermediate thought, the
+                                                                            1 private void inFunction (String js) {
+possible causes will inform the subsequent navigation step.                 2
+                                                                            3
+                                                                                 // Parse the body of the function.
+                                                                                 String thisBlock = assumedThisType == null
+   Challenge. Although the attendance of test code (i.e.,                   4        ? "" : "/** @this {" + assumedThisType + "} */";
+                                                                            ···
+the test method executed during each unit test) has been                    34 }
+proved helpful in LLM-based FL [15], we observe that the
+LLMs may still suffer from the limited information in the                                      Fig. 2: Example from Closure-19.
+test method. Figure 2 shows an example derived from bug
+                                                                         only the test method. In particular, test utility methods are
+Closure-19 in Defects4J-V1.2.0 [19], in this case, the test
+                                                                         very prevalent in practice, e.g., each test method calls 4.93
+testNoThisInference failed when a test utility method
+                                                                         other test utility methods on average in the Defect4J-V1.2.0
+inFunction() is called at line 4. However, since the
+                                                                         benchmark. Therefore, the information in the utility methods
+developers kept all the detailed test logic in test utility methods
+                                                                         can be potentially helpful for comprehensively comprehending
+that are called by the test method, the LLMs may find it
+                                                                         the test failure.
+difficult to comprehend the complete test behavior through
+                                         Method Call Trace                                             Utility Code of the prompt in Test Behavior Analysis task.
+                      - org.jfree.chart.LegendItemCollection getItemCount() int
+                      - org.jfree.chart.util.AbstractObjectList init(int,String) int                   C. Codebase Navigation
+                                                  ......
+  Test Class                                                                                 Class        Aim. Provided with the comprehension of the possible
+  Test Case 1          Instrumentation          Trace 1                Covered
+                                                                       Classes
+                                                                                           Method 1    causes in the last step, the Codebase Navigation step intends
+                                                                                           Method 2    to identify all related methods from the entire codebase. Our
+                       Instrumentation          Trace 2                Covered
+  Test Case 2                                                          Classes
+                                                                                               ···
+                                                                                                       intuition is that given the test failure information and the
+      ···                                        Class                                                 possible causes generated from task ❷, ChatGPT can gradually
+                                             Intersection
+                                                                                                       browse the entire codebase from global to local and identify
+                         Common                                Static                      Extracted
+                          Classes                             Analysis                      Classes
+                                                                                                       the program entities that may be responsible for the test
+                                        Program Analysis                                               failure. Specifically, we start with two tasks for the Codebase
+                                                                                                       Navigation step. The ❸ Search Suspicious Class task intends
+                              Class                     Doc            Name                            to localize the most suspicious class among all covered classes
+                            Method 1                                                                   during a test execution process. After that, the ❺ Find Related
+                                                     Code      Doc       Name
+                                                                                                       Methods task aims to filter out all the methods that may relate
+            Fig. 3: The process of the Program Analysis.                                               to the bug within the suspicious class. To depict the role of
+                                                                                                       methods in a class, the information about the suspicious class
+                                    Method Doc Enhancement                                             is also included in the prompt.
+         Method Name                                 Method Documentation
+                                                                                                          Challenge. Nevertheless, the above design still faces three
+  isRemovableVar(Var)
+                                  Traverses the root, removing all unused variables. Multiple          challenges: (1) Due to the possible invalidity or weakness
+  process(Node,Node)
+                                  traversals may occur to ensure all unused variables are removed.
+                                  Removes any vars in the scope that were not referenced. Removes
+                                                                                                       of LLMs under long contexts [17], a strategy should be
+  removeUnreferencedVars()
+                                  any assignments to those variables as well.                          taken for leading the model to concentrate on critical in-
+                ...                                              ...
+                                                                                                       formation during the browsing process; (2) An excessive
+                                                                                                       number of covered classes can still result in LLM distraction
+        Method Name                             Enhanced Method Documentation
+  isRemovableVar(Var)             This method checks if a variable is removable.                       and context length issues, for example, the failed integration
+                                  This method traverses the root, removing all unused variables.       test testSingletonGetter1 of bug Closure-36 covers
+                                  Multiple traversals may occur to ensure all unused variables are
+  process(Node,Node)
+                                  removed. This method calls another method “process()” to do          hundreds of methods in 208 classes; (3) The ChatGPT model
+                                  more specific tasks.
+                                  This method removes any variables in the scope that were not         struggles to identify related methods directly with the existing
+  removeUnreferencedVars()
+                                  referenced and any assignments to those variables.
+                                                                                                       documents due to the absence of some method comments and
+                ...                                              ...
+                                                                                                       the “function nested” problem. The upper side of Figure 4
+   Fig. 4: An example of method document enhancement.                                                  shows an example of the original method comments in bug
+                                                                                                       Closure-1. In the first row, the absence of the comment of
+   Strategy. To track the complete test execution behavior
+                                                                                                       method isRemovableVar(Var) prevents ChatGPT from
+from the test utility methods, we adopt the Test Behav-
+                                                                                                       better understanding its functionality. In the second row,
+ior Tracking strategy which equips the LLMs with the
+                                                                                                       although the comment of process(Node,Node) says it
+capability of program analysis. Specifically, the Test Code
+                                                                                                       “removes all unused variables”, this method accomplishes
+Reviewer agent in task ❶ utilizes the Test Code Analysis
+                                                                                                       the functionality by calling other methods. We refer to this
+tool to fill the prompt with the Test Utility Code before
+                                                                                                       inconsistency of comment and function of a method as the
+it is asked to summarize the test behavior. The more de-
+                                                                                                       “function nested” problem, which could mislead the LLMs to
+tailed process of Test Code Analysis in the Program Anal-
+                                                                                                       focus on irrelevant methods.
+ysis component is demonstrated in Figure 3. Firstly, the
+                                                                                                          Strategy. To alleviate the aforementioned challenges, we
+tool applies lightweight Instrumentation for each failed test
+                                                                                                       adopt a series of heuristic strategies: (1) Considering that the
+case to record the Method Call Trace during test code
+                                                                                                       LLMs can associate the function of a class/method with the
+execution, and parses the trace to register the Covered
+                                                                                                       function that may cause the bug through the proximity of
+Classes, each Class comprised of the full class name (e.g.,
+                                                                                                       natural language description, we adopt a Document-Guided
+com.google.jscomp.TypeInferenceTest) and a
+                                                                                                       Search strategy to first search for suspicious classes and
+signature list (e.g., init(int,String) int) of the cov-
+                                                                                                       then find the related methods. Specifically, in task ❸, we
+ered test utility methods in that class. Secondly, a Class In-
+                                                                                                       extract the covered classes by source code analysis (Figure
+tersection operation is conducted to keep the common classes
+                                                                                                       3), and prompt ChatGPT to select a single class from a
+and methods that are covered by all failed test cases, we refer
+                                                                                                       markdown format table built with names and documentation
+to the output as Common Classes. Finally, the Static Analysis
+                                                                                                       of the covered classes. After localizing the suspicious class,
+further augments the classes and methods with the document,
+                                                                                                       the ❺ task filters out all the methods that may relate to the
+name, and code from the codebase. As the output of the tool,
+                                                                                                       bug according to the names and comments of the covered
+Extracted Classes contains information about both the covered
+                                                                                                       methods. (2) To address the issue of an excessive number of
+test class and the covered test utility methods, which is then
+                                                                                                       covered classes, we draw inspiration from an observation in
+reserved in the State Storage and used to construct the Test
+                                                                                                       test coverage. Specifically, we have observed that the fixing
+behavior tends to occur more frequently in classes that ex-          One or more tests in the test class [TEST CLASS] failed:
+hibit higher method-level coverage (for further details, please      Failed tests: [FAILED TESTS]
+refer to Section IV-D). Based on this insight, we effectively        The method [METHOD NAME] may be problematic.
+                                                                     Detailed information is listed below:
+mitigate the problem by selectively reducing the number of           [TEST INFOS]
+covered classes while ensuring that the performance remains          Possible Causes: [POSSIBLE CAUSES],
+unaffected, which is achieved by retaining only the Top-N            Class of the Suspicious Method: [CLASS NAME]
+classes that possess relatively high method-level coverage. (3)      Documentation of the Class: [CLASS DOC]
+For the documentation inconsistency, our insight is that as          Suspicious Method Full Name: [METHOD NAME]
+                                                                     Suspicious Method Comment: [METHOD DOC]
+the LLMs have demonstrated powerful capabilities in code             Suspicious Method Code: [METHOD CODE]
+summarization [12], [44], the Source Code Reviewer agent can         As a Software Test Engineer, please carefully examine the code
+be hired to fix the problematic documentation. Therefore, we         of the method [METHOD NAME] and determine if this method
+further design the ❹ Method Doc Enhancement task to handle           is the buggy location. You can return TRUE with the reason or
+the above problem. Before finding related methods, the source        only FALSE.
+code and the original comments of all covered methods in the
+suspicious class are listed in the prompt, the agent is then          After the task ❻, multiple methods can be regarded as
+required to analyze the method call relationship to generate a      suspicious. Compared to spectrum-based and learning-based
+new comment for each method. The enhanced documentation             FL, AGENT FL does not generate suspicious values for ranking
+can be seen from the bottom side of Figure 4. In the first          the suspicious methods. For usability and evaluation purposes,
+row, the task fills in the missing comment. In the second row,      we further design a ❼ Get Top-1 Method task in the last, where
+the task declares the callee method process() to alleviate          the Software Test Engineer agent retrospectively analyzes the
+the “function nested” problem, which provides more accurate         buggy methods in all failed test classes to determine the most
+information for the upcoming Find Related Methods task.             probable fault location. In particular, if there is only one buggy
+                                                                    method, the task takes it directly as the top-1 method.
+                                                                                      IV. E XPERIMENT D ESIGN
+                                                                    A. Research Questions
+                                                                      To assess the effectiveness of AGENT FL, we propose to
+                                                                    answer the following research questions:
+D. Fault Confirmation                                               • RQ1: What is the performance of AGENT FL in method-
+                                                                      level fault localization? This RQ aims to build a new
+                                                                      effectiveness baseline for LLM-based method-level fault
+                                                                      localization.
+   Aim. In the previous steps, AGENT FL has only utilized           • RQ2: How does our design choices affect the perfor-
+the documentation and coverage information to search for the          mance of AGENT FL? This RQ could help measure the
+related methods in the codebase, which may not be enough              contribution of different components in AGENT FL, and thus
+to validate the exact fault location. Therefore, we design the        inspire future studies.
+Fault Confirmation step to aggregate all useful information and     • RQ3: Can AGENT FL help developers in practice? This
+make a final decision on which method is buggy. Specifically,         RQ conducts a user study to help understand how useful
+we build the ❻ Method Review task, where the Software                 AGENT FL could be in practice.
+Test Engineer agent examines the source code of the related
+methods and integrates all useful information to recognize the      B. Benchmark
+buggy methods.                                                         In line with most existing fault localization work, we
+   Challenge. In order to review all related methods, a straight-   include the two versions of the widely-used benchmarks
+forward approach is to fill all the source codes in a single        Defects4J [19] (i.e., Defects4J-V1.2.0 and Defects4J-V2.0.0)
+request and require the model to select the most suspicious         for evaluation. In particular, Defects4J-V1.2.0 consists of 395
+method. Nevertheless, we found in practice that as the volume       bugs from 6 real-world Java projects (as shown in Table I), on
+of code in the context increases, it is more difficult for the      which we compare AGENT FL against all the studied baselines.
+model to focus on the fault location, resulting in a significant    In addition, Defects4J-V2.0.0 consists of additional 226 bugs
+performance decrease. Therefore, a strategy should be taken         from extra 9 Java projects, on which we further evaluate the
+to validate all of the suspicious methods while also ensuring       generalization capability of studied techniques in the cross-
+the model’s accuracy.                                               project prediction setting in line with GRACE [11].
+
+   Strategy. To address the above problem, we adopt a Multi-        C. Baselines
+Round Dialogue strategy in task ❻, enabling the model to              LLM-based Baselines. We include two existing LLM-
+analyze one related method at a time. The prompt template of        based FL techniques (i.e., LLMAO [16] and Wu et al. [15])
+the Method Review task is illustrated below:                        as baselines. However, both techniques are only originally
+applied for fault localization within a small context, i.e., LL-                      Chart                    250          Closure
+                                                                    120          Covered Classes Amount                 Covered Classes Amount
+MAO [16] trains lightweight adapters on top of CodeGen [31]                      Rank of Buggy Class                    Rank of Buggy Class
+                                                                    100                                        200
+to produce a suspicious score of each line within the given 128
+code lines, and Wu et al. [15] require ChatGPT to analyze the        80                                        150
+buggy line in a method with well-crafted prompts. Therefore,         60
+to adapt these techniques to project-level fault localization                                                  100
+                                                                     40
+(i.e., localizing the buggy method from the whole code base),                                                  50
+we construct two variants of them (i.e., LLMAOOchiai and             20
+ChatGPTOchiai ), which first leverage the state-of-the-art SBFL      01      6       11    16     21      26    01   19 37 55 73 91 109 127
+technique Ochiai [20] to reduce the context size and then                             Bug ID                                Bug ID
+apply these techniques for fault localization. In particular, for   Fig. 5: Method level coverage rank. For each bug, the green
+ChatGPTOchiai , we apply a minimal change to the approach           bar is the average coverage rank of all changed classes, and
+of Wu et al. by retaining their prompt format except that           the orange bar is the amount of all covered classes. We show
+the command is changed from finding buggy lines to judging          2 out of 6 projects in Defects4J-V1.2.0 due to space limit.
+the correctness of the method, and ChatGPT is prompted to             TABLE I: Information of Defects4J-V1.2.0 benchmark.
+validate the top 20 suspicious methods localized by Ochiai. For       ID       Name                      #Bug LOC(k)
+LLMAOOchiai , given the top 20 suspicious methods localized           Chart    JFreeChart                   26        96
+by Ochiai, we first use LLMAO to predict a suspicious value           Lang     Apache commons-lang          65        22
+for each line in a method, then each method is re-ranked              Math     Apache commons-math         106        85
+according to the value of its most suspicious line.                   Time     Joda-Time                    27        28
+   Statistic-based Baselines. We include the SBFL tech-               Mockito Mockito framework             38        23
+nique Ochiai [20], FLUCCS [8] based on machine learning,              Closure Google Closure compiler      133        90
+DeepFL [10] based on deep learning, and GRACE [11] based
+on graph neural network. For a fair comparison, we follow           E. Metrics
+GRACE [11] to exclude mutation-related features in DeepFL              Following prior studies [8], [10], [11], [28], we assess the
+and keep the features related to source code and coverage, the      effectiveness of AGENT FL based on the Top-N (N=1,3,5)
+modified version is named DeepFLcov .                               metric. Top-N computes the number of bugs that have at least
+                                                                    one buggy element localized within the first N positions in
+D. Implementation                                                   the ranked list. It is easy to calculate the Top-1 value with
+   We implement AGENT FL in Python based on the state-of-           the design of Get Top-1 Method task in AGENT FL. However,
+the-art multi-agent framework ChatDev [41], we use the gpt-         since the ChatGPT model is a master at judging true or false
+3.5-turbo-16k-0613 model of the ChatGPT family as the en-           rather than calculating suspicious values, it is non-trivial to get
+gine of AGENT FL. For dynamic program analysis, we imple-           Top-3 and Top-5. To alleviate the problem, we compromise
+ment a lightweight JVM agent by the java.lang.instrument [45]       by keeping a list of all the methods that AGENT FL considers
+package, and modify the framework of Defects4J to sup-              suspicious in chronological order and calculating Top-N with
+port dynamic program instrumentation. To keep the program           the rank of the buggy methods in the list.
+analysis focused on test/source code, we allow the tool to
+                                                                                                V. E VALUATION
+instrument the Java bytecode files in the specified folder. For
+static program analysis, we use tree-sitter [46] for code parsing   A. RQ1: Localization Performance
+and program element extraction.                                        Compared to LLM-based baselines. We first compare
+   We set the following alterable parameters to regulate the        AGENT FL with ChatGPTOchiai and LLMAOOchiai that both
+behavior of AGENT FL. Among test information, the maximum           use LLMs to drive fault localization, the results are shown in
+token length of the test output log is 200. The token length of     Table II. Overall, AGENT FL achieves reasonable performance:
+class and method documentation is limited to 100. To deal with      it can localize 157 out of 395 bugs within Top-1, 28 more
+the rare circumstances of overwhelming test cases, we keep no       than LLMAOOchiai and 36 more than ChatGPTOchiai . When
+more than 5 failed test cases for each test class, which barely     considering the Top-1 metric on the individual project, we
+impairs the performance of AGENT FL in practice.                    observe that AGENT FL significantly outperforms the other
+   For covered class reduction (introduced in Section III-C),       two techniques on nearly every project except Closure, where
+we investigate the method-level coverage rank of the class          LLMAOOchiai localizes 18 more methods within Top-1. In
+changed by developers among all covered classes. Specifically,      terms of Top-3 and Top-5 metrics, we found that although
+the method-level
+         PN       coverage rate of class c is calculated with       AGENT FL outperforms ChatGPTOchiai , it failed to localize
+rc = ( i=1 Iyi )/N , where Iyi is an function to indicate           more bugs than LLMAOOchiai .
+whether method yi is covered. Based on the results shown in            The above results can be explained by the different mech-
+Figure 5, we retain classes that fall in the top-50 method-level    anisms of LLMAOOchiai and AGENT FL. The LLMAOOchiai
+coverage rates, which ensures the buggy class is preserved in       predicts a suspicious value for each method that has been pre-
+over 98% of the cases.                                              localized by Ochiai, which is more talented at ranking tasks
+TABLE II: Comparision with LLM-based baselines on                                  AGENTFL                            DeepFL𝒄𝒐𝒗
+Defects4J-V1.2.0.                                                                                      8
+                                                                                             34                  36
+     Project   # Bugs   Techniques      Top1   Top3   Top5
+                        ChatGPTOchiai     11     15     15                                             82
+                                                                                                  33        50
+     Chart       26     LLMAOOchiai       11     15     19
+                         AGENT FL         16     18     19
+                                                                                                       27
+                        ChatGPTOchiai     29     35     36
+     Lang        65     LLMAOOchiai       31     49     54
+                         AGENT FL         44     45     45                                         GRACE
+                        ChatGPTOchiai     38     55     55                 Fig. 6: Overlap results on Defects4J-V1.2.0.
+     Math       106     LLMAOOchiai       30     59     70
+                                                                   example, the average number of classes covered by the bugs
+                         AGENT FL         49     60     61
+                        ChatGPTOchiai      9     11     12
+                                                                   in Closure is 107.7, which is extremely larger than those in
+     Time        27     LLMAOOchiai        7     13     14         Lang (2.3) and Chart (27.5). In this case, it is more difficult
+                         AGENT FL         11     13     13         for AGENT FL to recognize the suspicious class at once among
+                        ChatGPTOchiai     12     16     16         a large number of covered classes. (3) Since AGENT FL is
+     Mockito     38     LLMAOOchiai        8     19     26         designed to validate rather than rank the methods, the number
+                         AGENT FL         13     14     14
+                                                                   of suspicious methods in the result of AGENT FL is relatively
+                        ChatGPTOchiai     22     36     38
+     Closure    133     LLMAOOchiai       42     57     70         small. Among all 395 bugs, there are 319 (374) cases where
+                         AGENT FL         24     33     35         the number of suspicious methods in the result is less than 3
+                        ChatGPTOchiai    121    168    172         (5). Consequently, the increase in the number of bugs localized
+     Overall    395     LLMAOOchiai      129    212    253         by AGENT FL becomes progressively smaller from Top-1 to
+                         AGENT FL        157    183    187         Top-3 (157 to 183) and then Top-3 to Top-5 (183 to 187).
+than the ChatGPT model. However, since AGENT FL behaves               The last row of Table III presents the result without project
+more like a human by browsing the entire codebase without          Closure, AGENT FL reaches a similar level as GRACE in
+any auxiliary localization results, the limited search space and   terms of Top-1 and outperforms the other three techniques
+the ranking issue [47] of the LLMs hinder it from achieving        on each project by localizing 67 more bugs than Ochiai, 15
+better performance in Top-3 and Top-5 metrics.                     more than FLUCCS, 21 more than DeepFLcov and only 12
+                                                                   less than GRACE. For cross-project evaluation, we follow Lou
+   Compared to statistic-based baselines. To investigate how
+                                                                   et al. [11] to evaluate AGENT FL against other statistic-based
+AGENT FL performs against the statistic-based techniques,
+                                                                   approaches on 226 extra bugs in Defects4J-V2.0.0, the result in
+we select four techniques based on different methodologies:
+                                                                   Table IV shows that AGENT FL significantly outperforms most
+FLUCCS [8] (machine learning), DeepFLcov [10] (multi-
+                                                                   of the other approaches by localizing 35 more bugs within Top-
+layer perception), GRACE [11] (graph neural network), and
+                                                                   1 than DeepFLcov , 21 more than FLUCCS, and 46 more than
+Ochiai [20] (suspicious formula). From Table III, we observe
+                                                                   Ochiai. AGENT FL gains comparable performance to GRACE
+that as a first attempt to use the LLMs for method-level fault
+                                                                   with only 7 fewer bugs localized in the top.
+localization, AGENT FL is not yet able to surpass existing
+                                                                      We also investigated the overlaps among the bugs localized
+approaches entirely. Overall, AGENT FL localizes 157 of 395
+                                                                   within Top-1 by different approaches on the Defects4J-V1.2.0
+bugs within Top-1, 77 more than Ochiai, 3 less than FLUCCS,
+                                                                   benchmark, and the results are shown in Figure 6. The figure
+19 less than DeepFLcov , and 35 less than GRACE.
+                                                                   illustrates the complementarity of AGENT FL with existing
+   However, when focusing on the results of individual             approaches on localizing different bugs. Specifically, 34 bugs
+projects, we find that AGENT FL has achieved competi-              can be uniquely localized within Top-1 by AGENT FL while
+tive performance in all software projects except Closure.          the numbers for DeepFLcov and GRACE are 36 and 27
+To explain this, we scrutinized every bug that AGENT FL            respectively.
+failed to localize while other approaches were able to
+make it. We attribute the prominent weak effectiveness of          Answer to RQ1: AGENT FL can effectively localize the bugs
+AGENT FL on Closure to three aspects: (1) Some bugs                in Defects4J, which outperforms the other LLM-based ap-
+in Closure possess very similar characteristics. For in-           proaches and shows complementarity with existing statistic-
+stance, bugs Closure-18 and Closure-31 have failed test            based techniques in terms of the Top-1 metric.
+cases with similar purposes (testDependencySorting
+and testDependencySortingWhitespaceMode), and                      B. RQ2: Ablation Study
+even the same buggy method parseInputs(). In these                   For this research question, we aim to investigate the contri-
+cases, the learning-based techniques learn much richer in-         butions of different design choices to AGENT FL. To this end,
+project knowledge than AGENT FL as they perform within-            we separately remove the Test Behavior Analysis task, Test
+project prediction with the leave-one-out training strategy.       Failure Analysis task, and Method Doc Enhancement task from
+AGENT FL, however, needs to localize a bug from scratch            AGENT FL, and retain the other tasks that need to maintain the
+based on more generalized knowledge from ChatGPT. (2) The          proper functionality of the system. Note that after removing
+tests in Closure tend to cover more program elements. For          the Test Failure Analysis task, the Test Behavior Analysis task
+                               TABLE III: Comparision with statistic-based baselines on Defects4J-V1.2.0.
+                                       AGENT FL              GRACE            DeepFLcov                FLUCCS               Ochiai
+       Project     # Bugs
+                                Top1     Top3 Top5    Top1    Top3 Top5   Top1 Top3 Top5        Top1    Top3 Top5    Top1   Top3 Top5
+     Chart                26      16       18    19     14      20   22     12     18    21       15      19   16       6     14    15
+     Lang                 65      44       45    45     42      54   57     43     53    56       40      53   55      24     44    50
+     Math                106      49       60    61     61      78   89     39     68    80       48      77   83      23     52    62
+     Time                 27      11       13    13     11      14   19      9     16    18        8      15   18       6     11    13
+     Mockito              38      13       14    14     17      24   26      9     15    21        7      19   22       7     14    18
+     Closure             133      24       33    35     47      70   81     64     86    97       42      66   77      14     30    38
+     Overall             395     157      183   187    192     260  294    176    256   293      160     249  271      80    165   196
+     w/o Closure         262     133      150   152    145     190  213    112    170   196      118     183  194      66    135   158
+          TABLE IV: Results on Defects4J-V2.0.0.                                        TABLE V: Result of ablation study.
+     Project     # Bugs        Techniques    Top1     Top3    Top5         Project    # Bugs   Techniques                 Top1   Top3   Top5
+                               Ochiai          32       74      93                             w/o TestBehaviorAnalysis    148    174    175
+                                                                                               w/o TestFailureAnalysis     125    148    152
+                               FLUCCS          57       97     119          Overall    395
+                                                                                               w/o MethodDocEnhancement    133    156    160
+     Overall       226         DeepFLcov       43       89     112                              AGENT FL                   157    183    187
+                               GRACE           85      119     140
+                                AGENT FL       78       98     103        C. RQ3: User study
+is also muted, since the results of the former task participate              In this RQ, we intend to evaluate to what extent can
+in the construction of the latter task’s prompt.                          AGENT FL help developers localize bugs in practice. Kochhar
+                                                                          et al. [49] found that 85% of the practitioners strongly agreed
+   The performances of the variants of AGENT FL are shown in              that the ability to provide rationale is important, with one of
+Table V. We notice that when the Test Failure Analysis task is            the respondents stating “because to make a decision about
+discarded, the efficacy of AGENT FL decreases sharply, with               bug fixing I want to exactly know why the automated tool
+the number of bugs localized within Top-1 decreasing from                 ‘thinks’ that the code has a bug”. Therefore, merely relying
+157 to 125. This indicates that it is a finer choice to offer             on the Top-N metric may not be enough to reflect the usability
+ChatGPT time to think about the root causes of the test failure           of AGENT FL, since it not only lists the suspicious methods
+and take the analysis result as intermediate data to guide the            but also provides the user with additional natural language
+subsequent localization process. This pattern is more in line             interpretations. To investigate the usability of AGENT FL, we
+with the debugging behavior of developers and shares the idea             re-evaluate AGENT FL through the following user study: (1)
+of chain-of-thought [48]. Similarly, when the Method Doc En-              Participant Selection. We recruited five Ph.D. students each of
+hancement task is removed, the Top-1 result drops significantly           whom has more than five years of programming experience
+from 157 to 133. While this phenomenon emphasizes the                     and does not know about the Defects4J benchmark before;
+importance of higher quality documentation for AGENT FL to                (2) Data Preparation. By excluding 98 out of 395 bugs
+more accurately localize the buggy methods, it also calls on the          where AGENT FL did not find any suspicious methods, we
+developers to write better documentation during production,               constructed 297 bug-suggestion pairs. The suggestion for each
+as the human wisdom preserved in documents can conversely                 bug contains the top-3 suspicious methods and the corre-
+support the development and maintenance of software.                      sponding rationales generated by AGENT FL; (3) Localization
+                                                                          Procedure. We ask each participant to localize the buggy
+   Surprisingly, when we abandon the Test Behavior Analysis               method from the codebase with the test failure information
+task, the performance of AGENT FL declines marginally from                (including failed tests, error stack traces, and test outputs) and
+157 to 148 on the Top-1 metric. To deeply understand the                  the suggestions provided by AGENT FL. The participants are
+reasons for this phenomenon, we analyze the characteristics               allowed to use web searches if they are not familiar with any
+of utility methods corresponding to failed test cases. We find            program logic. Given that the previous study shows that a
+that although each test method calls 4.93 other utility methods           practitioner usually takes about 11 minutes to localize a bug
+on average, these utility methods are generally shared by                 with an FL tool [50], we set the time limit to 15 minutes,
+multiple test methods to handle common operations such as                 providing the users with sufficient time to finish the task; (4)
+test initialization. This means that the code of the test method          Results Collection. Finally, for each bug-suggestion pair, we
+may already carry most of the information needed by the                   regard AGENT FL as helpful if the user successfully localizes
+ChatGPT to understand the behavior of the test. Nonetheless,              the buggy method within the specified time.
+the fact of performance gain still emphasizes the potential of               The result of our user study is shown in Figure 7, from
+other sources of information than just the test code.                     which we observe that with the help of AGENT FL, devel-
+                                                                          opers can consistently localize more bugs in all the projects
+                                                                          compared with the vanilla AGENT FL. Two most significant
+Answer to RQ2: The Test Behavior Analysis, Test Failure                   breakthroughs occur in projects Math and Closure, where the
+Analysis, and Method Doc Enhancement tasks are useful to                  numbers of localized bugs in terms of the Top-1 (Top-3) results
+underpin the effectiveness of AGENT FL. The contribution of               are improved by 19 (8) and 29 (20), respectively. To under-
+Test Behavior Analysis appears to be relatively small.                    stand why participants achieved better localization results, we
+           Number of Localized Bugs     Number of incorrect predictions
+              1618                                                                                             CASE 1: Lang 42
+  Chart          20                                                                             Suspicious Method: escapeHtml()
+                          44
+                          45 51
+  Lang                                                                                          Rationale: The test case expects "&#119650;", but the value
+                             49 60                                                AGENTFL       returned by this method is "&#55348;&#57186;". This method
+  Math                             68                                                           did not escape the high unicode character correctly.
+            1113
+  Time         16          Top-1                                                                Buggy Method: escape()
+             13
+              14           Top-3                                                                Bug Report: StringEscapeUtils.escapeHtml incorrectly
+Mockito        15          Human                                                  Developer     converts unicode characters above U+00FFFF into 2
+                 24 33                                                                          characters.
+Closure                  53
+       0   10 20 30 40 50 60 70         1   2   3   4   5   6   7   8   9                                     CASE 2: Closure 1
+                Fig. 7: Evaluation results of RQ3.
+                                                                                                Suspicious Method: interpretAssigns()
+further investigate the cases where AGENT FL failed to suggest                                  Rationale: If this method is not correctly marking variables as
+                                                                                  AGENTFL       referenced or unreferenced, it can lead to incorrect removal of
+the buggy method at the top position. The statistics show                                       unused variables and cause the test failures ...
+that in more than 80% of the cases, the number of incorrect                                     Buggy Method: removeUnreferencedFunctionArgs()
+predictions (i.e., non-buggy methods that are ranked before                                     Bug Report: Function arguments should not be optimized
+buggy methods) produced by AGENT FL does not exceed 3,                            Developer     away, as this compromises the function's length property. The
+                                                                                                function's length property is essential to many techniques, such
+thus bringing less distraction to the users. Such results indicate                              as currying functions.
+that the explanations produced by AGENT FL could provide
+additional fault-related information for the developers and help                Fig. 8: Two use cases for bug Lang-42 and Closure-1.
+them better finish the fault localization task, demonstrating the                               Runtime(s)                                     Cost($)
+potential usability of AGENT FL in practice.                                  Chart
+   To help further understand the usability of AGENT FL in                    Lang
+practice, we demonstrate two cases in Figure 8. In the first
+                                                                              Math
+case, AGENT FL successfully understands the root cause of the
+bug Lang-42 (i.e., “did not escape the high unicode character                 Time
+correctly”). However, although the method escapeHtml has                    Mockito
+been mentioned in the bug report, the developer eventually                  Closure
+modified its callee method escape (i.e., the method called by                         0   200       400      600      800      0.0     0.2     0.4      0.6        0.8
+escapeHtml to handle with more specific character escaping                                         Fig. 9: Cost analysis results.
+logic) to fix the bug. Similarly, in the second case, AGENT FL
+                                                                            tokens with the model price (0.003 dollar per thousand tokens).
+still failed to localize the buggy method, but it correctly inter-
+                                                                            We observe that AGENT FL offers affordable cost in terms of
+preted the root cause of the bug Closure-1 and suggested the
+                                                                            time and money, which only takes an average of 0.074 dollars
+users to investigate the method interpretAssigns, which
+                                                                            and 97 seconds to localize a fault. In over 95% cases, the cost
+is exactly the caller of the buggy method. As shown in the
+                                                                            per bug would not exceed 0.2 dollars and 200 seconds. Such
+figure, the incorrect removal of unused variables happens in the
+                                                                            a low expense is expected to mitigate the expensive costs that
+method removeUnreferencedFunctionArgs, making
+                                                                            developers spend on FL.
+it the buggy location. For both cases, AGENT FL provides
+reasonable explanations despite its prediction (i.e., the caller            B. Threats to Validity
+methods of the buggy methods) is not exactly precise, which
+allows the user to “find the error location with a little extra                Internal. The main internal threat comes from the data
+work” (one participant left such a comment).                                leakage problem. As the training data of the gpt-3.5-turbo-
+                                                                            16k-0613 model is up to Sep 2021 while Defects4J-V1.2.0
+Answer to RQ3: AGENT FL exhibits relatively high usability                  is released in Feb 2018, the fault localization dataset may
+in practice with its few incorrect predictions and the provi-               have been used for model training. We mitigate this threat by
+sion of rationale.                                                          making sure that the input to ChatGPT does not include any
+                                                                            content related to the project name, human-written bug report,
+                         VI. D ISCUSSION                                    or bug ID. Moreover, the poor performance of the default
+                                                                            ChatGPT (i.e., the baseline ChatGPTOchiai ) also indicates
+A. Cost Analysis                                                            that ChatGPT has not simply memorized the answer, while
+   We assessed the performance of AGENT FL on the often-                    the significant improvement of AGENT FL (compared to the
+concerned issues of prices and time consumption. The results                default ChatGPT) shows the effectiveness of our approach.
+are demonstrated in Figure 9, where each sample is marked                      External. The main external threat to validity comes from
+with an orange dot. For runtime, we record the seconds                      our evaluation benchmark. The results obtained by AGENT FL
+required for AGENT FL to completely deal with each bug,                     may not generalize to other benchmarks. To address this,
+including test runs, program analysis, and ChatGPT inference.               we evaluate AGENT FL not only on the Defects4J-V1.2.0
+For cost, we calculate how many dollars AGENT FL needs to                   benchmark but also on Defects4J-V2.0.0 to demonstrate the
+localize each bug by multiplying the total number of consumed               generalizability.
+                           VII. C ONCLUSION                                        [15] Y. Wu, Z. Li, J. M. Zhang, M. Papadakis, M. Harman, and Y. Liu, “Large
+                                                                                        language models in fault localisation,” arXiv:2308.15276 [cs.SE], 2023.
+   In this paper, we introduce AGENT FL, a multi-agent system                      [16] A. H. Yang, R. Martins, C. L. Goues, and V. J. Hellendoorn, “Large
+based on ChatGPT for automated LLM-based FL. Inspired by                                language models for test-free fault localization,” in 2024 IEEE/ACM
+the human debugging actions, AGENT FL breaks the localiza-                              46th International Conference on Software Engineering (ICSE). Los
+                                                                                        Alamitos, CA, USA: IEEE Computer Society, Apr 2024, pp. 154–165.
+tion process into three steps (Fault Comprehension, Codebase                       [17] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and
+Navigation, and Fault Confirmation), and hires several agents                           P. Liang, “Lost in the Middle: How Language Models Use Long Con-
+in each step to handle specific tasks. The evaluation results                           texts,” Transactions of the Association for Computational Linguistics,
+                                                                                        vol. 12, pp. 157–173, 02 2024.
+on the Defects4J-V1.2.0 benchmark show that AGENT FL                               [18] M. Böhme, E. O. Soremekun, S. Chattopadhyay, E. Ugherughe, and
+outperforms other LLM-based approaches and can be used                                  A. Zeller, “Where is the bug and how is it fixed? an experiment with
+complementarily to the existing learning-based techniques. A                            practitioners,” in Proceedings of the 11th Joint Meeting on Foundations
+                                                                                        of Software Engineering. ACM, 2017, pp. 117–128.
+user study also demonstrates the potential of AGENT FL in                          [19] R. Just, D. Jalali, and M. D. Ernst, “Defects4J: A database of existing
+helping developers localize real-world software bugs. Finally,                          faults to enable controlled testing studies for java programs,” in Pro-
+the cost analysis shows that AGENT FL takes only an average                             ceedings of the 23rd International Symposium on Software Testing and
+                                                                                        Analysis. ACM, 2014, pp. 437–440.
+of 0.074 dollars and 97 seconds to localize 157 out of 395                         [20] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “An evaluation of sim-
+bugs within Top-1.                                                                      ilarity coefficients for software fault localization,” in 2006 12th Pacific
+                                                                                        Rim International Symposium on Dependable Computing (PRDC’06),
+                               R EFERENCES                                              2006, pp. 39–46.
+                                                                                   [21] W. E. Wong, V. Debroy, R. Gao, and Y. Li, “The dstar method for
+ [1] A. Alaboudi and T. D. LaToza, “An exploratory study of debugging                   effective software fault localization,” IEEE Transactions on Reliability,
+     episodes,” arXiv:2105.02162 [cs.SE], 2021.                                         vol. 63, no. 1, pp. 290–308, 2013.
+ [2] R. Abreu, P. Zoeteweij, and A. J. van Gemund, “Spectrum-based multi-          [22] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “On the accuracy of
+     ple fault localization,” in 2009 IEEE/ACM International Conference on              spectrum-based fault localization,” in Testing: Academic and Industrial
+     Automated Software Engineering, 2009, pp. 88–99.                                   Conference Practice and Research Techniques-MUTATION.                IEEE,
+ [3] M. Raselimo and B. Fischer, “Spectrum-based fault localization for                 2007, pp. 89–98.
+     context-free grammars,” in Proceedings of the 12th ACM SIGPLAN                [23] M. Tomáŝ, K. Martin, B. Lukáŝ, C. Jan, and K. Sanjeev, “Recurrent
+     International Conference on Software Language Engineering, ser. SLE                neural network based language model,” Interspeech 2010, p. 1045, 09
+     2019. New York, NY, USA: Association for Computing Machinery,                      2010.
+     2019, p. 15–28.                                                               [24] M.-C. Popescu, V. E. Balas, L. Perescu-Popescu, and N. Mastorakis,
+ [4] S. Reis, R. Abreu, and M. D’Amorim, “Demystifying the combination of               “Multilayer perceptron and neural networks,” WSEAS Trans. Cir. and
+     dynamic slicing and spectrum-based fault localization,” in Proceedings             Sys., vol. 8, no. 7, p. 579–588, jul 2009.
+     of the 28th International Joint Conference on Artificial Intelligence, ser.
+                                                                                   [25] Y. Li, R. Zemel, M. Brockschmidt, and D. Tarlow, “Gated graph
+     IJCAI’19. AAAI Press, 2019, p. 4760–4766.
+                                                                                        sequence neural networks,” in Proceedings of ICLR’16, April 2016.
+ [5] W. E. Wong, V. Debroy, R. Gao, and Y. Li, “The dstar method for
+                                                                                   [26] X. Li and L. Zhang, “Transforming programs and tests in tandem for
+     effective software fault localization,” IEEE Transactions on Reliability,
+                                                                                        fault localization,” Proc. ACM Program. Lang., vol. 1, no. OOPSLA,
+     vol. 63, no. 1, pp. 290–308, 2014.
+                                                                                        oct 2017.
+ [6] L. Zhang, M. Kim, and S. Khurshid, “Localizing failure-inducing
+     program edits based on spectrum information,” in 2011 27th IEEE               [27] D. Zou, J. Liang, Y. Xiong, M. D. Ernst, and L. Zhang, “An empirical
+     International Conference on Software Maintenance (ICSM), 2011, pp.                 study of fault localization families and their combinations,” IEEE
+     23–32.                                                                             Transactions on Software Engineering, vol. 47, no. 2, pp. 332–347, 2021.
+ [7] W. Zheng, D. Hu, and J. Wang, “Fault Localization Analysis Based              [28] J. Qian, X. Ju, and X. Chen, “Gnet4fl: Effective fault localization via
+     on Deep Neural Network,” Mathematical Problems in Engineering, vol.                graph convolutional neural network,” Automated Software Engg., vol. 30,
+     2016, pp. 1–11, April 2016.                                                        no. 2, apr 2023.
+ [8] J. Sohn and S. Yoo, “Fluccs: Using code and change metrics to                 [29] “Openai,” https://openai.com/, 2024.
+     improve fault localization,” in Proceedings of the 26th ACM SIGSOFT           [30] “Phind,” https://www.phind.com/, 2024.
+     International Symposium on Software Testing and Analysis, ser. ISSTA          [31] E. Nijkamp, B. Pang, H. Hayashi, L. Tu, H. Wang, Y. Zhou, S. Savarese,
+     2017. New York, NY, USA: Association for Computing Machinery,                      and C. Xiong, “Codegen: An open large language model for code with
+     2017, p. 273–283.                                                                  multi-turn program synthesis,” in The Eleventh International Conference
+ [9] Z. Zhang, Y. Lei, X. Mao, and P. Li, “Cnn-fl: An effective approach for            on Learning Representations, 2023.
+     localizing faults using convolutional neural networks,” in 2019 IEEE          [32] R. Li, L. B. allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou,
+     26th International Conference on Software Analysis, Evolution and                  M. Marone, C. Akiki, J. LI, J. Chim, Q. Liu, E. Zheltonozhskii, T. Y.
+     Reengineering (SANER). IEEE, 2019, pp. 445–455.                                    Zhuo, T. Wang, O. Dehaene, J. Lamy-Poirier, J. Monteiro, N. Gontier,
+[10] X. Li, W. Li, Y. Zhang, and L. Zhang, “Deepfl: Integrating multiple fault          M.-H. Yee, L. K. Umapathi, J. Zhu, B. Lipkin, M. Oblokulov, Z. Wang,
+     diagnosis dimensions for deep fault localization,” in Proceedings of the           R. Murthy, J. T. Stillerman, S. S. Patel, D. Abulkhanov, M. Zocca,
+     28th ACM SIGSOFT International Symposium on Software Testing and                   M. Dey, Z. Zhang, U. Bhattacharyya, W. Yu, S. Luccioni, P. Villegas,
+     Analysis, 2019, pp. 169–180.                                                       F. Zhdanov, T. Lee, N. Timor, J. Ding, C. S. Schlesinger, H. Schoelkopf,
+[11] Y. Lou, Q. Zhu, J. Dong, X. Li, Z. Sun, D. Hao, L. Zhang, and                      J. Ebert, T. Dao, M. Mishra, A. Gu, C. J. Anderson, B. Dolan-Gavitt,
+     L. Zhang, “Boosting coverage-based fault localization via graph-based              D. Contractor, S. Reddy, D. Fried, D. Bahdanau, Y. Jernite, C. M.
+     representation learning,” in Proceedings of the 29th ACM Joint Meeting             Ferrandis, S. Hughes, T. Wolf, A. Guha, L. V. Werra, and H. de Vries,
+     on European Software Engineering Conference and Symposium on the                   “Starcoder: may the source be with you!” Transactions on Machine
+     Foundations of Software Engineering, ser. ESEC/FSE 2021. New York,                 Learning Research, 2023, reproducibility Certification.
+     NY, USA: Association for Computing Machinery, 2021, p. 664–676.               [33] W. Zhou, Y. E. Jiang, P. Cui, T. Wang, Z. Xiao, Y. Hou, R. Cotterell, and
+[12] X. Pu, M. Gao, and X. Wan, “Summarization is (almost) dead,”                       M. Sachan, “Recurrentgpt: Interactive generation of (arbitrarily) long
+     arXiv:2309.09558 [cs.CL], 2023.                                                    text,” arXiv:2305.13304 [cs.CL], 2023.
+[13] J. Li, S. Tworkowski, Y. Wu, and R. Mooney, “Explaining competitive-          [34] S. G. Patil, T. Zhang, X. Wang, and J. E. Gonzalez, “Gorilla: Large lan-
+     level programming solutions using llms,” in The 61st Annual Meeting                guage model connected with massive apis,” arXiv:2305.15334 [cs.CL],
+     Of The Association For Computational Linguistics, 2023.                            2023.
+[14] Z. Yuan, J. Liu, Q. Zi, M. Liu, X. Peng, and Y. Lou, “Evaluating              [35] G. Li, H. Hammoud, H. Itani, D. Khizbullin, and B. Ghanem, “Camel:
+     instruction-tuned large language models on code comprehension and                  Communicative agents for ”mind” exploration of large language model
+     generation,” arXiv preprint arXiv:2308.01240, 2023.                                society,” in Advances in Neural Information Processing Systems, A. Oh,
+     T. Neumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, Eds.,             on hallucination in large language models,” arXiv:2309.01219 [cs.CL],
+     vol. 36. Curran Associates, Inc., 2023, pp. 51 991–52 008.                      2023.
+[36] J. S. Park, J. O’Brien, C. J. Cai, M. R. Morris, P. Liang, and M. S.       [44] K. Yang, X. Mao, S. Wang, T. Zhang, B. Lin, Y. Wang, Y. Qin,
+     Bernstein, “Generative agents: Interactive simulacra of human behavior,”        Z. Zhang, and X. Mao, “Enhancing code intelligence tasks with chatgpt,”
+     in Proceedings of the 36th Annual ACM Symposium on User Interface               arXiv:2312.15202 [cs.SE], 2023.
+     Software and Technology, ser. UIST ’23.          New York, NY, USA:        [45] “java.lang.instrument,” https://docs.oracle.com/javase/8/docs/api/java/
+     Association for Computing Machinery, 2023.                                      lang/instrument/package-summary.html, 2024.
+[37] I. Gur, H. Furuta, A. V. Huang, M. Safdari, Y. Matsuo, D. Eck,             [46] “tree-sitter,” https://tree-sitter.github.io/tree-sitter/, 2024.
+     and A. Faust, “A real-world webagent with planning, long context           [47] Z. Qin, R. Jagerman, K. Hui, H. Zhuang, J. Wu, J. Shen, T. Liu,
+     understanding, and program synthesis,” in The Twelfth International             J. Liu, D. Metzler, X. Wang, and M. Bendersky, “Large language
+     Conference on Learning Representations, 2024.                                   models are effective text rankers with pairwise ranking prompting,”
+[38] “Autogpt,” https://github.com/Significant-Gravitas/AutoGPT, 2024.               arXiv:2306.17563 [cs.IR], 2023.
+[39] “Babyagi,” https://github.com/yoheinakajima/babyagi, 2024.                 [48] J. Wei, X. Wang, D. Schuurmans, M. Bosma, b. ichter, F. Xia, E. Chi,
+[40] S. Hong, M. Zhuge, J. Chen, X. Zheng, Y. Cheng, J. Wang, C. Zhang,              Q. V. Le, and D. Zhou, “Chain-of-thought prompting elicits reasoning in
+     Z. Wang, S. K. S. Yau, Z. Lin, L. Zhou, C. Ran, L. Xiao, C. Wu,                 large language models,” in Advances in Neural Information Processing
+     and J. Schmidhuber, “MetaGPT: Meta programming for multi-agent                  Systems, S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and
+     collaborative framework,” in The Twelfth International Conference on            A. Oh, Eds., vol. 35. Curran Associates, Inc., 2022, pp. 24 824–24 837.
+     Learning Representations, 2024.                                            [49] P. S. Kochhar, X. Xia, D. Lo, and S. Li, “Practitioners’ expectations
+[41] C. Qian, X. Cong, W. Liu, C. Yang, W. Chen, Y. Su, Y. Dang, J. Li,              on automated fault localization,” in Proceedings of the 25th Interna-
+     J. Xu, D. Li, Z. Liu, and M. Sun, “Communicative agents for software            tional Symposium on Software Testing and Analysis, ser. ISSTA 2016.
+     development,” arXiv:2307.07924 [cs.SE], 2023.                                   New York, NY, USA: Association for Computing Machinery, 2016, p.
+[42] W. Zhou, Y. E. Jiang, L. Li, J. Wu, T. Wang, S. Qiu, J. Zhang, J. Chen,         165–176.
+     R. Wu, S. Wang, S. Zhu, J. Chen, W. Zhang, X. Tang, N. Zhang,              [50] X. Xia, L. Bao, D. Lo, and S. Li, “‘automated debugging considered
+     H. Chen, P. Cui, and M. Sachan, “Agents: An open-source framework               harmful’ considered harmful: A user study revisiting the usefulness of
+     for autonomous language agents,” arXiv:2309.07870 [cs.CL], 2023.                spectra-based fault localization techniques with professionals using real
+[43] Y. Zhang, Y. Li, L. Cui, D. Cai, L. Liu, T. Fu, X. Huang, E. Zhao,              bugs from large systems,” in 2016 IEEE International Conference on
+     Y. Zhang, Y. Chen et al., “Siren’s song in the ai ocean: a survey               Software Maintenance and Evolution (ICSME), 2016, pp. 267–278.
+

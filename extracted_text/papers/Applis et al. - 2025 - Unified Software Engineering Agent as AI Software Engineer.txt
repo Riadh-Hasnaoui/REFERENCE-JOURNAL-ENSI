@@ -1,0 +1,791 @@
+                                             Unified Software Engineering Agent as AI Software Engineer
+                                                         Leonhard Applis∗                                        Yuntong Zhang∗†                                     Shanchao Liang
+                                                      l.applis@nus.edu.sg                                  yuntong@comp.nus.edu.sg                               liang422@purdue.edu
+                                                National University of Singapore                         National University of Singapore                           Purdue University
+                                                           Singapore                                               Singapore                                   West Lafayette, Indiana, USA
+
+                                                                Nan Jiang                                                 Lin Tan                                Abhik Roychoudhury
+                                                    jiang719@purdue.edu                                        lintan@purdue.edu                                abhik@comp.nus.edu.sg
+                                                       Purdue University                                        Purdue University                           National University of Singapore
+                                                  West Lafayette, Indiana, USA                             West Lafayette, Indiana, USA                               Singapore
+arXiv:2506.14683v2 [cs.SE] 8 Dec 2025
+
+
+
+
+                                        Abstract                                                                                CCS Concepts
+                                        The growth of Large Language Model (LLM) technology has raised                          • Software and its engineering → Automatic programming;
+                                        expectations for automated coding. However, software engineer-                          Software maintenance tools; Software evolution.
+                                        ing is more than coding and is concerned with activities including
+                                        maintenance and evolution of a project. In this context, the concept                    Keywords
+                                        of LLM agents has gained traction, which utilize LLMs as reason-                        Automated Software Engineering, Agentic Systems, AI for Software
+                                        ing engines to invoke external tools autonomously. But is an LLM                        Development
+                                        agent the same as an AI software engineer? In this paper, we seek
+                                        to understand this question by developing a Unified Software En-                        ACM Reference Format:
+                                                                                                                                Leonhard Applis, Yuntong Zhang, Shanchao Liang, Nan Jiang, Lin Tan,
+                                        gineering agent or USEagent. Unlike existing work which builds
+                                                                                                                                and Abhik Roychoudhury. 2026. Unified Software Engineering Agent as
+                                        specialized agents for specific software tasks such as testing, de-
+                                                                                                                                AI Software Engineer. In 2026 IEEE/ACM 48th International Conference on
+                                        bugging, and repair, our goal is to build a unified agent which can                     Software Engineering (ICSE ’26), April 12–18, 2026, Rio de Janeiro, Brazil. ACM,
+                                        orchestrate and handle multiple capabilities. This gives the agent                      New York, NY, USA, 12 pages. https://doi.org/10.1145/3744916.3773202
+                                        the promise of handling complex scenarios in software develop-
+                                        ment such as fixing an incomplete patch, adding new features, or
+                                        taking over code written by others. We envision USEagent as the
+                                                                                                                                1    Introduction
+                                        first draft of a future AI Software Engineer which can be a team                        Large language models (LLMs) have shown promise in coding,
+                                        member in future software development teams involving both AI                           reasoning, and problem solving. The model capability itself has
+                                        and humans. To evaluate the efficacy of USEagent, we build a Uni-                       improved significantly in terms of reasoning tasks, by training
+                                        fied Software Engineering bench (USEbench) comprising of myriad                         the models to always use reasoning paradigms such as chain of
+                                        tasks such as coding, testing, and patching. USEbench is a judicious                    thoughts, without needing further prompting, as shown by GPT
+                                        mixture of tasks from existing benchmarks such as SWE-bench,                            o1 [25] and its descendant models such as o3. On top of improved
+                                        SWT-bench, and REPOCOD. In an evaluation on USEbench consist-                           foundation models, the software engineering community is distill-
+                                        ing of 1,271 repository-level software engineering tasks, USEagent                      ing known best practices for downstream tasks into amplifiers for
+                                        shows improved efficacy compared to existing general agents such                        LLMs through agentic systems [39]. An LLM agent for software en-
+                                        as OpenHands CodeActAgent. For specific tasks such as issue reso-                       gineering invokes various interfaces including testing and analysis
+                                        lution in SWE-bench, USEagent demonstrates efficacy comparable                          tools autonomously driven by an LLM reasoning agent.
+                                        to agents such as AutoCodeRover (which are focused on software                             While agentic systems inspire researchers [5, 39], start-ups [3,
+                                        maintenance), while maintaining applicability to a broader range of                     26] and major companies [28, 33], we currently observe a strong spe-
+                                        software engineering tasks. There exist gaps in the capabilities of                     cialization in the emerging technologies among the LLM agents for
+                                        USEagent for certain coding tasks, which provides hints on further                      software. Agentless [37] performs program repair, Large Language
+                                        developing the AI Software Engineer of the future.                                      Monkeys [9] produce unit tests, ExecutionAgent [8] performs a
+                                                                                                                                project setup, and so forth. These specialized agents are reasonable
+                                                                                                                                efforts, especially as they require specialized metrics and datasets.
+                                        ∗ Joint first authors, ordered alphabetically.                                          However, with many agents comes the need to manage and main-
+                                        † Corresponding author, queries about the paper can be sent to Yuntong Zhang.           tain them as part of the future development environments!
+                                                                                                                                   We propose a unified Software Engineering agent (USEagent)
+                                                                                                                                representing a consolidated agentic capability for software engi-
+                                                                                                                                neering tasks. Individual SE tasks could be coordinated to result in
+                                                                                                                                a more effective ensemble of tasks: better test-generation should
+                                        This work is licensed under a Creative Commons Attribution 4.0 International License.   benefit reproduction in program repair, review of patches should
+                                        ICSE ’26, Rio de Janeiro, Brazil                                                        lead to better generated code, etc. With an integrated software
+                                        © 2026 Copyright held by the owner/author(s).
+                                        ACM ISBN 979-8-4007-2025-3/2026/04                                                      engineering agent, it becomes much more feasible to co-opt it in
+                                        https://doi.org/10.1145/3744916.3773202                                                 future development environments [2].
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                     Applis, et al.
+
+
+   As a foundation, we need a unified dataset of challenging SE            2    Unified Software Engineering Benchmark
+tasks to test our unified agentic capabilities, for which we build         To make progress towards building a unified agent for software
+Unified Software Engineering Bench, or USEbench for short. Re-             engineering (USEagent), we first build a dataset of automated soft-
+cently, the SWE-bench dataset [18] has been proposed that captures         ware engineering tasks. There is a rich environment of benchmarks,
+a set of GitHub issues depicted in natural language and requires           yet they are somewhat fragmented - they focus on specific types of
+bug fixes or feature additions in software projects. Thus the SWE-         software engineering tasks. Popular benchmarks encompass nat-
+bench dataset is replete with challenges in software maintenance           ural language issues for software (SWE-bench [18]), automated
+for various real-life software projects. Our proposed benchmark            program repair (Defects4J [19]), code generation (REPOCOD [20]),
+USEbench is a meta-benchmark composing a diverse set of soft-              test generation (SWT [23]) or documentation generation (CodeNet
+ware engineering tasks (such as code generation, program repair,           [27]), each accompanied by a metric to identify correct or optimal
+test generation) behind a unified application programming inter-           solutions. Next to their task, benchmarks often vary in scope too:
+face (API). Building a unified API is key, since it allows us to start     the programming benchmarks (such as HumanEval [12] , CodeNet
+thinking of a unified agentic capability which can handle differ-          [27], BigCode [4], EvalPlus [21]) cover method-snippets or class-
+ent software engineering tasks. After constructing USEbench, we            level code that is evaluated against known examples. The recently
+expand two popular agentic systems, one from industry and one              proposed SWE-bench [18] offers a new angle on repository-scale
+from academia, AutoCodeRover [42] and OpenHands CodeActA-                  changes by introducing natural language issues for program repair
+gent [34, 35] to solve the tasks in USEbench. We consider this a           instead of a known test-suite. However, due to the natural language,
+natural evolution or progression of the flurry of research proposing       some issues were too ambigious or un-solvable — spurring efforts
+manifold different agents for different software engineering tasks.        of OpenAI to create a human-verified subset, called SWE-bench-
+Existing specialized agents usually employ a fixed workflow and            verified [24]. Solving such natural language issues automatically
+approach the given task in a few pre-defined steps. For example, Au-       brings the vision of a future AI software engineer closer to the
+toCodeRover tackles program repair tasks using a fixed two-phase           capabilities of a human software engineer.
+workflow consisting of fault localization and patch generation. Now,           In this paper, we propose USEbench, a unified software engi-
+what does it take to generalize an existing program repair agent,          neering benchmark as a meta-benchmark which moves beyond
+with fixed actions and pre-defined workflow, so that it can act as a       project-level code editing tasks suggested by SWE-bench. Our goal
+unified software engineering agent (USEagent)? For each task or            is to unify existing individual benchmark sets and design a compre-
+problem in USEbench, the agentic systems are only provided with a          hensive unified dataset capturing multiple SE tasks. Our proposal
+description (i.e., a bug report or the documentation of a method to        combines a set of existing benchmark sets, namely SWE-bench-
+generate) as well as access to a containerized environment of the          verified [24], SWT [23], REPOCOD [20] and REPOTEST. Out of
+project. As such, our meta-benchmark reveals inherent challenges           these SWE-bench-verified captures tasks which involve code edit-
+regarding task-identification, workflow-configuration and measuring        ing or program modifications to achieve bug fixing / feature addi-
+progress (esp. determining end-criteria).                                  tion. SWT bench presents validation tasks for testing real-world
+   To address these requirements, we equip AutoCodeRover with              code fixes in software projects. REPOCOD is a recent benchmark
+a Meta-Agent, which is instructed to orchestrate the appropriate           which captures code generation tasks in a software project. RE-
+agents and construct a workflow on the fly. Over the course of this        POTEST is a not previously published derivative of REPOCOD:
+workflow, the Meta-Agent utilizes available actions to construct           While REPOCOD encompasses repository level code-generation
+and maintain a project-state, constituting a structured consensus          after removing a method body; REPOTEST removes tests for a
+memory over the trajectories LLM components. Since OpenHands               specified method-body and evaluation is based on code-coverage.
+CodeActAgent is a general-purpose agent designed to solve a va-                The exact composition of USEbench from the constituent bench-
+riety of tasks, we consider it for baseline comparison, with no            marks is shown in Table 1. Six different task types are covered,
+architectural changes applied.                                             and for each task type several instances are included in USEbench.
+   We report the efficacy of both agentic systems on USEbench              As a notable technical contribution, we provide a unified inter-
+including PASS@1 and PASS@5 results. We perform a detailed error           face for agentic interaction with the unified benchmark. Previous
+analysis as well as a manual inspection of positives, to identify false-   benchmarks like SWE-bench provide a suitable interface for evalu-
+positives and cases of over-fitting or memorization. On USEbench           ation of code editing tasks i.e., after providing a .json file tasks are
+consisting of 1271 tasks including program repair, regression testing,     streamlined; still there is significant work involved in interacting
+code generation, and test generation, USEagent achieves an efficacy        with a software project, or extracting data from the constituent
+of 33.3%, which is higher than the 26.8% efficacy from the state-of-       files of a software project. Thus, LLM agents proposed to work on
+the-art general agent OpenHands CodeActAgent. Specifically, on             SWE-bench tasks need to make these adjustments to work with
+software maintenance tasks in SWE-bench-verified, USEagent has             SWE-bench, e.g. see [26]. We would want our unified benchmark
+an efficacy of 45.6% which is similar to the 46.2% efficacy of the         USEbench to possess a greater degree of usability, so that LLM
+specialized AutoCodeRover agent, while being applicable to more            agents can be evaluated and compared in terms of their efficacy in
+types of tasks. On test generation tasks that AutoCodeRover could          conducting the software engineering tasks in the benchmark. To
+not be applied to, USEagent achieves 31.8% efficacy, demonstrating         alleviate the burden on researchers, the constituent benchmarks
+its versatility. We also make the USEbench benchmark public, to            are conveniently plugged behind a common interface revolving
+encourage further research in design of AI software engineers.             around docker images, providing options to read files and execute
+Unified Software Engineering Agent as AI Software Engineer                                                         ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                                   Table 1: Summary of primitive and compound tasks unified in USEbench.
+
+               Benchmark                     Task                      Concept                                          Solving Criteria         #
+                                                                       Primitive Tasks
+               SWE-bench-verified            Program Repair            Adjust a program according to an issue.           Test-Suite Pass        500
+               SWT-bench-Lite                Regression Testing        Produce a test that asserts a required change,   Patch-Coverage          298
+                                                                       as presented in an issue
+               REPOCOD-Lite                  Code Generation           Generate a method body, matching the func-        Test-Suite Pass        200
+                                                                       tionality outlined in documentation
+               REPOTEST-Lite                 Test Generation           Test a given method to reach 100% coverage        Code-Coverage          173
+                                                                       Compound Tasks
+               Partial fix                   Test Generation           Enrich the SWE-Task with a previously failed,     Test-Suite Pass        100
+                                             Program Repair            but promising patch
+               Feature Development           Code- & Test-Generation   Add both tests and code, evaluate against the     Code-Coverage           46
+                                                                       newly produced code coverage
+
+
+commands, regardless of the task. Due to the unified nature of                     is ReAct [39], in which the LLMs are instructed to reason about
+our benchmark USEbench, we can also imagine unified software                       output-traces and invoke tools in an interleaved manner.
+engineering agent (USEagent) working on the tasks in USEbench.                        In software engineering, the target system that an agent in-
+Such a unified agent will be able to achieve complex software en-                  teracts with is usually a software project. Another component of
+gineering tasks, which are solved via a sequence of the software                   the external system is an execution environment, where software
+engineering task types covered in the benchmark USEbench.                          can be executed and tested. Existing software engineering agents
+    We now show two concrete scenarios of more complex soft-                       (SE agents) proposed different ways to interact with the software
+ware engineering tasks constructed from primitive task types in                    project and the execution environment. AutoCodeRover [42] uses a
+USEbench, namely incomplete fix and feature development, elabo-                    set of project structure-aware tools (e.g. search_method_in_class
+rated in Table 1. To concretely see how the different task types in                to navigate the software codebase and gather necessary code con-
+USEbench are combined into compound tasks, let us consider the                     text. It further performs test execution and spectrum-based lo-
+scenario of handling an incomplete code fix. In such a scenario, we                calization (SBFL) [36] to pinpoint more relevant code locations.
+(i) test the code and find failing tests, (ii) generate a fix for the failed       SWE-Agent [38] employs file-based tools to navigate files in the
+tests, (iii) test the fixed code and find more failed tests, and (iv)              project, for example find_file, open, scroll_down, and together
+finally generate a fixed code which passes all tests. These four steps             they form an agent-computer interface [38]. OpenHands CodeActA-
+could be four different runs of a software engineering agent, and                  gent [34, 35] provides a set of basic tools such as CmdRunAction to
+could combine different task types from USEbench, namely code fix-                 execute arbitrary bash commands inside a sandbox environment. A
+ing and test generation. The unified API of tasks in USEbench allows               similar approach was followed by Google Jules agent [14]. Roughly
+us to combine and alter tasks to capture more complex software                     summarized, the existing agents differ (intentionally) in how much
+engineering challenges, like incomplete fixes. Another scenario of                 structure and domain knowledge they introduce.
+a complex software engineering task is the complete addition of                       Another aspect of agent design is the decision framework. Exist-
+a feature to a codebase. This includes a problem description, and                  ing SE agents have explored options for more controlled decision-
+requires a functional method-body as well as accommodating tests.                  making beyond the ReAct framework, in the context of software en-
+How to solve the task, as well as any form of decomposition, re-                   gineering. AutoCodeRover [42] and Agentless [37] targets software
+iteration or co-evolution is left up to the users of the benchmark.                maintenance tasks, and they break the agent’s execution into phases
+The final evaluation of this derived scenario will be against a hidden             like context retrieval/localization and repair. Another example is
+test-suite, as well as the generated tests.                                        RepairAgent [7], which restricts available tools through a finite-
+                                                                                   state machine. The different designs in existing SE agents raise an
+                                                                                   important question – how much autonomy should be given to the
+                                                                                   agent during decision making? On one hand, agents can follow
+3    Background: Agents for Software Engineering                                   a fine-tuned workflow for the targeted software engineering (SE)
+Agents typically utilize LLMs for decision making and content                      task (e.g. in AutoCodeRover, Agentless, RepairAgent). In this design,
+generation, along with autonomously invoked tools to interact with                 agents operate in fixed phases (e.g. localization is the first phase
+external entities. These tools allow the agent access to knowledge                 for program repair), which makes them more cost-effective [37, 42].
+beyond the LLMs’ training data, and allow the agent to influence                   With the task broken down into phases, it also becomes easier to
+the external environment through the tool interface. Agents often                  leverage program analysis techniques in each of the phases. How-
+employ reasoning frameworks to orchestrate the LLM and the tool                    ever, agents with this design have less autonomy, and as a result,
+usage. One of the popular reasoning frameworks used in agents
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                    Applis, et al.
+
+
+they could not be directly applied to another kind of SE task. Apply-
+ing a program repair agent to test generation would require drastic
+changes to its workflow. On the other hand, agents can be given
+more autonomy by having access to a general set of tools and the
+freedom to decide when to use these tools (e.g. in SWE-Agent and
+OpenHands CodeActAgent). This general design makes the agents
+applicable to many kinds of software engineering tasks. However,
+this generality makes it harder to exploit domain knowledge and
+program analysis in the agents. Moreover, when the task becomes
+complex and the agent execution gets longer, it is challenging to
+interpret the agent trajectory consisting of a list of general tool
+usages. In comparison, agents operating in “phases” are more inter-
+pretable, since we can inspect the results of each phase (e.g. what          Figure 1: Concept: Meta-Agent abstracting over actions.
+is the identified faulty location at the end of a localization phase).
+    In this work, our goal is to have an agent applicable to multiple
+types of software engineering task, while still utilizing domain-          The action of executing a console command is extremely flexible,
+specific optimizations and interpretability. We name this agent            but hard to control. The agent’s execution consists of a sequence
+Unified Software Engineering Agent (USEagent).                             of console commands, which are difficult for human developers to
+                                                                           interpret and raise security concerns. Thus, we propose to design
+                                                                           our actions at a coarser granularity, where each action encapsu-
+4     Unified Software Engineering Agent                                   lates a “unit of work” that developers carry out during the software
+The first step towards a unified software engineering agent is break-      engineering process. Each action receives instructions from the
+ing down the fixed workflow of existing agents into components             Meta-Agent on what outcomes it is supposed to achieve, rather than
+(i.e., phases) and add orchestration to decide which component             how it achieves them. The Meta-Agent and individual actions com-
+to invoke based on the task type and task state. To achieve this,          municate through this intent-based interface. An example action is
+we propose a Meta-Agent, a central LLM-reasoning agent that                EditCode, where the Meta-Agent specifies what should be edited
+orchestrates various components, henceforth called actions. The            in the code, but not the exact details of making the edits. This design
+Meta-Agent and the actions together form a unified software engi-          results in a set of modularized actions with clear responsibilities,
+neering agent (USEagent) that is capable of solving several types          that can be tested, extended and maintained individually. More-
+of software engineering tasks with a higher level of autonomy. We          over, when one action is improved, the improvements propagate
+identify several challenges in designing such a unified agent to           across all involved task types. We present a sample list of actions
+solve tasks in USEbench.                                                   for unified software engineering agents in Section 4.1.
+    The first challenge is to adapt to tasks beyond a fixed workflow.         The third challenge is knowledge management: For complex
+Previous agents extract actions such as context retrieval or patch         tasks, the information provided a priori is not sufficient, and a
+generation as clear “units of work” from developer workflows and           central effort in solving tasks is identifying and producing rele-
+organize them into state-machines or fixed workflows. This rigid           vant information. Once produced, this context should be made
+organization of actions restricts their adaptability to other tasks. To    available to the agentic system, i.e. Meta-Agent and other actions.
+achieve high agent autonomy we allow the actions to be freely com-         Existing work has defined this problem as memory management
+posed and introduce a Meta-Agent that orchestrates the actions             of agents [17, 43], where memory refers to historical information
+using a ReAct-style loop, forming a meta-layer over the actions,           relevant to the current task. In literature on LLM agents, memory
+shown in Figure 1. Starting from natural-language descriptions, the        is often categorized into short-term (e.g., information within an on-
+Meta-Agent invokes actions, observes the changes made by the               going conversation), long-term (e.g., historical data from previous
+action, reasons about the output, and decides on the next action to        sessions), and consensus memory (e.g., shared knowledge between
+take. This framework enables on-the-fly composition of workflows,          multiple agents) [17]. In this work, we explicitly identify what infor-
+adjusting to different tasks, errors and changing states. ReAct-style      mation to memorize when designing a unified software engineering
+decision making has been widely used in previous agents to orches-         agent, and classify them into the different types of memory. We
+trate tools that directly interact with the codebase; which we extend      categorize the results of actions as short-term memory, which is
+towards action orchestration. The overall trajectory and choices of        only presented to the Meta-Agent to decide the next action. Project-
+the Meta-Agent will construct an action-graph. In our action-graph,        specific knowledge, such as developer-written documentation, is
+any node can be the start or end-point - for example, depending on         considered long-term memory. These documents are embedded
+the task, an action of “executing tests” can be the starting point or      and stored in a vector database accessible for Retrieval-Augmented
+the last assurance before termination. The agent execution can be          Generation (RAG) by the agent. Finally, artifacts generated by ac-
+seen as an implicit construction of this action-graph on the fly.          tions that are useful in guiding other actions constitute consensus
+    The next challenge is to provide the Meta-Agent with a set of re-      memory. Such artifacts include program locations or code edits
+liable, yet flexible actions that are suitable for composition. Existing   that can be notable to other actions. We introduce a structured task
+general agents such as OpenHands CodeActAgent [35] and Google              state that represents the consensus memory, which can be read and
+Jules [14] provide the LLM with a console to execute any command.          modified by different actions.
+Unified Software Engineering Agent as AI Software Engineer                                                     ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+                      1                          2
+                                                                                                                                             Action Space
+                               Reproduction              Code Retrieval
+           Issue
+                                                                                                                                            Code Retrieval
+                                  5                                3
+
+                                                                                                                                    2        Test Retrieval
+                          6                       4                              Task
+         Terminate                                                                         1             Meta-Agent
+                               Review Patch                  Edit Code
+         & Explain                                                               Initial                                                     Reproduction
+                                                  5                              State
+
+                                                                                                                                             Execute Tests
+
+                                                                                                          5     4     Task
+                                                                                                State'                State                   Edit Code
+Figure 2: Overview of AutoCodeRover. AutoCodeRover com-                                                                  Chosen     3
+                                                                                                                         Action              Review Patch
+poses a fixed workflow for program maintenance tasks.
+                                                                                                                                    6
+                                                                                                                        Terminate            Terminate &
+                                                                                                                        & Explain              Explain
+
+
+
+4.1     Instantiating AutoCodeRover as USEagent
+In this section, we highlight steps to build the unified SE agent         Figure 3: Overview of the USEagent and workflow. The Meta
+USEagent that handles multiple types of SE tasks. We design our           Agent chooses available actions, provides the state and re-
+USEagent drawing inspiration from the open-source agent Au-               trieves a altered state until termination is chosen.
+toCodeRover [29, 42], since AutoCodeRover operates in different
+phases which are suitable as starting points for actions. We elabo-
+rate the design of USEagent and flesh out our proposed solutions
+to the challenges in Section 4.                                           priming set of actions for USEagent. The set of actions are shown
+    AutoCodeRover is an LLM agent that targets program mainte-            in Table 2. Each action provides the Meta-Agent with an interface
+nance tasks. Figure 2 shows the overall workflow of AutoCodeRover.        that specifies its description, input, and output, but abstracts away
+Starting from a natural-language description of a software issue,         the underlying execution details. In addition to interacting with the
+AutoCodeRover first writes an executable self-contained test that         Meta-Agent through input and output, each action can also read
+reproduces the issue (Step ○).
+                             1 The stacktrace of the reproducer test,     from and write to the task state.
+together with the task description, is sent to a context retrieval com-      Many of the actions in Table 2 are conceptually inspired by those
+ponent to identify relevant code locations (Step ○). 2 The relevant       used in existing agents such as AutoCodeRover (Figure 2). On top
+program locations are made available to the Edit Code component           of the existing agents, we designed a few new actions that are es-
+for writing a candidate patch (Step ○). 4 With both LLM-generated         sential for the task types in USEbench. These new actions include
+patch and reproducer test, the Review Patch component then exe-           TestRetrieval and ExecuteTests. The TestRetrieval action ex-
+cutes the tests on the patched program, decides whether the are           plores the codebase and retrieves testcases relevant to the current
+correctly written, and iteratively improves them (Step ○).  5 Finally,    task. It works similarly compared to the existing CodeRetrieval,
+the AutoCodeRover workflow finishes when the reviewer approves            which employs a set of search tools such as search_func to search
+a patch or the execution reaches a pre-defined round limit (Step          for relevant code units in the program. The ExecuteTests action
+○).
+ 6 AutoCodeRover proved effective for resolving software issues           executes parts of the project test suite, which is useful for validating
+such as bug fixing [29, 42]. However, these fixed transitions among       code/test changes by execution. Current agents focusing on SWE-
+components make agents like AutoCodeRover not generalizable to            bench usually assume the commands to run existing unit tests are
+task types that require a different workflow. For example, in a task      given as an input to the agent [29, 37]; however, this assumption re-
+like test-suite generation, steps such as Reproduction and Review         quires additional manual configuration when setting up the agents
+Patch are irrelevant, requiring the design of a new workflow or           on new projects. Our ExecuteTests action does not assume the
+even a new agent.                                                         test commands to be given, and instead it queries the project docu-
+    Instead of designing a new agent for each task type, our goal         mentation files to retrieve the project-specific commands through
+is to build one general agent that handles multiple task types. To        RAG. In addition, we added a special Finish action that signals the
+achieve this, we disassemble the workflow of AutoCodeRover and            termination of the agent execution. The Finish action is invoked
+reassemble it into USEagent shown in Figure 3. We adapt compo-            with an argument specifying the final result for the current task.
+nents in AutoCodeRover such as Code Retrieval into actions that           Unlike other actions which encapsulates concrete workflows, the
+can be freely composed by a Meta-Agent for different task types.          Finish action only terminates the agent and outputs its argument
+Given the task description that mentions the task type in natural         as the final result from the agent.
+language, the Meta-Agent uses ReAct-style reasoning to select next           These actions can be invoked multiple times and combined in
+actions to execute. Short-term feedback such as action execution          various ways to complete a given task. For example, for a code gen-
+results are reflected directly to the Meta-Agent, while artifacts that    eration task, the Meta-Agent may first invoke CodeRetrieval to
+should be preserved longer are stored into a task state represent-        understand the surrounding code context, invoke EditCode to draft
+ing the consensus memory among actions. We next discuss each              the implementation, invoke TestRetrieval to find out where exist-
+component of USEagent in more details.                                    ing tests for this code component resides, and then invoke EditCode
+                                                                          to write new tests for the newly added code. It may then enter a
+  Actions. Given the tasks of program repair, regression testing,         refinement loop of improving the new code and tests using the
+code generation, and test generation in USEbench, we identify a           ExecuteTests and EditCode actions. We note that this sequence
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                        Applis, et al.
+
+
+     Table 2: Details of actions used in USEagent. Diff denotes a Patch to the project, and subscript specifies modifiers.
+                              E.g. DiffCode expresses a change to program code, instead of test code.
+
+                   Action            Description                         Action Signature                             Interaction with Task State
+                 CodeRetrieval       Collect program code relevant to    Description → LocationsCode                  Write: LocationsCode
+                                     the task description.
+                  TestRetrieval      Collect test code relevant to the   Description → LocationsTests                 Read: LocationsCode
+                                     task description.                                                               Write: LocationsTest
+                 Reproduction        Generate a system-level stan-       Description → DiffTest                      Write: TestReprod.
+                                     dalone reproduction test.                                                       Write: Output(TestReprod. )
+                  ExecuteTests       Execute a subset of the program     List[TestFile] → Summary(Results)            Read: LocationsTest
+                                     test suite.                                                                     Write: CommandTest
+                    EditCode         Make modifications across the       ΔBehavior × Location → Diff                  Read: LocationsCode
+                                     codebase, including test-code.                                                   Read: LocationsTest
+                                                                                                                     Write: Diff
+                  ReviewPatch        Review and iteratively improve      TestReprod. ×DiffCode → Bool                 Read: DiffCode
+                                     a generated patch and generated                                                  Read: TestReprod.
+                                     test.                                                                           Write: DiffCode
+                   Terminate         Finish the agent execution and      State → Diff                                -
+                                     select a final solution.
+
+
+of action invocation can happen without prior configuration, as we                    execute (Step ○).2 Each action represents an encapsulated work-
+will show in section 6.3.                                                             flow to complete a “unit of work”, and exposes its input/output
+                                                                                      interface to the Meta-Agent. At each step of action selection, we
+   Task State. Our next contribution towards a USEagent is the de-                    present the Meta-Agent with the current task state, the overall task
+sign of a task state. The task state represents the consensus memory                  description, as well as the output from the previously invoked ac-
+among the actions - each action can write new artifacts generated                     tion. The invoked action modifies the task state and retunrs it back
+by them into the task state so that the artifacts can be visible to                   to the Meta-Agent (Step ○).  5 This interleaving of reasoning (i.e.
+other actions. Our task state captures essential artifacts involved                   select the next action based on current output and state) and action
+in a software debugging process, including relevant locations, test                   (i.e. execute the actual action to obtain new observations) forms a
+execution information, and prior attempts of code modifications.                      ReAct-style loop at the action level. When the Meta-Agent deems
+Specifically, the task state 𝑆 is defined as: 𝑆 = (𝐿𝑐 , 𝐿𝑡 , 𝑅𝑒𝑥𝑒𝑐 , 𝐷𝑆).             that one of the diffs in the diff store is a satisfactory solution to the
+Here, 𝐿𝑐 represents the relevant code locations (e.g., program meth-                  given task, it invokes the Finish action to end the agent execution
+ods and classes); 𝐿𝑡 represents the test locations (e.g., unit test                   and output the final solution. In the case where the Meta-Agent
+methods). The locations are identified by the retrieval actions, and                  could not decide on the final solution (i.e. could not invoke the
+are utilized by downstream code editing actions. 𝑅𝑒𝑥𝑒𝑐 contains                       Finish action) after a pre-defined limit for the ReAct-loop, we ends
+the execution results of different tests against different candidate                  the execution and invoke the LLM to select one of the candidates
+patches. These execution information provides guidance to other                       in the diff store as the final solution.
+actions in improving partial solutions and selecting the final solu-
+tion. The last part of the task state is a diff store (𝐷𝑆), which records             4.2     Configuring OpenHands
+all the generated diff contents from the EditCode, Reproduction                       OpenHands CodeActAgent [35] is a general-purpose agent de-
+and ReviewPatch actions. These diff contents include modifica-                        signed to solve general tasks1 . It utilizes a structured controller-
+tions to both the program code and the test code. The diff store is                   agent-runtime architecture, where the AgentController acts as a
+necessary to allow for versatile invocations of the ExecuteTests                      supervisor, enforcing operational constraints (such as conversation
+and EditCode actions. By selecting different subsets of diffs in                      iterations and budget) and managing the agent’s lifecycle (start,
+𝐷𝑆 and passing them to ExecuteTests, tests can be executed on                         stop, pause). The CodeActAgent makes decisions, interprets LLM re-
+different versions of the project after applying the selected diffs.                  sponses, and converts them into actions to interact with the runtime,
+Similarly, EditCode can first apply an existing patch from 𝐷𝑆, and                    which is an isolated sandbox environment. Since CodeActAgent
+subsequently introduce additional modifications, thereby enhanc-                      does not rely on a predefined task-specific workflow, it can be ap-
+ing partial patches. Concretely, when an action is implemented,                       plied to a wide range of software engineering tasks, including those
+the implementation defines which part of the action output will be                    in USEbench, without requiring modifications to its architecture.
+stored into the task state.                                                              During execution, OpenHands CodeActAgent operates itera-
+                                                                                      tively, generating actions, executing them, and processing observa-
+   MetaAgent. The last important addition is the Meta-Agent which                     tions before determining the next step. The actions include:
+orchestrates the various actions. As shown in Figure 3, Meta-Agent                    1 Note: OpenHands is also developing CodeActSWEAgent, specialised on SWE-Bench.
+takes in the task description and an initial empty task state (Step                   We purposefully chose the non-specialised implementation for USEbench. The entries
+○),
+ 1 and then iteratively selects an action from the action space to                    on the SWE-Bench leaderboards are to our knowledge results from CodeActSWEAgent.
+ Unified Software Engineering Agent as AI Software Engineer                                                ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+• CmdRunAction: execute Linux bash commands.                              RQ3: Effectiveness of Self-Configuration and Actions. Can
+• IPythonRunCellAction: execute Python code in Jupyter or IPython         USEagent self-configure based on the task type while maintaining
+ environment.                                                             reasonable efficacy? How does adding new actions affect efficacy?
+• FileEditAction: read, write, or edit files in the runtime.
+• AgentFinishAction: signal task completion or termination.                 We present the sequence of actions of the USEagent and accumu-
+                                                                         late their patterns per task. We showcase examples on how these
+ The execution of CodeActAgent terminates when the agent is-
+                                                                         top-level patterns translate into commands, queries and edits. Fur-
+ sues an AgentFinishAction, reaches resource limits (e.g., maximum
+                                                                         thermore, to quantitatively understand the effect of using dynamic
+ iterations), or encounters an error. In practice, we design differ-
+                                                                         decision making, we perform an ablation study by using a static
+ ent prompt templates for each task type as input to OpenHands
+                                                                         action sequence for each task type. We also perform an ablation
+ CodeActAgent, incorporating both the task type and task descrip-
+                                                                         study by removing one of the newly added actions ExecuteTests.
+ tion. Compared to USEagent, the OpenHands CodeActAgent em-
+                                                                            Lastly, we identify open challenges in the current unified soft-
+ ploys a similar reasoning framework, but the actions operate on a
+                                                                         ware engineering agent. We formulate key difficulties and discuss
+ lower-level such as execution of a single bash command. It follows
+                                                                         potential future directions to address them.
+ a single ReAct-loop centered around a more open set of available
+ actions. This free-wheeling approach is an alternative to the more       RQ4: Open Challenges for Agentic Systems. What are
+ structured and pronounced options in Section 4.1. These two de-          the challenges faced by the current unified agent in tasks in
+ signs demonstrate a trade-off: allowing arbitrary bash commands          USEagent? Can we identify actions to remediate them?
+ makes the agent more flexible, while using structured actions im-
+ proves interpretability and control over the agent.                        Experiment setup. We evaluate agentic systems such as USEagent
+                                                                         and OpenHands CodeActAgent on the full USEbench which con-
+ 5    Research Questions & Experiment Setup                              sists of 1271 datapoints. In most of our experiments, agentic systems
+                                                                         use Anthropic Claude 3.5 Sonnet v2 (claude-3-5-sonnet-20241022)
+ Our first research question focuses on evaluating and comparing         as the backend LLM. Additional experiments with DeepSeek-V3
+ agentic systems for tasks beyond program repair.                        invokes the DeepSeek-V3 model through the Openrouter API 3 . For
+  RQ1: Efficacy of Agentic Systems. How well do state-of-the-            USEagent, we set the maximum rounds of action invocation from
+  art agentic systems perform across the diverse software engineer-      the Meta-Agent to 20, and force the agent to end execution and
+  ing tasks in USEbench?                                                 select a candidate solution. We set the model temperature to zero
+                                                                         in USEagent. To better understand the effect of randomness, we
+    We address RQ1 by applying USEagent and OpenHands to all             randomly sampled a statistically significant subset (295 instances)
+ data points outlined in Section 2 and report a PASS@1. In addition to   to report PASS@5 results from both agentic systems.
+ the efficacy, we also report an investigation of the major obstacles
+ for the individual benchmarks. To understand the effect of random-      6 Results
+ ness, we report PASS@5 on a significant subset of the data points.
+We also examine the feasibility of using open-source models as the       6.1 RQ1: Efficacy of Agentic Systems
+ backend of USEagent, by evaluating USEagent with DeepSeek-V3.           An overview of the efficacy of the agents on USEbench are shown
+    A known issue and motivation for our next research question is       in Table 3. We investigate the results per system.
+ overfitting in plausible patches. Such patches pass the evaluation-
+                                                                            USEagent. In general, USEagent demonstrates its applicability
+ criteria by bypassing the harness with tricks rather than benign
+                                                                         across different types of tasks in USEbench. USEagent achieves a
+ functionality. Sometimes, actual solutions are checks for edge-cases
+                                                                         PASS@1 of 45.6% on SWE-Verified. In comparison, AutoCodeRover,
+- these can only be distinguished from overfitting by consulting the
+                                                                         a more specialized agent on issue resolution, achieved efficacy
+ ground truth (i.e., the gold patch). We aim to identify and quantify
+                                                                         of 46.2% on the same SWE-Verified benchmark when using the
+ overfitting solutions.
+                                                                         same Claude 3.5 Sonnet v2 backend LLM [1]. USEagent relaxed the
+  RQ2: Analysis of Plausible Patches. What is the rate of over-          fixed workflow in AutoCodeRover and is a more general agent that
+  fitting among the resolved patches?                                    applies to more task types. Although being more general, USEagent
+                                                                         demonstrates similar efficacy on the specialized issue resolution
+    We sample a significant subset2 of solved data points and manu-      task compared to AutoCodeRover. This comparable performance
+ ally examine whether the plausible solution is overfitting. During      demonstrates that, with the design of USEagent, the increased
+ this manual investigation, we also look for memorization in plau-       autonomy does not result in noticeable reduction in efficacy.
+ sible patches, i.e. patches that perfectly mirror the ground truth         While being effective on issue resolution tasks, USEagent can
+ developer patch or contain suspicious content.                          handle other tasks which specialized agents could not be applied
+    As described in Section 4, one milestone is to make the agent        to. For issue reproduction tasks in SWT, USEagent resolved 40.3%
+ adapt autonomously to different tasks. We study this adaptation by      of the tasks. Here, “resolved” means USEagent generated test cases
+ investigating the resulting sequence of actions in RQ3:                 that cover all changed lines in the developer-written patch for the
+                                                                         issue, without seeing the patch. Moreover, for a significant number
+                                                                         of unresolved tasks, USEagent generated test cases that achieve a
+ 2 at 95% confidence with 10% error margin.                              3 https://openrouter.ai/deepseek/deepseek-chat-v3-0324
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                            Applis, et al.
+
+
+                                         Table 3: Efficacy of USEagent and OpenHands CodeActAgent on USEbench.
+
+                                                                      USEagent                                OpenHands
+                                 Dataset        Tasks     PASS@1      4 PASS@5   4 PASS@1       PASS@1         4 PASS@5         4 PASS@1
+
+                                 SWE-Ver         500    228 (45.6%)    66.7%     42.7%        192 (38.4%)       52.1%            35.9%
+                                 SWT             298    120 (40.3%)    53.6%     34.8%        85 (28.4%)        50.7%            29.0%
+                                 REPOCOD         200     12 (6.0%)     15.2%      6.5%         11 (5.5%)        6.5%              0%
+                                 REPOTEST        173    55 (31.8%)     42.5%     17.5%        45 (26.0%)        42.5%            10.0%
+                                 SWETRY          100     8 (8.0%)      30.4%      8.7%          7 (7.0%)         8.7%             4.3%
+                                 Total          1271    423 (33.3%)    49.5%     29.1%        340 (26.8%)       44.1%            22.6%
+
+
+
+coverage above 90%. In these cases, the generated tests do not fully                from the SWE-Bench leaderboard [1]. We attribute this difference
+satisfy the requirement of the benchmark, but only miss coverage                    to the choice of agent - the reported result on the leaderboard is
+on individual statements or branches. On test generation tasks in                   generated using a specialized CodeActSWEAgent, while we used
+REPOTEST, USEagent achieves efficacy of 31.8%, which is slightly                    the more general CodeActAgent in our evaluation.
+lower than similar tasks in SWT. While the requirement in SWT is                       We utilize the general CodeActAgent to solve the different types
+to cover a developer-written patch, the requirement in REPOTEST                     of tasks in USEbench. For SWT, CodeActAgent achieves a resolu-
+is to generate tests that cover an entire method, which can be                      tion rate of a 28.4%, slightly lagging behind USEagent. Similar to
+more challenging. Sometimes the agent generates tests that cover                    that of USEagent, CodeActAgent only achieves a low resolution
+most scenarios in a method, but do not cover all the lines. On the                  rate on REPOCOD (5.5%). However, unlike USEagent, resolved
+other hand, we observe certain advantages of agent-generated tests                  instances are evenly distributed across sympy, astropy (a popular
+compared to developer-written tests. The agent often generates                      library for Astronomy and Astrophysics), and Plotly (a graphing
+shorter tests where each test has individual assertions, while the                  library), each contributing 27% of the total resolved cases. On RE-
+developer-written tests tend to consist of long tests that combine                  POTEST, OpenHands CodeActAgent resolves 26.0% of the total
+multiple inputs and assertions. In a real test-suite, short individual              instances, which is similar but slightly lower compared to its per-
+tests can provide more informative error messages when part of                      formance on SWT. This trend is consistent with that of USEagent.
+the test-suite fail [31, 32].                                                       On SWETRY, CodeActAgent only solves 7%, similar to that of
+   Tasks in REPOCOD proved to be the most challenging with                          USEagent, indicating that improving partial fixes is still a difficult
+only 6% resolution rate. REPOCOD tasks are generally challenging                    task for general agents.
+because the requirement is to generate a complete method imple-
+                                                                                       Open-Source Model. We also report the efficacy of the agents with
+mentation that can pass a large number of hidden test cases. Overall,
+                                                                                    the open-source model DeepSeek-V3 in Table 3. With DeepSeek-V3,
+for many unresolved instances, the generated method passes a high
+                                                                                    both USEagent and OpenHands have a slight performance drop,
+number of tests, yet does not account for a few edge-cases. The ma-
+                                                                                    which is expected. There is a larger performance drop on REPOTEST
+jority of resolved instances stem from Sympy, a library for symbolic
+                                                                                    for both agents. REPOTEST requires generating a large amount of
+mathematics. We expect a relation between the relative success
+                                                                                    test code to achieve full test coverage – DeepSeek-V3 sometimes
+in Sympy and the fact that mathematical reasoning is becoming a
+                                                                                    makes minor mistakes in the generated code, or generates tests
+common aspect of training in foundational models.
+                                                                                    that only partially cover the target function.
+   On the compound benchmark SWETRY, USEagent has a re-
+solve rate of 8%, which shows some promise to apply USEagent as                        PASS@5. Moving to a PASS@5 increases the efficacy of USEagent
+a follow up to partial fixes. We need to stress that the data points in             to 49.5% (+48.6%) and OpenHands to 44.1% (+64.6%). This shows a
+SWETRY are sourced from previous failed attempts of agentic sys-                    similar increase across the two systems when employing retries.
+tems, which means they are from the more challenging instances in
+                                                                                         Summary: RQ1 - Efficacy of Agentic Systems. USEagent
+SWE-verified. We observe two main failure modes on the SWETRY
+                                                                                         solves the tasks from USEbench at a 33.3% rate, compared to
+tasks. Firstly, since the partial patch is given to the agent as part of
+                                                                                         26.8% of OpenHands. There is a consistent improvement over all
+the task description, the agent often attempts to derive a solution on
+                                                                                         benchmarks. USEagent’s efficacy of 45.6% for SWE-verified is
+top of this partial patches by making modifications to it. However,
+                                                                                         close to the performance of fine-tuned systems.
+the partial patch may be misplaced. In these cases, the agent still
+chose to iterate over this patch, and failed to discard the partial
+attempt and approach the task in a different way. Secondly, the                     6.2       RQ2: Dissection of Plausible Patches
+Meta-Agent sometimes ends the agent execution prematurely. For                      For USEagent, we manually investigated a sample of 218 plausible
+example, when the ExecuteTests action still shows some relevant                     solutions (i.e. passing the resolution criteria of each benchmark) to
+test errors, the Meta-Agent wrongly disregards errors as irrele-                    understand the degree of memorization, overfitting or other anom-
+vant to the task, ending the workflow. This can be addressed by                     alies. We report a low number of 3 cases of memorization (1.3%),
+configuring the prompt, at the cost of longer execution time.                       next to 23 cases of overfitting (10.5%). The percentage of overfitting
+  OpenHands. OpenHands CodeActAgent achieves a PASS@1 of                            solutions is lower than the previously reported overfitting rate of
+38.4% on SWE-verified, which is lower than the reported result                      4 Derived from the statistically significant subset.
+Unified Software Engineering Agent as AI Software Engineer                                              ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+Table 4: Results of ablation study with USEagent on a statisti-               Table 4 supports these findings through an ablation study. The
+cally significant subset of USEbench, using claude-3-5-sonnet-             disable dynamic column refers to USEagent with the dynamic deci-
+20241022 as the backend model.                                             sion making by MetaAgent disabled. Instead of letting the MetaA-
+                                                                           gent freely decide which action should be taken as the next step,
+        Dataset
+                      USEagent       USEagent            USEagent          we predefine the following workflows for the task types:
+                       original   disable dynamic    remove ExecuteTests
+                                                                           • SWE/SWETRY: Reproduction -> CodeRetrieval -> EditCode
+        SWE-Ver         49.6%        46.2% (-7%)         49.6% (-0%)
+        SWT             40.6%        39.1% (-4%)        36.2% (-11%)        -> (ReviewPatch -> EditCode)*
+        REPOCOD         8.7%        6.5% (-25%)          0% (-100%)        • SWT: TestRetrieval -> CodeRetrieval -> EditCode ->
+        REPOTEST        25.0%       20.0% (-20%)        17.5% (-30%)        (ExecuteTests -> EditCode)*
+        SWETRY          13.0%       8.7% (-33%)         8.7% (-33%)
+                                                                           • REPOCOD: EditCode -> TestRetrieval -> EditCode ->
+        Overall         34.9%        31.9% (-9%)        31.2% (-11%)
+                                                                            (ExecuteTests -> EditCode)*
+                                                                           • REPOTEST: TestRetrieval -> EditCode -> (ExecuteTests ->
+                                                                            EditCode)*
+31% on SWE-bench from SpecRover [29]. We attribute the lower
+overfitting rate in part to our extensive ExecuteTests action in           where * represents a loop, and the agent can decide when to break
+USEagent, which allows for more versatile test execution. As a             out the loop and end the workflow. We see that disabling dynamic
+result, we see an overfitting rate of 13.6% from USEagent on the           decision making leads to reductions in efficacy from 4% to 33%
+SWE-verified dataset. In addition, the SWT and REPOTEST datasets           across tasks. The MetaAgent in USEagent not only allows for it to
+show low numbers of overfitting, which further reduces the overall         handle multiple task types without hurting the efficacy compared
+rate. Furthermore, we identified a set of 33 anomalies that are plausi-    to predefined workflows, but without it there would be an efficacy
+ble, and do not overfit, yet they are different from the ground truth.     drop. This efficacy improvement (by the MetaAgent) is largely
+One example anomaly includes the introduction of a new vector              because the MetaAgent can help to recover from initial sub-optimal
+library for xarray (a vector library itself). Another example is an        decisions (e.g. invoke retrieval actions towards the end of workflow
+unorthodox class-inheritance check for scikit-learn - instead              to gather more context).
+of utilizing pythons standard function isinstance, a predicate is             We performed another ablation study to examine the effect of an
+applied to the objects obj.__classes__. These solutions are func-          individual action. The column remove ExecuteTests in Table 4 shows
+tionally correct but are unlikely to be accepted by developers, so         the efficacy of USEagent after removing ExecuteTests, which is
+we have marked them as anomalies.                                          one of the actions newly introduced in this work. In task types that
+                                                                           require repeated test executions to validate and refine solutions
+ Summary: RQ2 - Analysis of Plausible Solutions. We man-                   (e.g. REPOCOD and REPOTEST), removing ExecuteTests results
+ ually inspected 218 plausible solutions from USEagent and report          in significant efficacy drops (-100% and -30%). On the other hand,
+ 10.5% overfitting, 1.3% memorization. Overfitting was most com-           there is no efficacy drop in SWE-bench tasks, since the MetaAgent
+ mon in SWE-verified, and least common in REPOTEST and SWT.                could invoke alternative actions such as ReviewPatch to refine
+                                                                           solutions. These results indicate that a single action can enhance
+6.3     RQ3: Self-Configuration                                            effectiveness across multiple task types.
+Figure 4 shows the different choices of the Meta-Agent when fac-            Summary: RQ3 - Self Configuration. USEagent is capable
+ing different tasks (we present two for brevity). The histograms            of choosing different action-patterns for different benchmarks.
+illustrate the actions taken at each step in the sequence (first, sec-      The self-configured workflow is as effective as predefined static
+ond, etc.). We observe some clear patterns in the different task            workflows. In addition, a single action can help improve efficacy
+types that match our intuition. For program repair tasks (i.e. in           in multiple task types.
+SWE-Verified), we see in Figure 4a that the first step prominently
+consists of generating a reproduction test, followed by retrieving
+relevant code context. Over the course of agent execution, the              6.4   RQ4: Open Challenges in Agentic Systems
+EditCode and ExecuteTests become more prominent, introduc-                 Based on our investigations, we identify several major challenges
+ing and verifying code changes to the software. For regression             in the current unified software engineering agent. Firstly, when the
+testing (in SWT), Figure 4b shows that by-large the first step cho-        task requires writing a large amount of code (e.g. feature develop-
+sen is TestRetrieval, immediately followed by a (test-)code edit.          ment tasks), the agent often generates solutions that are “mostly cor-
+The majority of USEagent trajectories on SWT tasks then consist of         rect”. This is reflected on our evaluation on the REPOCOD dataset,
+alternating test-changes and test-executions. Overall, the sequence        where the task is to implement a complex function based on natural
+of action invocation follows a certain pattern for each task type as       language requirement, and the correctness is defined as passing a
+shown in Figure 4, showing that USEagent can self-configure its            large number of hidden unit tests. We observe a number of solu-
+workflow based on the task type. Across all benchmarks, USEagent           tions generated by the agent implement the required feature almost
+first gathers information (using the retrieval actions or reproducers),    correctly, but fail a few hidden tests due to missing edge cases.
+converging towards alternating EditCode and ExecuteTests until             The edge-case behaviors are sometimes not specified clearly in the
+either budgets are exhausted or Terminate is chosen. This behav-           natural-language task description. We attribute this challenge in
+ior showcases the capability of emulating concepts like Test-Time          part to the inherent ambiguity of natural language. A future agent
+Scaling [9] and command-discovery [8] through the Meta-Agent.              may first resolve the ambiguity in natural language by transforming
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                    Applis, et al.
+
+
+
+
+(a) Distribution of SWE Steps – the most common trajectory begins         (b) Distribution of SWT Steps - the most common trajectory begins
+with reproduction, followed by code retrieval, editing, and review.       with test-case retrieval, followed by test-editing and execution.
+
+Figure 4: Comparison of SWT and SWE Step Distributions for USEagent on a significant subset of USEbench. Each bar shows
+how often different actions are invoked at a particular Meta-Agent step.
+
+
+the task requirements into more “formal” artifacts such as speci-          7    Related Work
+fications and test cases, and then generate solutions based on the             SE - Benchmarks. Recent Software Engineering Benchmarks fall
+formal specification. Another approach is to design human-agent            into two broad categories: isolated coding exercises and repository-
+interaction schemes to clarify ambiguity when needed.                      level tasks. Some coding datasets such as CodeXGlue [22] come
+   Secondly, the current agent lacks the capability of “backtracking”      without an evaluation metric and form a training corpus; others
+when the agent execution does not yield meaningful results on a            such as HumanEval [11], MBPP [6], ClassEval [13] or CoderEval
+given execution path. For example, when there is a partial patch at        [40] provide a challenge accompanied by an evaluation harness
+a particular program location, the agent is prone to continuously          (i.e., a test-suite). There are already ongoing efforts to provide a
+make small edits to the partial patch and execute tests to verify them.    meta-benchmark for these tasks [21, 41], which commonly target
+However, the agent may not make good progress with this approach,          LLMs directly rather than agentic systems. For USEbench, we select
+since it may be impossible to craft a good solution at the location of     repository-level tasks to ensure challenges of uniform granularity.
+the partial patch. This issue is amplified in the SWETRY dataset, in       We opted against coding exercises, as many models have begun to
+which the task description comes with a partial patch. To tackle this      saturate on such benchmarks [30].
+issue, a future agent should employ a backtracking mechanism to
+discard unpromising partial solutions, and start over at a previous            LLM Agents for Software Engineering. We consider a system agen-
+step. It could be possible to employ the recent reasoning LLMs to          tic if the LLM exhibits a degree of autonomy and can interact with
+examine the agent execution trace and decide whether to backtrack,         the environment through commands or other pre-defined tools.
+since reasoning models have shown backtracking behaviors in their          Within agentic systems, we distinguish terminal-based agents that
+thinking process [16]. Moreover, recent work [5] on employing              interface LLMs directly with a console and minimal tooling (e.g.,
+search algorithm over agent execution trajectories can help the            SWE-Agent [38], Google Jules [14]), from approaches that integrate
+agent escape from unpromising paths.                                       additional domain knowledge and techniques. These additions in-
+   Lastly, we still observe patch overfitting in tasks such as program     clude specialized tools (such as spectrum-based fault localization
+repair and regression testing. Overfitting is a known problem for          in AutoCodeRover [42]), self-reflective capabilities (such as the re-
+automated program repair [15]. Overfitting happens due to the gen-         viewer agent in SpecRover [29]), and control logic (such as the finite-
+erated patches passing given tests, but missing actual requirements.       state machine in RepairAgent [7]). In this work, we have focused on
+Thus, to avoid overfitting, if the tests are too specific, we need to      AutoCodeRover [42] and OpenHands [35], as both are widely used
+generalize them. Agentic systems show promise for test generation          open-source projects. While the Aider project [3] covers a well-
+(also reflected in this work), and the USEagent framework allows           suited scope involving multiple types of software engineering tasks,
+additional actions, such as test amplification or mutation testing,        its workflow relies on human prompting. Passerine [28] by Google
+to be incorporated into the agent. Artifacts from these actions can        proposes a program repair framework inspired by SWE-Agent [38]
+be fed back into code generation, thereby reducing overfitting and         and incorporates a structure similar to our Meta-Agent, providing
+enhancing trustworthiness.                                                 five pre-configured commands (and does not allow free execution
+ Summary: RQ4 - Open Challenges. Challenges include ex-                    of terminal commands, unlike SWE-Agent). Our approach differs in
+ ploring edge-case handling and alternative solutions in feature           scope, as we target a broader range of tasks beyond program repair.
+ development, backtracking and discarding poor partial results in          MASAI [33] defines an action space for its central agent similar to
+ repair, and addressing patch overfitting.                                 our Meta-Agent, but is also limited to program repair. In contrast,
+                                                                           we structure the essential artifacts involved in software debugging
+Unified Software Engineering Agent as AI Software Engineer                                                                 ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil
+
+
+    Table 5: Comparing USEagent with LLM agents for software engineering. All these agents take in natural language issues.
+
+                                           USEagent    SWE-Agent        OpenHands        AutoCode      Agentless      MASAI          Passerine        CodeR
+                                                                         CodeAct          Rover
+           Is workflow predefined or       dynamic       dynamic          dynamic        predefined    predefined    predefined       dynamic        predefined
+           dynamically constructed?
+           Handles only program repair     multiple      multiple         multiple        program       program       program         program         program
+           or multiple task types?                                                         repair        repair        repair          repair          repair
+           What is the “unit of work” in   SE action   terminal-level   terminal-level   SE action      SE action     SE action      SE action       SE action
+           the agent?                                    command          command
+           Multi-agent system?               yes             no              no             yes            no            yes             no              yes
+
+
+
+                                                                                         2.20 USD average, and REPOCOD highest at a mean of 7.66 USD.
+                                                                                         The high costs in REPOCOD originate from the iteration of patch
+                                                                                         generation and test execution. As shown in Figure 5, among all
+                                                                                         actions, EditCode is the main cost-driver, due to the large contexts
+                                                                                         provided through relevant code and tests. We calculate the Pear-
+                                                                                         son correlation coefficient for the elapsed time and the costs, and
+                                                                                         find a strong correlation of 𝑟 = 0.89, implying correlation between
+                                                                                         computational (e.g. test execution) and model (e.g. reasoning) ef-
+                                                                                         forts. When using DeepSeek-V3 as backend model, the average cost
+                                                                                         of USEagent is 0.55 USD per datapoint, which is ~15% of the cost
+       Figure 5: Average cost across Actions in USEagent.                                with Claude 3.5 Sonnet v2. Given the efficacy presented in Table 3,
+                                                                                         open-source models are cost-effective.
+
+via a task state, incorporate a broader set of software engineer-                            Perspectives. We consider the approach of USEagent to be a
+ing actions for orchestration, and apply the agentic framework to                        promising avenue for solving any task that revolves around code as
+multiple task types. CodeR [10] has a Meta-Agent component that                          its primary artifact. Many tasks such as dependency management
+pre-defines an execution plan, but does not adapt it dynamically as                      or project configuration can be incrementally tackled by introduc-
+USEagent does. Table 5 compares USEagent with existing software                          ing more actions into USEagent. For USEagent to become truly an
+engineering agents that take in natural language issues. USEagent                        AI Software Engineer, it must address tasks such as requirements
+distinguishes itself from the rest by dynamically orchestrating ac-                      engineering, data visualization, deployment, code review or even
+tions (each action is executed by sub-agents) to handle multiple                         a-b-testing. The efforts presented in this work are the second step in
+types of software engineering tasks.                                                     agentic development towards an AI software engineer, the first be-
+                                                                                         ing individual agentic systems for single tasks (like AutoCodeRover).
+8     Threats to validity                                                                With the USEagent we pave the way for a unified approach to inter-
+                                                                                         act autonomously with code regardless of the task. Going beyond
+   Construct Validity. Within USEbench, we approximate testing
+                                                                                         the USEagent will involve studying the cooperative intelligence
+capabilities using test coverage. While test coverage does not guar-
+                                                                                         resulting from multiple USEagents and multiple human developers.
+antee semantic coverage and can sometimes be achieved through
+                                                                                         This might establish the dynamics of future development teams.
+various hacks, it remains a useful proxy in the absence of a better or-
+acle. It captures several attributes we aim to evaluate: code changes                      Artifact Availability. We release the logs and evaluation of USE-
+must be correctly formatted and target the appropriate program                           agent at https://doi.org/10.5281/zenodo.15023393, the source code of
+locations. Moreover, upon inspection, many of the REPOTEST data-                         USEbench at https://github.com/nus-apr/USEbench, and the source
+points contain branches that handle edge-case behavior with errors,                      code of USEagent at https://github.com/nus-apr/USEagent.
+where syntactic coverage effectively reflects semantic testing.
+   Internal Validity: Data Leakage. It is possible that LLMs have                        Acknowledgments
+been exposed to the projects under evaluation or even datapoints                         This work was partially supported by a Singapore Ministry of Ed-
+from the source benchmarks [30]. While fully preventing such                             ucation (MoE) Tier 3 grant “Automated Program Repair”, MOE-
+exposure is beyond our capabilities and the scope of this work, we                       MOET32021-0001, and the NUS Artificial Intelligence Institute
+aim to provide an overview of potential memorization by manually                         (NAII) seed grant NAII-SF-2024-006. It was also supported in part
+inspecting a sample of plausible solutions.                                              by NSF 1901242 and 2006688 and a CFI fund.
+
+9     Discussion                                                                         References
+   Cost Analysis. With Claude 3.5 Sonnet v2 as the backend model,                         [1] [n. d.]. SWE-bench leaderboard. https://www.swebench.com/#verified. Accessed:
+                                                                                              2025-03-08.
+USEagent costs were at an average of 3.65 USD, with notable dif-                          [2] M Pradel A Roychoudhury, C Pasareanu and B Ray. 2025. AI Software Engineer:
+ferences across sub-benchmarks. Herein SWE scored lowest with                                 Programming with Trust. arxiv (Feb 2025).
+ICSE ’26, April 12–18, 2026, Rio de Janeiro, Brazil                                                                                                                    Applis, et al.
+
+
+ [3] AIDER Team. 2024. AIDER: Advanced AI-Powered Coding Assistant. https:                       The Thirty-eighth Annual Conference on Neural Information Processing Systems.
+     //aider.chat. Accessed: 2025-01-03.                                                         https://openreview.net/forum?id=9Y8zUO11EQ
+ [4] Anonymous. 2021. The Big Code Project: Learning to Program by Learning to              [24] OpenAI. 2024. Introducing SWE Bench: Verified. https://openai.com/index/
+     Understand Programming Languages. arXiv preprint arXiv:2102.01092 (2021).                   introducing-swe-bench-verified/. Accessed: 2025-01-03.
+ [5] Antonis Antoniades, Albert Örwall, Kexun Zhang, Yuxi Xie, Anirudh Goyal, and           [25] OpenAI. 2024. OpenAI o1: Large Language Model. https://openai.com/index/
+     William Wang. 2024. SWE-Search: Enhancing Software Agents with Monte Carlo                  introducing-openai-o1-preview/ Accessed: 2025-02-26.
+     Tree Search and Iterative Refinement. arXiv preprint arXiv:2410.20285 (2024).          [26] Andrew Orwall and contributors. 2025. Moatless Tools. https://github.com/
+ [6] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk                            aorwall/moatless-tools/tree/main. Accessed: 2025-02-04.
+     Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le,             [27] Ruchir Puri, Geert Jansen Saini, Shruti Kalyan, Naveen Limaye, Saurabh Kolar,
+     et al. 2021. Program synthesis with large language models. arXiv preprint                   Philipe Maldonado, Jianfeng Hu, Dinesh Sreedhar, Yunhui Zhang, Lingming
+     arXiv:2108.07732 (2021).                                                                    Zhang, et al. 2021. CodeNet: A Large-Scale AI for Code Dataset for Learning a
+ [7] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2024. Repairagent: An                Diversity of Coding Tasks. In 2021 IEEE/ACM 43rd International Conference on
+     autonomous, llm-based agent for program repair. arXiv preprint arXiv:2403.17134             Software Engineering: Companion Proceedings (ICSE-Companion). IEEE, 15–18.
+     (2024).                                                                                [28] Pat Rondon, Renyao Wei, José Cambronero, Jürgen Cito, Aaron Sun, Siddhant
+ [8] Islem Bouzenia and Michael Pradel. 2024. You Name It, I Run It: An LLM Agent                Sanyam, Michele Tufano, and Satish Chandra. 2025. Evaluating Agent-based
+     to Execute Tests of Arbitrary Projects. arXiv preprint arXiv:2412.10133 (2024).             Program Repair at Google. arXiv preprint arXiv:2501.07531 (2025).
+ [9] Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V Le, Christo-        [29] Haifeng Ruan, Yuntong Zhang, and Abhik Roychoudhury. 2024. Specrover: Code
+     pher Ré, and Azalia Mirhoseini. 2024. Large language monkeys: Scaling inference             intent extraction via llms. arXiv preprint arXiv:2408.02232 (2024).
+     compute with repeated sampling. arXiv preprint arXiv:2407.21787 (2024).                [30] June Sallou, Thomas Durieux, and Annibale Panichella. 2024. Breaking the
+[10] Dong Chen, Shaoxin Lin, Muhan Zeng, Daoguang Zan, Jian-Gang Wang, Anton                     silence: the threats of using llms in software engineering. In Proceedings of the
+     Cheshkov, Jun Sun, Hao Yu, Guoliang Dong, Artem Aliev, et al. 2024. CodeR: Issue            2024 ACM/IEEE 44th International Conference on Software Engineering: New Ideas
+     Resolving with Multi-Agent and Task Graphs. arXiv preprint arXiv:2406.01304                 and Emerging Results. 102–106.
+     (2024).                                                                                [31] Davide Spadini, Fabio Palomba, Andy Zaidman, Magiel Bruntink, and Alberto
+[11] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de                         Bacchelli. 2018. On the relation of test smells to software code quality. In 2018
+     Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg              IEEE international conference on software maintenance and evolution (ICSME).
+     Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf,              IEEE, 1–12.
+     Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail            [32] Arie Van Deursen, Leon Moonen, Alex Van Den Bergh, and Gerard Kok. 2001.
+     Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter,                    Refactoring test code. In Proceedings of the 2nd international conference on extreme
+     Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fo-                programming and flexible processes in software engineering (XP2001). Citeseer,
+     tios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex              92–95.
+     Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shan-     [33] Nalin Wadhwa, Atharv Sonwane, Daman Arora, Abhav Mehrotra, Saiteja Utpala,
+     tanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh             Ramakrishna B Bairi, Aditya Kanade, and Nagarajan Natarajan. 2024. MASAI:
+     Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles                    Modular Architecture for Software-engineering AI Agents. In NeurIPS 2024 Work-
+     Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei,               shop on Open-World Agents. https://openreview.net/forum?id=NSINt8lLYB
+     Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. 2021. Evaluating Large           [34] Xingyao Wang, Yangyi Chen, Lifan Yuan, Yizhe Zhang, Yunzhu Li, Hao Peng,
+     Language Models Trained on Code. (2021). arXiv:2107.03374 [cs.LG]                           and Heng Ji. 2024. Executable Code Actions Elicit Better LLM Agents. In ICML.
+[12] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Ryan Puri, Jared Nixon,                   arXiv:2402.01030
+     Pamela Mishkin, Daniel Nguyen, Jordan Kaplan, and Ananthan Rajasekaran.                [35] Xingyao Wang, Boxuan Li, Yufan Song, Frank F Xu, Xiangru Tang, Mingchen
+     2021. Evaluating Large Language Models Trained on Code. arXiv preprint                      Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, et al. 2024. Openhands:
+     arXiv:2107.03374 (2021).                                                                    An open platform for ai software developers as generalist agents. arXiv preprint
+[13] Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang, Junwei Liu, Yixuan Chen,                 arXiv:2407.16741 (2024).
+     Jiayi Feng, Chaofeng Sha, Xin Peng, and Yiling Lou. 2023. Classeval: A manually-       [36] W Eric Wong, Ruizhi Gao, Yihao Li, Rui Abreu, and Franz Wotawa. 2016. A
+     crafted benchmark for evaluating llms on class-level code generation. arXiv                 survey on software fault localization. IEEE Transactions on Software Engineering
+     preprint arXiv:2308.01861 (2023).                                                           42, 8 (2016), 707–740.
+[14] Google. 2024.          Google Gemini AI Update: December 2024.                 Blog    [37] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2024.
+     post.          https://blog.google/technology/google-deepmind/google-gemini-                Agentless: Demystifying llm-based software engineering agents. arXiv preprint
+     ai-update-december-2024/#building-responsibly                   Available online:           arXiv:2407.01489 (2024).
+     https://blog.google/technology/google-deepmind/google-gemini-ai-update-                [38] John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik
+     december-2024/#building-responsibly.                                                        Narasimhan, and Ofir Press. 2024. Swe-agent: Agent-computer interfaces enable
+[15] Claire Le Goues, Michael Pradel, and Abhik Roychoudhury. 2019. Automated                    automated software engineering. arXiv preprint arXiv:2405.15793 (2024).
+     Program Repair. Commun. ACM 62 (2019). Issue 12.                                       [39] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan,
+[16] Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin                      and Yuan Cao. 2023. ReAct: Synergizing Reasoning and Acting in Language
+     Xu, Qihao Zhu, Shirong Ma, Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1:                   Models. In International Conference on Learning Representations (ICLR).
+     Incentivizing reasoning capability in llms via reinforcement learning. arXiv           [40] Hao Yu, Bo Shen, Dezhi Ran, Jiaxin Zhang, Qi Zhang, Yuchi Ma, Guangtai Liang,
+     preprint arXiv:2501.12948 (2025).                                                           Ying Li, Qianxiang Wang, and Tao Xie. 2024. Codereval: A benchmark of prag-
+[17] Shanshan Han, Qifan Zhang, Yuhang Yao, Weizhao Jin, Zhaozhuo Xu, and                        matic code generation with generative pre-trained models. In Proceedings of the
+     Chaoyang He. 2024. LLM multi-agent systems: Challenges and open problems.                   46th IEEE/ACM International Conference on Software Engineering. 1–12.
+     arXiv preprint arXiv:2402.03578 (2024).                                                [41] Zhaojian Yu, Yilun Zhao, Arman Cohan, and Xiao-Ping Zhang. 2024. HumanEval
+[18] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press,           Pro and MBPP Pro: Evaluating Large Language Models on Self-invoking Code
+     and Karthik R Narasimhan. 2024. SWE-bench: Can Language Models Resolve                      Generation. arXiv preprint arXiv:2412.21199 (2024).
+     Real-world Github Issues?. In The Twelfth International Conference on Learning         [42] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-
+     Representations. https://openreview.net/forum?id=VTF8yNQM66                                 tocoderover: Autonomous program improvement. In Proceedings of the 33rd ACM
+[19] René Just, Darioush Jalali, and Michael D Ernst. 2014. Defects4J: A database of ex-         SIGSOFT International Symposium on Software Testing and Analysis. 1592–1604.
+     isting faults to enable controlled testing studies for Java programs. In Proceedings   [43] Zeyu Zhang, Xiaohe Bo, Chen Ma, Rui Li, Xu Chen, Quanyu Dai, Jieming Zhu,
+     of the 2014 international symposium on software testing and analysis. 437–440.              Zhenhua Dong, and Ji-Rong Wen. 2024. A survey on the memory mechanism of
+[20] Shanchao Liang, Yiran Hu, Nan Jiang, and Lin Tan. 2024. Can Language Models                 large language model based agents. arXiv preprint arXiv:2404.13501 (2024).
+     Replace Programmers? REPOCOD Says’ Not Yet’. arXiv preprint arXiv:2410.21647
+     (2024).
+[21] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. 2024. Is your
+     code generated by chatgpt really correct? rigorous evaluation of large language
+     models for code generation. Advances in Neural Information Processing Systems
+     36 (2024).
+[22] Shuai Lu, Daya Guo, Shuo Ren, Junjie Huang, Alexey Svyatkovskiy, Ambro-
+     sio Blanco, Colin Clement, Dawn Drain, Daxin Jiang, Duyu Tang, et al. 2021.
+     Codexglue: A machine learning benchmark dataset for code understanding and
+     generation. arXiv preprint arXiv:2102.04664 (2021).
+[23] Niels Mündler, Mark Niklas Mueller, Jingxuan He, and Martin Vechev. 2024.
+     SWT-Bench: Testing and Validating Real-World Bug-Fixes with Code Agents. In
+

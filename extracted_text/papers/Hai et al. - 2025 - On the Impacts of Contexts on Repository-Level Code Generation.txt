@@ -1,0 +1,1960 @@
+       On the Impacts of Contexts on Repository-Level Code Generation
+
+                    Nam Le Hai1,2,† , Dung Manh Nguyen1 , Nghi D. Q. Bui1
+                               1
+                                 FPT Software AI Center, Vietnam
+                     2
+                       Hanoi University of Science and Technology, Viet Nam
+             namlh@soict.hust.edu.com, dungnm31@fpt.com, bdqnghi@gmail.com
+
+
+
+                        Abstract                                in real-world, professional software development
+                                                                scenarios presents more complex challenges. A
+     CodeLLMs are widely used for code genera-                  critical aspect of this complexity lies in leverag-
+     tion, yet their ability to handle repository-level         ing relevant contexts/dependencies (e.g., function
+     dependencies remains underexplored. We in-
+                                                                calls, imports, class hierarchy) across an entire soft-
+     troduce R EPO E XEC, a benchmark for evalu-
+     ating repository-level code generation, focus-             ware repository, which raises two pivotal questions.
+     ing on executability, functional correctness,              First, to what extent are the retrieved contexts accu-
+     and dependency utilization. Our study evalu-               rate and relevant, rather than potential noise in the
+     ates 18 models, revealing that retaining full de-          input? Second, how effectively do LLMs process
+     pendency context yields the best performance,              and incorporate the provided dependencies into
+     while smaller context sizes can be mislead-                their generated code? These inquiries are central
+     ing. Pretrained LLMs excel in correctness
+                                                                to understanding the capabilities and limitations
+     but often reimplement dependencies, while
+     instruction-tuned models better utilize depen-
+                                                                of CodeLLMs in repository-level code generation,
+     dencies but sometimes introduce unnecessary                where completing a single line of code might re-
+     complexity. We propose an instruction-tuning               quire making API calls to functions within the same
+     dataset that improves dependency handling and              file (in-file context) or across different files (cross-
+     introduce a new metric, Dependency Invoca-                 file context).
+     tion Rate (DIR), to measure context utiliza-
+     tion. Experiments show that instruction-tuned                 Existing repository-level code generation bench-
+     models improve DIR by over 10%, and multi-                 marks, such as RepoBench (Liu et al., 2023b),
+     round debugging further enhances both correct-             RepoCoder (Zhang et al., 2023a), CrossCodeE-
+     ness and dependency use. R EPO E XEC pro-                  val (Ding et al., 2023), CoCoMIC (Ding et al.,
+     vides a comprehensive framework to advance                 2024), and DevEval (Li et al., 2024), have advanced
+     CodeLLMs for real-world applications. The                  the evaluation of code generation at a repository
+     dataset and source code are available at https:
+                                                                level. However, they exhibit key limitations: (1)
+     //github.com/FSoft-AI4Code/RepoExec.
+                                                                Lack of an executable environment, leading to de-
+1    Introduction                                               pendence on match-based metrics that fail to as-
+                                                                sess functional correctness adequately; (2) Insuf-
+Code Large Language Models (CodeLLMs) have                      ficient control over unit test quality, reducing the
+emerged as powerful tools for assisting with cod-               data pipeline scalability and robustness of the eval-
+ing tasks (Wang et al., 2021, 2023; Feng et al.,                uation; and (3) Overemphasis on functional cor-
+2020; Allal et al., 2023; Li et al., 2023; Lozhkov              rectness metrics like pass@k, which is inadequate
+et al., 2024; Guo et al., 2024; Pinnaparaju et al.,             for comprehensive repository-level code genera-
+2024; Zheng et al., 2024; Roziere et al., 2023; Ni-             tion evaluation. In real-world development, code
+jkamp et al., 2022; Luo et al., 2023; Xu et al.,                often needs to call predefined modules (functions,
+2022; Bui et al., 2023; Manh et al., 2024; Liu et al.,          classes, or variables) in the repository to align with
+2024a). While these models excel at generating                  developer intent. While LLMs may generate code
+code from natural language requirements or com-                 that passes tests, it can result in inefficient imple-
+pleting individual lines of code, their application             mentations or unnecessary duplication of prede-
+    * A majority of this work was done while the first author
+                                                                fined functions, leading to issues like technical debt
+was an AI resident at FPT Software AI Center.                   and code smells (Maldonado and Shihab, 2015;
+   †
+     Corresponding author: namlh@soict.hust.edu.vn              Sierra et al., 2019; Santos et al., 2018).
+                                                            1496
+                                 Findings of the Association for Computational Linguistics:
+                                               NAACL 2025, pages 1496–1524
+                          April 29 - May 4, 2025 ©2025 Association for Computational Linguistics
+                                                                                          Unit-test     Coverage
+                                                                                         generation    Enhancement
+
+
+
+
+                                                                                Syntax Error              Assertion fixer                  Functions
+                                                                                Function invocation
+                  extracting
+                                                                                                           Multiple time                  Dependencies
+                                                                                                            execution
+     Repository                Function extraction    Dependencies extraction                                                  RepoExec
+                                                                                Syntax-based filter   Execution-based filter
+                                                                                                                                           Testcases
+
+
+
+
+                                                     Figure 1: Data Processing Pipeline of R EPO E XEC
+
+
+   To address these gaps, we propose R EPO E XEC,                                       test execution, particularly with models like GPT-
+a novel benchmark designed to ensure both func-                                         3.5 and WizardCoder, significantly boosts both
+tional correctness and effective dependency uti-                                        pass@1 and DIR after three rounds. Additionally,
+lization. It offers an executable environment for                                       fine-tuning on our dependency-enhanced dataset
+reliable functional evaluation and incorporates a                                       improves these metrics while reducing computa-
+mechanism to generate high-coverage test cases,                                         tional costs. These findings highlight the benefits
+enhancing the robustness of functional correctness                                      of executable code testing, instruction tuning, and
+assessment. Additionally, we also propose Depen-                                        iterative debugging for improving CodeLLM per-
+dency Invocation Rate (DIR), a metric that evalu-                                       formance and managing code dependencies more
+ates the extent to which generated code leverages                                       effectively. Besides, it also demonstrates that better
+predefined dependencies, offering a more compre-                                        context utilization leads to higher pass@k scores
+hensive measure of model performance beyond                                             (detailed analysis provided in Sections 6.2, 6.3 and
+merely passing test cases.                                                              Appendix G). In summary, our contributions are as
+   Our experiments with R EPO E XEC offer several                                       follows:
+key insights into repository-level code generation.                                     1. We introduce a novel evaluation paradigm for
+Firstly, given varying context levels (full, medium,                                       repository-level code generation, assessing both
+small), which correspond to the information pro-                                           functional correctness and quality factors such
+vided for dependencies—such as full implementa-                                            as maintainability and adherence to clean code
+tion, docstrings, and function signatures—we ob-                                           principles through efficient dependency use.
+serve that models achieve the best performance
+when given full context dependencies while also                                         2. We present the Dependency Invocation Rate
+showing potential with smaller contexts. Secondly,                                         (DIR), a novel metric that measures the pro-
+pretrained LLMs and instruction-tuned LLMs ex-                                             portion of provided dependencies successfully
+hibit different strengths: pretrained LLMs gener-                                          incorporated into the generated code. This met-
+ally excel in pass@k metrics, while instruction-                                           ric helps gauge the models’ understanding and
+tuned LLMs perform better on the Dependency                                                utilization of dependencies and shows a strong
+Invocation Rate (DIR). This suggests that while                                            correlation with functional correctness.
+pretrained LLMs can generate runnable code, they
+often struggle with properly utilizing dependencies,                                    3. We introduce R EPO E XEC, a novel benchmark
+which means the code may pass tests but might not                                          that aligns with our evaluation paradigm, ad-
+be correctly implemented in a repository-level con-                                        dressing the gaps in existing benchmarks and
+text. On the other hand, instruction-tuned LLMs                                            offering a comprehensive assessment of code
+make better use of contextual information. These                                           generation quality. Additionally, an effective
+findings highlight the importance of using both                                            pipeline is introduced within R EPO E XEC from
+pass@1 and DIR for a more holistic evaluation,                                             dependency extraction, dynamically generate
+emphasizing the need to improve both functional                                            high-coverage test cases and automatic evalua-
+correctness and context utilization in CodeLLMs.                                           tion with execution and code dependencies. Our
+                                                                                           pipeline offers practical usage and scalability
+  Furthermore, we investigate two methods to                                               for the community.
+enhance repository-level code generation: multi-
+round debugging and instruction tuning with de-                                         4. We release a tool named pydepcall to extract
+pendency contexts. Multi-round debugging with                                              dependencies for all functions within any repos-
+                                                                                1497
+    itory, providing a practical use for advancing         scenarios, underscoring the importance of cross-
+    research in this domain.                               contextual considerations. However, these works
+                                                           are still limited to match-based evaluation meth-
+5. Our experiments reveal key insights into                ods. A recent study (Li et al., 2024) introduced
+   CodeLLMs’ performance in repository-level               the DevEval benchmark for code generation within
+   code generation. While foundation models show           repository contexts, evaluating performance based
+   high initial accuracy, instruction-tuned models         on extracted tests available in the repository. These
+   excel in dependency management. Additionally,           benchmarks primarily focus on assessing the func-
+   multi-round debugging tests further improve per-        tional correctness of generated outputs but have not
+   formance, enhancing dependency management.              extensively investigated the correctness in conjunc-
+   Notably, a strong correlation between pass@1            tion with the ability to utilize dependency contexts.
+   and DIR underscores that better context utiliza-
+   tion leads to more functionally correct code.           3   Evaluation Paradigm
+2    Related works                                         In this section, we outline our paradigm to achieve
+Coding-related tasks have been crucial for assess-         a more robust and comprehensive evaluation of
+ing the performance of Large Language Models               repository-level code generation. Our paradigm
+(LLMs), with code generation emerging as a pri-            encompasses two key attributes: Functional cor-
+mary focus (Chen et al., 2021; Li et al., 2023;            rectness and Dependency utilization.
+Jiang et al., 2024; Touvron et al., 2023; Roziere          Functional correctness: This evaluation crite-
+et al., 2023; Xu et al., 2022; Allal et al., 2023; Ni-     rion ensures that the code accurately performs its
+jkamp et al., 2022; Phan et al., 2024a; To et al.,         intended tasks and requirements. Specifically, it
+2023). Early benchmarks have been introduced to            typically involves using test cases to compare the
+address this issue (Yin et al., 2018; Iyer et al., 2018;   execution output of the generated code against the
+Nguyen et al., 2023; Chen et al., 2021; Austin et al.,     expected output for a given input. This criterion has
+2021; Hendrycks et al., 2021); however, they often         been widely employed for evaluating code genera-
+had limited scope or employed weak evaluation ap-          tion in numerous studies (Chen et al., 2021; Austin
+proaches. Some benchmarks (Yin et al., 2018; Iyer          et al., 2021; Zhuo et al., 2024; Li et al., 2024). We
+et al., 2018; Nguyen et al., 2023) exhibit domain          follow the well-known automatic metric Pass@k
+diversity akin to real-world applications; however,        (Chen et al., 2021) to measure the functional cor-
+their evaluation methodologies are constrained to          rectness of generation outputs.
+match-based metrics, thereby decreasing the reli-
+ability of these benchmarks (Chen et al., 2021).           Dependency utilization: Functional correctness
+Meanwhile, benchmarks with reliable evaluation             alone cannot fully capture code quality, as it
+approaches such as HumanEval (Chen et al., 2021),          may overlook poor implementations or redundancy.
+MBPP (Austin et al., 2021) and APPS (Hendrycks             Match-based metrics like BLEU and edit similarity
+et al., 2021) often entail limitations to specific do-     evaluate alignment between generated and refer-
+mains like competitive programming. Recently,              ence code at the token level. However, not all
+there have been efforts to extend the domains of           tokens impact code quality equally, and alterna-
+generation tasks in various benchmarks. For in-            tive implementations can maintain quality despite
+stance, ExeDS (Huang et al., 2022) focuses on data         low similarity scores. Tokens representing called
+science code generation, while ODEX (Wang et al.,          dependencies—such as packages, functions, vari-
+2022) serves as an open-domain benchmark for               ables, and classes within the repository—imply
+code generation. Besides, all the benchmarks men-          effective use of human intent for efficient imple-
+tioned primarily focus on standalone function gen-         mentation. Ignoring these dependencies may sug-
+eration, lacking consideration for cross-contextual        gest workaround implementations misaligned with
+and dependency invocation scenarios.                       human intent, leading to increased verification and
+   Several recent studies have introduced frame-           maintenance costs. To assess the models’ ability to
+works and benchmarks for repository-level code             utilize provided dependencies in accordance with
+generation (Ding et al., 2024; Shrivastava et al.,         human intent, we introduce the Dependency In-
+2023; Ding et al., 2023; Liao et al., 2023; Liu et al.,    vocation Rate (DIR). This metric represents the
+2023b). These studies closely align with real-world        percentage of invoked dependencies out of the total
+                                                       1498
+                                                                         #No problem         #No testcase          Avg tokens
+number of dependencies provided. Let Dg denote                         Cross-file Total   Avg LC (%)     Avg    Prompt Solution
+the set of identifiers in the generated output, and Ds       Full       22.8%      355      96.25       99.45   362.92    78.46
+                                                             Medium        -        -          -          -     253.05      -
+denote the set of provided dependencies extracted            Small         -        -          -          -     179.66      -
+from the solution. The Dependency Invocation
+Rate (DIR) is calculated as follows:                      Table 1: Dataset attributes with different levels of con-
+                                                          texts. Cross-file refers to the percentage of problems
+                         |Dg ∩ Ds |                       that involve cross-file dependencies. Tree-sitter is used
+                 DIR =
+                           |Ds |                          for tokenization. AVG LC: Average Line Coverage.
+A higher DIR indicates that the model successfully
+incorporates a larger proportion of the provided          et al., 2021) and MBPP (Austin et al., 2021). Us-
+dependencies into the generated code, demonstrat-         ing tree-sitter, we parse files into Abstract Syntax
+ing a better understanding of the dependencies’           Trees (AST) to extract functions, focusing on those
+relevance and their intended usage. Conversely, a         with comprehensive docstrings and excluding func-
+lower DIR suggests that the model may struggle to         tions used as entry points or that do not produce
+identify and utilize the appropriate dependencies,        verifiable outputs.
+potentially generating code that is less aligned with
+the human-intent solution. In summary, achieving          Dependencies extraction: We employ static
+a high-quality solution requires the generated code       analysis on call graph to identify dependencies,
+to excel in both functional correctness and depen-        excluding identifiers that are function parameters
+dency utilization. Otherwise, it indicates a lack         or typing objects. Each dependency name is then
+of ability to generate correct solutions or suggests      mapped to its definition within the repository using
+poor implementation practices, including technical        a repository graph and static analysis tools. We
+debt or code smell issues.                                release our tool pydepcall for community usage
+                                                          and provide a brief description in Appendix I.
+4   Data Collection Pipeline                                 For example in Figure 2, for the function
+                                                          camel_case_to_snake in manipulation.py, our
+Developing an executable benchmark within repos-
+                                                          process identifies CAMEL_CASE_REPLACE_RE as an
+itory contexts is challenging due to complex setup
+                                                          in-file dependency and analyzes import statements
+requirements and frequent lack of clear installation
+                                                          to track cross-file dependencies from errors.py
+guidelines in repositories. Previous studies (Ding
+                                                          and validation.py. Dependencies are then
+et al., 2024; Shrivastava et al., 2023; Ding et al.,
+                                                          parsed and incorporated into the input prompt to
+2023; Liao et al., 2023) have often relied on match-
+                                                          ensure comprehensive context for code generation.
+based metrics for evaluation, which may not fully
+capture code functionality. In addition, test cases       4.2       Test case generation
+are essential for assessing code functionality. How-
+                                                          To overcome the limitation of requiring available
+ever, extracting test cases from repositories (Zhang
+                                                          tests in the repository for evaluation as in previous
+et al., 2023b; Li et al., 2024; Zhang et al., 2024) of-
+                                                          works, we leverage large language models (LLMs)
+ten relies on available functions and heuristic rules,
+                                                          to generate test cases automatically. Our proposed
+limiting adaptability and excluding data without
+                                                          approach ensures the correctness of created test
+existing tests. For instance, Li et al. 2024 found
+                                                          cases while also controlling and enhancing test
+that over 99% of functions were discarded due to
+                                                          coverage. To execute and validate the generated
+the absence of suitable tests. We propose a dataset
+                                                          test cases, it is necessary to configure each reposi-
+collection pipeline to ensure that repositories can
+                                                          tory to create an executable environment. Follow
+build executable environments and that test cases
+                                                          Lemieux et al. 2023, we use pipreqs1 to identify
+are automatically generated. The complete data
+                                                          each project’s dependency packages.
+pipeline is illustrated in Figure 1, with details of
+                                                             In our test generation process, we conduct two
+the data sources provided in Appendix A.
+                                                          phases corresponding to Correctness Control and
+4.1 Functions and Dependencies Extraction                 Coverage Enhancement. After the test generation
+                                                          process, we exclude samples with a line coverage
+Function extraction: We extract functions and
+                                                          lower than 40%, as they are insufficient to accu-
+their dependencies from repositories, considering
+                                                          rately assess the correctness of the generated code.
+only those suitable for function-level code gener-
+ation, akin to benchmarks like HumanEval (Chen                 1
+                                                                   https://github.com/bndr/pipreqs
+
+                                                      1499
+                             (1)                     (2)          (3)                 (4)                                                         (6)
+                                                                                                                     (5)
+                         dependency              dependency   dependency          dependency                                                Target function
+                                                                                                              in-file import
+                          signature               docstring     content             variable                                                    prompt
+
+
+       errors.py
+                                                                              Prompt
+        ...
+                                                                                          Full context
+    (1) class InvalidInputError(TypeError):
+
+                 """                                                                       (5)    +    (4)    +       (1)      +    (2)      +       (3)        +   (6)
+    (2)          Custom error raised when received object is not
+                 a string as expected.
+                 """
+                                                                                        Medium context
+    (1)          def __init__(self, input_data: Any):
+
+                     """
+                                                                                           (5)    +    (4)    +       (1)      +    (2)          +    (6)
+    (2)              :param input_data: Any received object
+                     """
+
+                     type_name = type(input_data).__name__
+                     msg = 'Expected "str", received "                                    Small context
+    (3)                      {}"'.format(type_name)
+                     super().__init__(msg)
+                                                                                           (5)    +     (4)    +      (1)      +      (6)
+           ...
+
+
+                                      Cross-file context                                                                In-file context
+                                                                                    manipulation.py
+    validation.py
+                                                                                      import base64
+     ...                                                                              import random
+    (4) DEFAULT_SEPERATOR = '_'                                                       import unicodedata
+                                                                                      import zlib
+                                                                                      from typing import Union
+    (1) def is_string(obj: Any) -> bool:
+                                                                                  (5) from uuid import uuid4
+                 """                                                                  from ._regex import *
+                 Checks if an object is a string.                                     from .errors import InvalidInputError
+                                                                                      from .validation import is_snake_case,
+                 *Example:*                                                           is_full_string, is_camel_case, is_integer, is_string,
+                                                                                      DEFAULT_SEPERATOR
+                 >>> is_string('foo') # returns true
+    (2)          >>> is_string(b'foo') # returns false                                CAMEL_CASE_REPLACE_RE = re.compile(r'([a-z]|[A-Z]+)(?
+                                                                                  (4) =[A-Z])')
+                 :param obj: Object to test.
+                 :return: True if string, false otherwise.
+                                                                                        def camel_case_to_snake(input_string,
+                 """
+                                                                                        separator=DEFAULT_SEPERTATOR):
+                 return isinstance(obj, str)                                                """
+    (3)
+                                                                                             Convert a camel case string into a snake case one.
+                                                                                             (The original string is returned if is not a valid
+                                                                                             camel case string)
+    (1) def is_camel_case(input_string: Any) -> bool:
+                                                                                             *Example:*
+                 """                                                              (6)
+                 Checks if a string is formatted as camel case.                              >>> camel_case_to_snake('ThisIsACamelStringTest') #
+                                                                                             returns 'this_is_a_camel_case_string_test'
+                 A string is considered camel case when:
+                                                                                             :param input_string: String to convert.
+                 - it's composed only by letters ([a-zA-Z]) and                              :type input_string: str
+                 optionally numbers ([0-9])                                                  :param separator: Sign to use as separator.
+                 - it contains both lowercase and uppercase letters                          :type separator: str
+                 - it does not start with a number                                           :return: Converted string.
+    (2)                                                                                      """
+                 *Examples:*
+                                                                                             if not is_string(input_string):
+                 >>> is_camel_case('MyString') # returns true                                    raise InvalidInputError(input_string)
+                 >>> is_camel_case('mystring') # returns false
+                                                                                             if not is_camel_case(input_string):
+                 :param input_string: String to test.
+                                                                                                 return input_string
+                 :type input_string: str
+                 :return: True for a camel case string, false otherwise.
+                 """                                                                         return CAMEL_CASE_REPLACE_RE.sub(lambda m:
+                                                                                                 m.group(1) + separator,
+                 return is_full_string(input_string) and                                         input_string).lower()
+    (3) ...          CAMEL_CASE_TEST_RE.match(input_string) is
+                     not None                                                       ...
+
+                                                                                                 Target function                                     Solution
+
+
+
+
+Figure 2: Illustration of a data instance in RepoExec. The target function signatures and their associated docstrings,
+which describe the functionality of the functions, are shown in (6). The infile-imports and variable declarations are
+represented by (5) and (4), respectively. The remaining components, (1), (2), and (3), represent the function and
+class contexts. Specifically, (1) denotes the class or function signature, (2) may contain the description of the class,
+and (3) represents the function body of the cross-file function.
+
+
+4.2.1 Correctness Control                                                     ness. Specifically, we use CodeLlama-13b (Roziere
+                                                                              et al., 2023) and provide the model with the prompt
+In this stage, we present the procedure for generat-                          detailed in Appendix D. The first 20 assertions form
+ing initial test cases and ensure the tests’ correct-
+                                                                           1500
+ Pipeline
+                 RepoContext     Test           Test      5       Data Characteristics
+                   Mining      Generation   Enhancement
+ RepoCoder            ✓            ✗            ✗
+                                                          5.1      Data Formatting
+ R2E                  ✓            ✓            ✗         Figure 2 illustrates the input data format used in
+ CodeBenchGen         ✗            ✓            ✓         R EPO E XEC. We retain import information and ap-
+ R EPO E XEC          ✓            ✓            ✓         pend dependencies in the order presented in the
+                                                          import statements, placing the target function sig-
+Table 2: Comparison of data construction pipelines
+                                                          nature and description at the end of the prompt.
+across different repo-level code generation benchmarks.
+                                                          To evaluate the reasoning capability of CodeLLMs
+                                                          in repo-level code generation, we propose three
+                                                          prompt types with varying context lengths:
+the test cases, which are then filtered via syntax and
+execution checks to ensure correctness.                   • Full-size context: All contexts, including cross-
+                                                            file and in-file contexts, are preserved to assess
+                                                            the model’s ability to navigate and utilize the
+Syntax-based filter: We filter out tests that               complete information available in the repository.
+present syntax errors during parsing into AST. Ad-
+ditionally, tests that do not invoke the function un-     • Medium-size context: Class and function bod-
+der test are excluded. For instance, while the state-       ies are removed, while their signatures and doc-
+ment “assert 1” may pass during execution, it is            strings are retained. This tests the model’s ability
+meaningless and negatively impacts the evaluation.          to infer the functionality and usage of dependen-
+                                                            cies based on their interfaces and documentation,
+                                                            reducing the input context length.
+Execution-based filter: We use pytest2 to run
+the generated tests, discarding those with errors         • Small-size context: Only the signatures of
+except for AssertionError. If an assertion error            the dependencies are retained. This tests if
+occurs, the Assertion Fixer resolves it by execut-          CodeLLMs can infer the usage of dependencies
+ing the test with the target function, extracting the       in the target function given only the function sig-
+output, and updating the assertion. To handle com-          natures without docstrings, representing the most
+plex return types (e.g., custom objects), we employ         challenging case with minimal information.
+pickle3 to store results. Additionally, to address
+                                                             Evaluating the model’s performance across these
+flaky tests that are inconsistent due to randomness,
+                                                          context sizes provides insights into the trade-offs
+each test is executed 10 times for comparison.
+                                                          between input context length and the model’s rea-
+                                                          soning capabilities, helping to understand the opti-
+4.2.2 Coverage Enhancement                                mal balance between providing sufficient informa-
+                                                          tion and minimizing input size for effective code
+Weak unit tests may allow incorrect implementa-           generation at the repository level.
+tions to pass (Liu et al., 2023a). To address this,          We follow Muennighoff et al. 2023 to define 2
+we propose a strategy for enhancing test coverage         types of prompt formats in our evaluation of R E -
+using LLMs. Given the complexity of this task,            PO E XEC across LLMs: (1) BasePrompt, which
+requiring a strong understanding of code, we uti-         concatenates all contexts with the target functions
+lize GPT-3.5 to improve the quality of test cases.        (Figure 2), and (2) InstructPrompt, which includes
+We provide GPT-3.5 with three prompts (see Ap-            specific instructions for the LLMs to follow, utiliz-
+pendix D) to handle challenging scenarios, includ-        ing two variations as input formats (further details
+ing edge and corner cases. The initial generated          and examples in Appendix E).
+tests serve as few-shot examples. We then extract
+                                                          5.2      Dataset Stastistic
+the newly generated tests and ensure their correct-
+ness using our methodology from Section 4.2.1. Ta-        Comparison to Existing Benchmarks: Table
+ble 3 shows a line coverage improvement of about          3 compares the details of R EPO E XEC with ex-
+4% after enhancement, reaching 96.25%. The per-           isting code generation benchmarks. Benchmarks
+formance gap has also increased to over 5% (Ap-               2
+                                                                  https://github.com/pytest-dev/pytest
+pendix C), indicating greater robustness.                     3
+                                                                  https://docs.python.org/3/library/pickle.html
+
+                                                      1501
+ Dataset                             #Samples   RC   TC     LC (%)
+ CoNaLA (Yin et al., 2018)              500      ✗    ✗        -
+                                                                        test cases but lacks enhancement, limiting scalabil-
+ CONCODE (Iyer et al., 2018)           2,000     ✗    ✗        -        ity. CodeBenchGen uses LLMs to synthesize func-
+ HumanEval (Chen et al., 2021)          164      ✗   ✓, H    99.43
+ MBPP (Austin et al., 2021)             974      ✗   ✓, H    98.48      tion contexts, reducing practicality. Lastly, R2E
+ RepoCoder (Zhang et al., 2023b)        373     ✓    ✓, P      -        is the most closely related to our approach, how-
+ CrossCodeEval (Ding et al., 2023)     2,665    ✓     ✗        -
+ CoCoMIC (Ding et al., 2024)           6,888    ✓     ✗        -        ever, it similarly neglects test case enhancement
+ DevEval (Li et al., 2024)             1,874         ✓, P      -
+ R EPO E XEC                            355
+                                                ✓
+                                                ✓    ✓, A    92.46
+                                                                        like RepoCoder, which can undermine evaluation
+   + coverage-enhancement                                    96.25      robustness (as detailed in Appendix C).
+Table 3: The comparison between popular code gener-                     Dataset attributes: Table 1 outlines the charac-
+ation benchmarks and R EPO E XEC. For test case, we                     teristics of R EPO E XEC, including the total number
+denote H: Human annotated, P: Pre-existing, A: Auto-                    of examples, the average number of test cases, and
+mated. RC: Repo-context utilization. TC: Test Cases.                    the number of tokens in prompts and solutions.
+LC: Line Coverage
+                                                                        6     Experiment
+that exclude execution-based evaluation (Yin et al.,                    6.1    Evaluation Results
+2018; Iyer et al., 2018; Ding et al., 2023, 2024)                       We evaluated 18 CodeLLMs on R EPO E XEC and
+may gather substantial amounts of data; however,                        presented the results (pass@1, pass@5, and DIR)
+they are inadequate for assessing the quality of the                    in Table 4. We use nucleus sampling with tem-
+generated code. For HumanEval and MBPP, the                             perature set to 0.2, top-p to 0.95, and 10 outputs
+majority of problems involve standalone functions,                      generated for all models. For evaluating super-large
+which do not reflect real-world scenarios. Besides,                     models requiring paid API access, we utilize greedy
+benchmarks that rely on human-annotated and pre-                        decoding and report pass@1 and DIR metrics un-
+existing test cases (Chen et al., 2021; Austin et al.,                  der the Full Context setting. The results show that
+2021; Zhang et al., 2023a; Li et al., 2024) are chal-                   retaining the full context of dependencies yields the
+lenging to scale and control the test coverage. Fi-                     best performance across all models. Surprisingly,
+nally, repository-context benchmarks (Zhang et al.,                     Small-size context proves to be more effective than
+2023a; Ding et al., 2023, 2024; Li et al., 2024)                        Medium-size context, which we attribute to the
+primarily focus on investigating retrieval modules.                     context’s input format using BasePrompt, poten-
+For example, RepoCoder analyzes a retriever using                       tially misleading the model into interpreting the
+a sparse bag-of-words model. Similarly, Cross-                          dependency functions as few-shot examples. Using
+CodeEval experiments and reports performance                            the Small-size context results in a fair decrease in
+using various retrievers such as BM25, UniXCoder,                       performance compared to the Full context while
+and OpenAI ada. CoCoMic proposed CCFINDER                               effectively reducing the input length.
+to retrieve cross-file context. DevEval is the closest                     DeepSeek-R3 achieves the highest pass@1 rate
+to our work; however, they compare the perfor-                          among the evaluated models. Additionally, Base-
+mance of the generation model based on different                        Prompt and pretrained models exhibit superior ef-
+given types of file-level context, which can also                       fectiveness over instruction-tuned models in terms
+align with the different contexts provided by differ-                   of functional correctness (pass@k) when compar-
+ent retrievers. In contrast, our approach emphasizes                    ing models of similar size on R EPO E XEC. How-
+the generation module’s ability to understand and                       ever, our analysis reveals limitations in both types
+utilize human-provided dependency contexts.                             of models. Additional discussions and examples
+                                                                        are provided in Appendix F.
+Comparison to Existing Data Pipeline: Several
+                                                                        1. Instruction-tuned LLMs demonstrate a higher
+studies, including RepoCoder (Zhang et al., 2023a),
+                                                                           capacity for utilizing given dependencies than
+R2E (Jain et al., 2024), and CodeBenchGen (Xie
+                                                                           foundation LMs, sometimes enabling them to
+et al., 2024), have introduced data pipelines for
+                                                                           address edge or corner cases that foundation
+repository-level code generation. Table 2 compares
+                                                                           models have overlooked.
+our pipeline with these approaches across three
+key aspects: RepoContext mining, Test Genera-                           2. Despite the high DIR, instruction-tuning LMs
+tion, and Test Enhancement. These components                               may not utilize dependencies correctly and fre-
+are crucial for robust evaluation, as missing any can                      quently produce overly complex code, leading
+compromise quality. RepoCoder extracts existing                            to incorrect solutions.
+                                                                     1502
+                                                                      Full context               Medium context           Small context
+              Model
+                                                                pass@1 pass@5 DIR            pass@1 pass@5 DIR       pass@1 pass@5 DIR
+                                                                        BasePrompt
+              CodeLlama-13b-Python (Roziere et al., 2023)       38.65     43.24      62.26   32.96   38.33   56.38   35.66   42.41   62.67
+              StarCoder (Li et al., 2023)                       28.08     33.95      58.75   22.54   31.83   50.74   25.54   31.45   56.67
+Pre-models
+
+
+
+
+              StarCoder2-15b (Lozhkov et al., 2024)             27.77     32.60      60.57   18.70   23.28   39.28   23.27   29.78   53.49
+              Mixtral-8x7B-v0.1 (Jiang et al., 2024)            22.82     29.14      55.90   19.38   25.25   47.22   20.54   26.30   53.40
+              Phi-2 (Javaheripi et al., 2023)                   19.04     24.56      48.22   14.54   20.34   40.85   14.82   20.69   44.54
+              Phi-1 (Gunasekar et al., 2023)                    14.99     18.38      43.17   12.48   15.42   37.45   12.54   15.96   38.75
+              DeepSeek-R1 (Guo et al., 2025)                    42.57       -        70.86     -       -       -       -       -       -
+              DeepSeek-V3 (Liu et al., 2024a)                   42.00       -        80.35     -       -       -       -       -       -
+              Llama 3.1-405B-Instruct (Dubey et al., 2024)      34.86       -        78.81     -       -       -       -       -       -
+              GPT-4o                                            37.14       -        81.43     -       -       -       -       -       -
+              GPT-4o-mini                                       30.29       -        74.75     -       -       -       -       -       -
+Inst-models
+
+
+
+
+              CodeLlama-34b-Python (Roziere et al., 2023)       40.93     49.54      68.85   35.92   42.95   58.15   39.80   45.79   64.23
+              WizardCoder-Python-13B-V1.0 (Luo et al., 2023)    34.31     40.06      62.90   30.99   36.75   59.50   32.54   38.34   64.67
+              Phind-CodeLlama-34B-v2                            30.08     33.49      59.47   25.25   29.40   50.73   27.55   31.85   58.93
+              CodeLlama-13b-Instruct (Roziere et al., 2023)     28.56     32.67      57.09   26.25   30.72   49.48   26.73   33.50   54.53
+              GPT-3.5                                           27.27     37.69      63.59   23.15   33.94   52.79   22.59   33.63   55.22
+              DeepSeek-Coder-7b-Instruct (Guo et al., 2024)     25.18     29.91      58.50   20.23   26.02   45.76   22.20   27.74   56.69
+              Mixtral-8x7B-Instruct-v0.1 (Jiang et al., 2024)   23.41     28.71      59.83   19.04   24.83   52.75   20.45   25.84   58.17
+                                                                    InstructPrompt
+              DeepSeek-R1 (Guo et al., 2025)                    39.71       -        53.78     -       -       -       -       -       -
+              DeepSeek-V3 (Liu et al., 2024a)                   41.71       -        62.58     -       -       -       -       -       -
+              Llama 3.1-405B-Instruct (Dubey et al., 2024)      39.43       -        73.26     -       -       -       -       -       -
+Inst-models
+
+
+
+
+              GPT-4o                                            38.00       -        68.15     -       -       -       -       -       -
+              GPT-4o-mini                                       32.29       -        53.34     -       -       -       -       -       -
+              WizardCoder-Python-13B-V1.0                       26.20     30.68      67.32   24.56   30.25   67.54   24.70   29.56   68.34
+              CodeLlama-13b-Instruct                            25.66     30.82      62.04   27.44   34.11   63.33   26.73   32.43   64.85
+              GPT-3.5                                           23.82     39.10      40.55   19.62   36.03   37.48   19.00   34.00   35.28
+              Mixtral-8x7B-Instruct-v0.1                        18.11     23.04      67.73   18.54   23.12   69.66   15.38   20.61   68.86
+
+
+Table 4: Pass@k and DIR results of various LLMs on R EPO E XEC. Bold scores indicate the highest, while
+Underlined scores denote the second highest. Pre- and Inst- denote Pretrained and Instruction-tuned, respectively.
+More results are presented in Table 8.
+
+
+3. Pretrained LLMs generate functionally correct                               rectly despite its emphasis on handling them. Mod-
+   code but often fail to effectively utilize the pro-                         els with high pass@k and DIR scores, such as
+   vided dependencies, occasionally reimplement-                               DeepSeek-V3 (80.35) and Llama 3.1 (73.26), excel
+   ing dependencies already present in the given                               in accurately invoking dependencies, which is cru-
+   context. This leads to redundancy and poten-                                cial for real-world code generation tasks. Finally,
+   tially creates technical debt or code smell is-                             R EPO E XEC remains challenging to existing mod-
+   sues (Maldonado and Shihab, 2015; Sierra et al.,                            els, as evidenced by consistently low performance,
+   2019; Santos et al., 2018; Hai et al., 2024a).                              underscoring the need for more advanced systems.
+
+   These issues can lead to a low-quality code-                                6.2      Generation with Multi-round Debugging
+base, requiring substantial human effort for re-                              In this section, we examine the models’ self-
+viewing and fixing, which may even exceed the                                 refinement capabilities in enhancing generation per-
+effort needed to write the code from scratch.                                 formance. We provide the models with error output
+Moreover, the performance of current advanced                                 logs and ask them to fix the errors. We experiment
+LLMs highlights that DeepSeek models, particu-                                with WizardCoder, GPT3.5, and CodeLlama-13b-
+larly DeepSeek-R1 and DeepSeek-V3, demonstrate                                Python. The number of rounds to debug is set to
+strong overall capabilities, effectively balancing                            3 and the input template is presented in Appendix
+accuracy and dependency management. Among                                     G. In this experiment, we employ a greedy search
+smaller models, GPT-4o-mini achieves the highest                              algorithm to generate only a single output.
+DIR (74.75) but underperforms in pass@1 (30.29),                                 Table 5 shows the improvement across three
+emphasizing it often invokes dependencies incor-                              rounds of debugging in various models. We ob-
+                                                                          1503
+ Round    GPT-3.5   WizardCoder   CodeLlama-13b-Python                              Full context       Small context
+                                                                Model
+   0       27.04       34.37             39.44                                    Pass@1      DIR    Pass@1      DIR
+   1       36.34       40.85             39.44                  phi-2              19.04     48.22    14.82     44.54
+   2       40.00       41.69             39.44                  phi-2DepIT         20.20     61.66    20.31     70.30
+   3       41.97       42.54             39.44                  StarCoder          28.08     58.67    25.49     56.67
+                                                                StarCoderDepIT     29.43     69.80    28.73     71.48
+Table 5: Pass@1 scores of various models across three           StarCoder2         27.77     60.57    23.27     53.49
+rounds of debugging. Round 0 represents the initial             StarCoder2DepIT    28.45     69.76    27.27     73.98
+generation stage.                                               CodeLlama          38.65     62.26    35.66     62.67
+                                                                CodeLlamaDepIT     38.85     68.89    36.93     73.19
+
+                                                            Table 6: Comparison of the performance of several
+serve that GPT-3.5 and WizardCoder demonstrate
+                                                            models on R EPO E XEC after instruction tuning for de-
+a high capacity for debugging with improvement              pendency calls (DepIT ) with their pre-trained versions.
+of over 10% and 7% in pass@1, respectively, while
+CodeLlama fails to take advantage of this process.
+Additionally, the DIR has also shown a significant          scores (over 70%) compared to other models after
+improvement (over 7%) after three rounds of de-             tuning with our dataset. Notably, performance im-
+bugging in these two instruction models (Figure             proves significantly with small context, matching
+7). These findings indicate a promising approach            results from full context, enabling more efficient
+using self-refinement with debugging for code gen-          processing and reducing computational costs. In
+eration, which can enhance both the correctness             summary, our instruction-tuning method enhances
+and the utilization of given dependencies.                  the model’s ability to utilize dependencies and en-
+                                                            sure functional correctness. While multi-round de-
+6.3 Instruction-tuning with Code                            bugging (Section 6.2) is more effective, instruction-
+    Dependencies                                            tuned models rely on single-turn generation, mak-
+While the multi-round debugging experiment has              ing them more practical and efficient. To facilitate
+demonstrated effectiveness in leveraging given de-          open research in this domain, we will publicly re-
+pendencies to provide correct solutions (Section            lease this dataset.
+6.2), it requires a strong model to generate good
+                                                            7     Conclusion
+test cases and can be time-consuming due to the
+repeated generation and execution of code and test          We propose an evaluation approach for repository-
+cases. To address these challenges, we propose              level code generation that rethinks the limitations
+an instruction-tuning dataset for fine-tuning base          of prior methods by assessing not only the func-
+LLMs. We collected the 1,555 most-starred repos-            tional correctness aspect but also dependency uti-
+itories from 2018 onward and extracted functions            lization to ensure code quality. We introduce R E -
+with their corresponding dependencies, following            PO E XEC , a novel Python code generation bench-
+the procedure outlined in Section 4.1. We ob-               mark with executable capabilities, designed to eval-
+tained 154,818 functions, of which 57,746 sam-              uate the alignment of generated code with devel-
+ples include docstrings. We use 50K samples with            oper intent and correctness. Our experiments show
+docstrings and applied instruction prompts, while           that while pretrained LLMs excel in functional cor-
+80K samples adhered to the raw code format (Full            rectness, instruction-tuned models perform better
+context). Recognizing the potential of the Small            in utilizing dependencies and debugging. However,
+context format, we allocated the remaining 20K              existing models struggle to reuse provided depen-
+samples to follow this structure. We fine-tuned             dencies, risking technical debt and code smells. We
+Phi-2, StarCoder, StarCoder2, and CodeLlama-13b-            provide a comprehensive analysis of how LLMs
+Python models for 5 epochs with LoRa (Hu et al.,            leverage dependencies, revealing that context infor-
+2021) and used 10% of the training data as the              mation significantly influences the results. Besides,
+validation set to select the best checkpoint.               we also introduce an instruction-tuning dataset that
+   Table 6 illustrates the efficacy of our training         enhances dependency invocation accuracy and out-
+data. All 4 models demonstrate improvements                 put correctness, even with limited context. Our
+in both Pass@1 and DIR after instruction tuning.            contributions establish a foundation for future re-
+Specifically, there is a slight increase of around          search in code generation, providing valuable eval-
+1% in Pass@k for all models, while DIR shows                uation techniques to drive the development of more
+a significant improvement, reaching the highest             capable and reliable models.
+                                                         1504
+8   Limitations                                              Nghi DQ Bui, Hung Le, Yue Wang, Junnan Li,
+                                                               Akhilesh Deepak Gotmare, and Steven CH Hoi. 2023.
+In this work, we currently consider one level of               Codetf: One-stop transformer library for state-of-the-
+dependency context, specifically the dependencies              art code llm. arXiv preprint arXiv:2306.00029.
+directly called from the target function. While this         Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+simplification facilitates manageable analysis and            Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-
+model development, it may not fully capture the               plan, Harri Edwards, Yuri Burda, Nicholas Joseph,
+valuable context necessary for leveraging models              Greg Brockman, et al. 2021. Evaluating large
+                                                              language models trained on code. arXiv preprint
+effectively. However, incorporating deep depen-               arXiv:2107.03374.
+dencies could significantly extend the input length,
+posing challenges in managing long context in-               Yangruibo Ding, Zijian Wang, Wasi U. Ahmad, Mu-
+puts and potentially exceeding the maximum input               rali Krishna Ramanathan, Ramesh Nallapati, Par-
+                                                               minder Bhatia, Dan Roth, and Bing Xiang. 2024.
+length. Our approach has demonstrated promising                CoCoMIC: Code completion by jointly modeling
+outcomes with the small-size context version, cre-             in-file and cross-file context. In Proceedings of the
+ating opportunities for integrating additional input           2024 Joint International Conference on Computa-
+context. Future research could explore incorpo-                tional Linguistics, Language Resources and Evalua-
+                                                               tion (LREC-COLING 2024).
+rating multiple levels of dependencies, creating a
+more comprehensive graph that includes transitive            Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Han-
+dependencies, indirect calls, and broader contex-              tian Ding, Ming Tan, Nihal Jain, Murali Krishna Ra-
+tual information. By doing so, we could enhance                manathan, Ramesh Nallapati, Parminder Bhatia, Dan
+                                                               Roth, and Bing Xiang. 2023. Crosscodeeval: A di-
+the model’s understanding of code interactions and             verse and multilingual benchmark for cross-file code
+improve its ability to handle intricate software exe-          completion. In Advances in Neural Information Pro-
+cution scenarios.                                              cessing Systems 36: Annual Conference on Neural
+                                                               Information Processing Systems 2023, NeurIPS 2023,
+                                                               New Orleans, LA, USA, December 10 - 16, 2023.
+References                                                   Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey,
+Marah Abdin, Jyoti Aneja, Harkirat Behl, Sébastien             Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,
+ Bubeck, Ronen Eldan, Suriya Gunasekar, Michael                Akhil Mathur, Alan Schelten, Amy Yang, Angela
+ Harrison, Russell J Hewett, Mojan Javaheripi, Piero           Fan, et al. 2024. The llama 3 herd of models. arXiv
+ Kauffmann, et al. 2024. Phi-4 technical report. arXiv         preprint arXiv:2407.21783.
+ preprint arXiv:2412.08905.
+                                                             Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xi-
+                                                               aocheng Feng, Ming Gong, Linjun Shou, Bing Qin,
+Loubna Ben Allal, Raymond Li, Denis Kocetkov,
+                                                               Ting Liu, Daxin Jiang, et al. 2020. Codebert: A
+  Chenghao Mou, Christopher Akiki, Carlos Munoz
+                                                               pre-trained model for programming and natural lan-
+  Ferrandis, Niklas Muennighoff, Mayank Mishra,
+                                                               guages. arXiv preprint arXiv:2002.08155.
+  Alex Gu, Manan Dey, et al. 2023. Santacoder: don’t
+  reach for the stars! arXiv preprint arXiv:2301.03988.      Suriya Gunasekar, Yi Zhang, Jyoti Aneja, Caio
+                                                               César Teodoro Mendes, Allie Del Giorno, Sivakanth
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten             Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo
+   Bosma, Henryk Michalewski, David Dohan, Ellen               de Rosa, Olli Saarikivi, et al. 2023. Textbooks are all
+   Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. 2021.     you need. arXiv preprint arXiv:2306.11644.
+   Program synthesis with large language models. arXiv
+   preprint arXiv:2108.07732.                                Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+                                                               Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,
+Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang,          Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-
+   Xiaodong Deng, Yang Fan, Wenbin Ge, Yu Han, Fei             centivizing reasoning capability in llms via reinforce-
+   Huang, Binyuan Hui, Luo Ji, Mei Li, Junyang Lin,            ment learning. arXiv preprint arXiv:2501.12948.
+   Runji Lin, Dayiheng Liu, Gao Liu, Chengqiang Lu,
+   Keming Lu, Jianxin Ma, Rui Men, Xingzhang Ren,            Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai
+   Xuancheng Ren, Chuanqi Tan, Sinan Tan, Jianhong             Dong, Wentao Zhang, Guanting Chen, Xiao Bi,
+   Tu, Peng Wang, Shijie Wang, Wei Wang, Sheng-                Y Wu, YK Li, et al. 2024. Deepseek-coder: When the
+   guang Wu, Benfeng Xu, Jin Xu, An Yang, Hao Yang,            large language model meets programming–the rise of
+   Jian Yang, Shusheng Yang, Yang Yao, Bowen Yu,               code intelligence. arXiv preprint arXiv:2401.14196.
+   Hongyi Yuan, Zheng Yuan, Jianwei Zhang, Xingx-
+   uan Zhang, Yichang Zhang, Zhenru Zhang, Chang             Nam Le Hai, Anh MT Bui, Phuong T Nguyen, Davide
+   Zhou, Jingren Zhou, Xiaohuan Zhou, and Tianhang             Di Ruscio, and Rick Kazman. 2024a. Improving the
+   Zhu. 2023. Qwen technical report. arXiv preprint            detection of technical debt in java source code with an
+   arXiv:2309.16609.                                           enriched dataset. arXiv preprint arXiv:2411.05457.
+
+                                                         1505
+Nam Le Hai, Trang Nguyen, Linh Ngo Van, Thien Huu             Emma Bou Hanna, Florian Bressand, et al. 2024.
+  Nguyen, and Khoat Than. 2024b. Continual varia-             Mixtral of experts. arXiv preprint arXiv:2401.04088.
+  tional dropout: a view of auxiliary local variables in
+  continual learning. Machine Learning, 113(1):281–        Caroline Lemieux, Jeevana Priya Inala, Shuvendu K
+  323.                                                       Lahiri, and Siddhartha Sen. 2023. Codamosa: Es-
+                                                             caping coverage plateaus in test generation with pre-
+Rajarshi Haldar and Julia Hockenmaier. 2024. An-             trained large language models. In 2023 IEEE/ACM
+  alyzing the performance of large language mod-             45th International Conference on Software Engineer-
+  els on code summarization.       arXiv preprint            ing (ICSE), pages 919–931. IEEE.
+  arXiv:2404.08018.
+                                                           Jia Li, Ge Li, Yunfei Zhao, Yongmin Li, Huanyu
+Dan Hendrycks, Steven Basart, Saurav Kadavath, Man-           Liu, Hao Zhu, Lecheng Wang, Kaibo Liu, Zheng
+  tas Mazeika, Akul Arora, Ethan Guo, Collin Burns,           Fang, Lanshen Wang, et al. 2024.         Deveval:
+  Samir Puranik, Horace He, Dawn Song, and Jacob              A manually-annotated code generation benchmark
+  Steinhardt. 2021. Measuring coding challenge com-           aligned with real-world code repositories. arXiv
+  petence with apps. NeurIPS.                                 preprint arXiv:2405.19856.
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan
+                                                           Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas
+  Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang,
+                                                             Muennighoff, Denis Kocetkov, Chenghao Mou, Marc
+  and Weizhu Chen. 2021. Lora: Low-rank adap-
+                                                             Marone, Christopher Akiki, Jia Li, Jenny Chim, et al.
+  tation of large language models. arXiv preprint
+                                                             2023. Starcoder: may the source be with you! arXiv
+  arXiv:2106.09685.
+                                                             preprint arXiv:2305.06161.
+Dong Huang, Qingwen Bu, Jie M Zhang, Michael Luck,
+  and Heming Cui. 2023. Agentcoder: Multi-agent-           Dianshu Liao, Shidong Pan, Qing Huang, Xiaoxue Ren,
+  based code generation with iterative testing and opti-     Zhenchang Xing, Huan Jin, and Qinying Li. 2023.
+  misation. arXiv preprint arXiv:2312.13010.                 Context-aware code generation framework for code
+                                                             repositories: Local, global, and third-party library
+Junjie Huang, Chenglong Wang, Jipeng Zhang, Cong             awareness. arXiv preprint arXiv:2312.05772.
+  Yan, Haotian Cui, Jeevana Priya Inala, Colin Clement,
+  Nan Duan, and Jianfeng Gao. 2022. Execution-based        Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang,
+  evaluation for data science code generation models.        Bochao Wu, Chengda Lu, Chenggang Zhao, Chengqi
+  arXiv preprint arXiv:2211.09374.                           Deng, Chenyu Zhang, Chong Ruan, et al. 2024a.
+                                                             Deepseek-v3 technical report.   arXiv preprint
+Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Day-           arXiv:2412.19437.
+  iheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang,
+  Bowen Yu, Kai Dang, et al. 2024. Qwen2. 5-coder          Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and
+  technical report. arXiv preprint arXiv:2409.12186.          LINGMING ZHANG. 2023a. Is your code gen-
+                                                              erated by chatGPT really correct? rigorous evalu-
+Maor Ivgi, Uri Shaham, and Jonathan Berant. 2023. Ef-         ation of large language models for code generation.
+  ficient long-text understanding with short-text mod-        In Thirty-seventh Conference on Neural Information
+  els. Transactions of the Association for Computa-           Processing Systems.
+  tional Linguistics, 11:284–299.
+                                                           Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+Srinivasan Iyer, Ioannis Konstas, Alvin Cheung, and
+                                                             jape, Michele Bevilacqua, Fabio Petroni, and Percy
+   Luke Zettlemoyer. 2018. Mapping language to code
+                                                             Liang. 2024b. Lost in the middle: How language
+   in programmatic context. In Proceedings of the 2018
+                                                             models use long contexts. Transactions of the Asso-
+   Conference on Empirical Methods in Natural Lan-
+                                                             ciation for Computational Linguistics, 12:157–173.
+   guage Processing, pages 1643–1652.
+Naman Jain, Manish Shetty, Tianjun Zhang, King Han,        Tianyang Liu, Canwen Xu, and Julian McAuley.
+  Koushik Sen, and Ion Stoica. 2024. R2e: Turning            2023b. Repobench: Benchmarking repository-
+  any github repository into a programming agent envi-       level code auto-completion systems. arXiv preprint
+  ronment. In Forty-first International Conference on        arXiv:2306.03091.
+  Machine Learning.
+                                                           Zhijie Liu, Yutian Tang, Xiapu Luo, Yuming Zhou, and
+Mojan Javaheripi, Sébastien Bubeck, Marah Abdin, Jy-         Liang Feng Zhang. 2024c. No need to lift a finger
+ oti Aneja, Sebastien Bubeck, Caio César Teodoro             anymore? assessing the quality of code generation by
+ Mendes, Weizhu Chen, Allie Del Giorno, Ronen                chatgpt. IEEE Transactions on Software Engineer-
+ Eldan, Sivakanth Gopi, et al. 2023. Phi-2: The sur-         ing.
+ prising power of small language models. Microsoft
+ Research Blog.                                            Anton Lozhkov, Raymond Li, Loubna Ben Allal, Fed-
+                                                             erico Cassano, Joel Lamy-Poirier, Nouamane Tazi,
+Albert Q Jiang, Alexandre Sablayrolles, Antoine              Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei,
+  Roux, Arthur Mensch, Blanche Savary, Chris Bam-            et al. 2024. Starcoder 2 and the stack v2: The next
+  ford, Devendra Singh Chaplot, Diego de las Casas,          generation. arXiv preprint arXiv:2402.19173.
+
+                                                       1506
+Stephan Lukasczyk, Florian Kroiß, and Gordon Fraser.      Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten
+   2023. An empirical study of automated unit test gen-     Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+   eration for python. Empirical Software Engineering,      Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.
+   28(2):36.                                                Code llama: Open foundation models for code. arXiv
+                                                            preprint arXiv:2308.12950.
+Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xi-
+  ubo Geng, Wenxiang Hu, Chongyang Tao, Jing Ma,          José Amancio M Santos, João B Rocha-Junior, Luciana
+  Qingwei Lin, and Daxin Jiang. 2023. Wizardcoder:           Carla Lins Prates, Rogeres Santos Do Nascimento,
+  Empowering code large language models with evol-           Mydiã Falcão Freitas, and Manoel Gomes De Men-
+  instruct. arXiv preprint arXiv:2306.08568.                 donça. 2018. A systematic review on the code smell
+                                                             effect. Journal of Systems and Software, 144:450–
+Everton da S Maldonado and Emad Shihab. 2015.
+                                                            477.
+  Detecting and quantifying different types of self-
+  admitted technical debt. In 2015 IEEE 7Th interna-
+  tional workshop on managing technical debt (MTD),       Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank
+  pages 9–15. IEEE.                                        Tip. 2023. Adaptive test generation using a large
+                                                           language model. arXiv e-prints, pages arXiv–2302.
+Dung Nguyen Manh, Thang Phan Chau, Nam Le Hai,
+  Thong T Doan, Nam V Nguyen, Quang Pham, and             Disha Shrivastava, Hugo Larochelle, and Daniel Tar-
+  Nghi DQ Bui. 2024. Codemmlu: A multi-task bench-          low. 2023. Repository-level prompt generation for
+  mark for assessing code understanding capabilities        large language models of code. In International Con-
+  of codellms. arXiv preprint arXiv:2410.01999.             ference on Machine Learning, ICML 2023, 23-29
+                                                            July 2023, Honolulu, Hawaii, USA, volume 202 of
+Debanjan Mondal, Abhilasha Lodha, Ankita Sahoo, and         Proceedings of Machine Learning Research, pages
+  Beena Kumari. 2023. Robust code summarization.            31693–31715. PMLR.
+  In Proceedings of the 1st GenBench Workshop on
+  (Benchmarking) Generalisation in NLP, pages 65–75,      Giancarlo Sierra, Emad Shihab, and Yasutaka Kamei.
+  Singapore. Association for Computational Linguis-         2019. A survey of self-admitted technical debt. Jour-
+  tics.                                                     nal of Systems and Software, 152:70–82.
+Niklas Muennighoff, Qian Liu, Armel Zebaze, Qinkai
+                                                          Ankita Nandkishor Sontakke, Manasi Patwardhan,
+  Zheng, Binyuan Hui, Terry Yue Zhuo, Swayam
+                                                            Lovekesh Vig, Raveendra Kumar Medicherla, Ravin-
+  Singh, Xiangru Tang, Leandro Von Werra, and
+                                                            dra Naik, and Gautam Shroff. 2022. Code summa-
+  Shayne Longpre. 2023. Octopack: Instruction tun-
+                                                            rization: Do transformers really understand code? In
+  ing code large language models. arXiv preprint
+                                                            Deep Learning for Code Workshop.
+  arXiv:2308.07124.
+Dung Nguyen, Le Nam, Anh Dau, Anh Nguyen, Khanh           Gemma Team, Morgane Riviere, Shreya Pathak,
+  Nghiem, Jin Guo, and Nghi Bui. 2023. The vault:           Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupati-
+  A comprehensive multilingual dataset for advanc-          raju, Léonard Hussenot, Thomas Mesnard, Bobak
+  ing code understanding and generation. In Findings        Shahriari, Alexandre Ramé, et al. 2024. Gemma 2:
+  of the Association for Computational Linguistics:         Improving open language models at a practical size.
+  EMNLP 2023, pages 4763–4788, Singapore. Associ-           arXiv preprint arXiv:2408.00118.
+  ation for Computational Linguistics.
+                                                          Qwen Team. 2024. Qwq: Reflect deeply on the bound-
+Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan       aries of the unknown.
+  Wang, Yingbo Zhou, Silvio Savarese, and Caiming
+  Xiong. 2022. Codegen: An open large language            Hung Quoc To, Nghi DQ Bui, Jin Guo, and
+   model for code with multi-turn program synthesis.        Tien N Nguyen. 2023. Better language models
+   arXiv preprint arXiv:2203.13474.                         of code through self-improvement. arXiv preprint
+                                                            arXiv:2304.01228.
+Huy N Phan, Hoang N Phan, Tien N Nguyen, and
+  Nghi DQ Bui. 2024a. Repohyper: Better context
+                                                          Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+  retrieval is all you need for repository-level code
+                                                            bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+  completion. arXiv preprint arXiv:2403.06095.
+                                                            Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Huy Nhat Phan, Tien N Nguyen, Phong X Nguyen,               Bhosale, et al. 2023. Llama 2: Open founda-
+  and Nghi DQ Bui. 2024b. Hyperagent: Generalist            tion and fine-tuned chat models. arXiv preprint
+  software engineering agents to solve coding tasks at      arXiv:2307.09288.
+  scale. arXiv preprint arXiv:2409.16299.
+                                                          Quyen Tran, Nguyen Thanh, Nguyen Anh, Nam Hai,
+Nikhil Pinnaparaju, Reshinth Adithyan, Duy Phung,           Trung Le, Linh Ngo, and Thien Nguyen. 2024. Pre-
+  Jonathan Tow, James Baicoianu, Ashish Datta,              serving generalization of language models in few-
+  Maksym Zhuravinskyi, Dakota Mahan, Marco Bel-             shot continual relation extraction. In Proceedings
+  lagente, Carlos Riquelme, et al. 2024. Stable code        of the 2024 Conference on Empirical Methods in
+  technical report. arXiv preprint arXiv:2404.01226.        Natural Language Processing, pages 13771–13784.
+
+                                                      1507
+Yue Wang, Hung Le, Akhilesh Deepak Gotmare,              Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Nghi DQ Bui, Junnan Li, and Steven CH Hoi. 2023.         Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  Codet5+: Open code large language models for             Weizhu Chen. 2023b. Repocoder: Repository-level
+  code understanding and generation. arXiv preprint        code completion through iterative retrieval and gen-
+  arXiv:2305.07922.                                        eration. In Proceedings of the 2023 Conference on
+                                                           Empirical Methods in Natural Language Process-
+Yue Wang, Weishi Wang, Shafiq Joty, and Steven CH          ing, EMNLP 2023, Singapore, December 6-10, 2023,
+  Hoi. 2021.     Codet5: Identifier-aware unified          pages 2471–2484. Association for Computational
+  pre-trained encoder-decoder models for code un-          Linguistics.
+  derstanding and generation.      arXiv preprint
+  arXiv:2109.00859.                                      Kechi Zhang, Jia Li, Ge Li, Xianjie Shi, and Zhi
+                                                           Jin. 2024. Codeagent: Enhancing code genera-
+Zhiruo Wang, Shuyan Zhou, Daniel Fried, and Gra-           tion with tool-integrated agent systems for real-
+  ham Neubig. 2022. Execution-based evaluation             world repo-level coding challenges. arXiv preprint
+  for open-domain code generation. arXiv preprint          arXiv:2401.07339.
+  arXiv:2212.10481.
+                                                         Tianyu Zheng, Ge Zhang, Tianhao Shen, Xueling Liu,
+Yiqing Xie, Alex Xie, Divyanshu Sheth, Pengfei Liu,        Bill Yuchen Lin, Jie Fu, Wenhu Chen, and Xiang
+  Daniel Fried, and Carolyn Rose. 2024. Codebench-         Yue. 2024. Opencodeinterpreter: Integrating code
+  gen: Creating scalable execution-based code genera-      generation with execution and refinement. arXiv
+  tion benchmarks. arXiv preprint arXiv:2404.00566.        preprint arXiv:2402.14658.
+
+Frank F Xu, Uri Alon, Graham Neubig, and Vincent Jo-     Terry Yue Zhuo, Minh Chien Vu, Jenny Chim, Han Hu,
+   sua Hellendoorn. 2022. A systematic evaluation of       Wenhao Yu, Ratnadira Widyasari, Imam Nur Bani
+   large language models of code. In Proceedings of        Yusuf, Haolan Zhan, Junda He, Indraneil Paul, et al.
+   the 6th ACM SIGPLAN International Symposium on          2024. Bigcodebench: Benchmarking code genera-
+  Machine Programming, pages 1–10.                         tion with diverse function calls and complex instruc-
+                                                           tions. arXiv preprint arXiv:2406.15877.
+Ruijie Xu, Zengzhi Wang, Run-Ze Fan, and Pengfei Liu.
+  2024. Benchmarking benchmark leakage in large
+  language models. arXiv preprint arXiv:2404.18824.
+
+Prateek Yadav, Qing Sun, Hantian Ding, Xiaopeng Li,
+  Dejiao Zhang, Ming Tan, Parminder Bhatia, Xiaofei
+  Ma, Ramesh Nallapati, Murali Krishna Ramanathan,
+  Mohit Bansal, and Bing Xiang. 2023. Exploring
+  continual learning for code generation models. In
+  Proceedings of the 61st Annual Meeting of the As-
+  sociation for Computational Linguistics (Volume 2:
+  Short Papers), pages 782–792, Toronto, Canada. As-
+  sociation for Computational Linguistics.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui,
+  Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,
+  Fei Huang, Haoran Wei, et al. 2024. Qwen2. 5 tech-
+  nical report. arXiv preprint arXiv:2412.15115.
+
+Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan
+  Vasilescu, and Graham Neubig. 2018. Learning to
+  mine aligned code and natural language pairs from
+  stack overflow. In Proceedings of the 15th interna-
+  tional conference on mining software repositories,
+  pages 476–486.
+
+Alex Young, Bei Chen, Chao Li, Chengen Huang,
+  Ge Zhang, Guanwei Zhang, Guoyin Wang, Heng
+  Li, Jiangcheng Zhu, Jianqun Chen, et al. 2024. Yi:
+  Open foundation models by 01. ai. arXiv preprint
+  arXiv:2403.04652.
+
+Fengji Zhang, Bei Chen, Yue Zhang, Jacky Keung, Jin
+  Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and
+  Weizhu Chen. 2023a. Repocoder: Repository-level
+  code completion through iterative retrieval and gen-
+  eration. arXiv preprint arXiv:2303.12570.
+
+                                                     1508
+Appendix
+A    Data Source
+Creating an executable benchmark within repository contexts poses significant challenges due to intricate
+setup requirements and the often inadequate installation instructions provided in repositories. Therefore,
+we select repositories that can be automatically set up using pipreqs to auto-detect the required packages.
+Additionally, to effectively utilize the test generation module of our pipeline, we select repositories that
+align with the literature on unit test generation. As a result, R EPO E XEC, is based on repositories from the
+unit test generation studies (Schäfer et al., 2023; Lukasczyk et al., 2023; Lemieux et al., 2023; Liu et al.,
+2024c), which provide executable environments and robust test generation capabilities.
+   Some might claim that our dataset is constructed for based on existing works, thus, this approach
+can potentially lead to data leakage, especially when modern models are trained on similar datasets. If
+the benchmark relies heavily on known works, there’s a risk that the model may inadvertently learn
+from specific patterns or features present in those works, compromising its generalization ability. De-
+spite this concern, experimental results demonstrate that even modern models struggle to handle the
+challenges posed by R EPO E XEC, indicating that the benchmark remains a valuable tool for assessing
+model performance. Besides, several models, including StarCoder2 and DeepSeek-Coder, have been
+pretrained using repository-level context. However, these models typically concatenate the contents of
+multiple files in a repository without filtering out irrelevant information or considering the selection of
+dependencies. This helps our dataset distinguish from the pretraining datasets of these models, thereby
+helping to mitigate the data leakage issue. To further measure the data leakage level compare to other
+benchmarks, we follow BenBench (Xu et al., 2024) to report the perplexity and n-gram metrics, against
+three datasets—HumanEval, RepoCoder, and DevEval—analyzing their levels of data leakage when
+tested on three powerful LLMs. As indicated in Table 7, while HumanEval exhibits a significant level of
+data leakage, as expected, RepoExec demonstrates notably low levels of leakage. This is reflected in its
+higher perplexity and reduced n-gram overlap in most cases. The extent of data leakage in RepoExec is
+comparable to that of RepoCoder, a recently developed benchmark based on repositories created after
+January 1, 2022, to mitigate the data leakage problem. Consequently, the leakage issue in RepoExec
+is minimal, aligning with benchmarks like RepoCoder that utilize the latest repositories. We believe
+that repository-level code generation could be a valuable contribution to more robust and high-quality
+evaluation for advanced agent systems and dynamic environments (Huang et al., 2023; Phan et al., 2024b;
+Yadav et al., 2023; Hai et al., 2024b; Tran et al., 2024). By assessing models in a more comprehensive
+coding context, this approach enables a deeper evaluation of their ability to understand, integrate, and
+adapt code components effectively.
+
+                                         perplexity                                      n-gram
+ Model
+                        HumanEval   RepoCoder DevEval       RepoExec   HumanEval   RepoCoder DevEval   RepoExec
+ Mistral-7B-v0.3          2.10        177.99       170.67    120.77      0.35         0.30      0.26     0.18
+ CodeLlama-7B-Python       1.96       90.71       32.14      72.77       0.43        0.30      0.43      0.30
+ CodeLlama-13B-Python      1.96       72.66       23.83      126.51      0.48        0.31      0.41      0.31
+
+              Table 7: Comparison of data leakage level between R EPO E XEC and other benchmarks.
+
+
+B    Evaluation Metrics: Match-Based vs. Execution-Based
+Several code generation benchmarks utilize match-based metrics like Edit similarity (ES), BLEU, and
+CodeBLEU for evaluation (Ding et al., 2024; Shrivastava et al., 2023; Ding et al., 2023; Liao et al.,
+2023; Yin et al., 2018; Iyer et al., 2018). These metrics are straightforward to apply and may exhibit
+a strong correlation with execution metrics such as Pass@k. However, they cannot accurately measure
+functional correctness. For instance, comparing two Python code snippets where the only difference is the
+":" character could result in a good ES and BLEU score. Nevertheless, one snippet may contain a syntax
+error, highlighting a limitation in these metrics for assessing true functionality.
+                                                      1509
+                                                                      0.40                                                  0.50
+                  225
+                  250                                                 0.35                                                  0.45
+Edit Similarity
+
+                                                                      0.30
+
+
+
+
+                                                                                                                 CodeBLEU
+                  275                                                                                                       0.40
+
+
+
+
+                                                             BLEU-4
+                  300                                                 0.25                                                  0.35
+                  325                                                 0.20
+                  350                       Pearson: 0.76                                       Pearson: 0.85               0.30                     Pearson: 0.92
+                                            Spearman: 0.70            0.15                      Spearman: 0.79                                       Spearman: 0.89
+                  375                       Kendall: 0.51                                       Kendall: 0.61               0.25                     Kendall: 0.73
+                        0.15 0.20 0.25 0.30 0.35 0.40                         0.15 0.20 0.25 0.30 0.35 0.40                        0.15 0.20 0.25 0.30 0.35 0.40
+                                   pass@1                                                pass@1                                               pass@1
+
+                         Figure 3: Correlation between Match-based metrics and Execution-based metric (Pass@1).
+
+
+
+   Figure 3 demonstrates that these metrics on average can achieve a strong correlation with Pass@k,
+with CodeBLEU showing the highest correlation with Pearson score of 0.92. However, upon closer
+inspection of the score distribution between correct and incorrect solutions (Figure 4), a considerable
+overlap becomes apparent. This underscores the limitation of match-based metrics in accurately measuring
+the correctness of code generation.
+
+
+                                                                             Correct           Incorrect
+
+
+
+
+                            0.0       0.2        0.4    0.6                     0.8           0         1000 2000 3000                         4000
+                                               CodeBLEU                                                     Edit Similarity
+
+                              Figure 4: Match-based metric distributions between Correct and Incorrect solutions
+
+
+
+
+ C                 Coverage Enhancement Effectiveness
+
+Weak unit tests may inadvertently allow incorrect implementations to be determined as correct. Even with
+human-written tests, the overlooked coverage rates lead to evaluations that are incomplete and potentially
+misleading (Liu et al., 2023a). We present evidence supporting this argument, underscoring the limitations
+of prior work on code generation within repository-level contexts. As depicted in Figure 5, enhancing the
+number of test cases and coverage rates leads to a significant increase in the identification of incorrect
+generated solutions, causing the Pass@1 score to drop markedly (by over 5%). We investigated several
+solutions and found that most of the generated results did not fully utilize the given context (considered as
+human-provided). Instead, they primarily focused on addressing the problem described in the given natural
+language description. This indirectly overlooks the developer’s intentions, such as testing edge or corner
+cases, highlighting the limitations in following and understanding the provided intent and dependency
+context in these models. In summary, these findings underscore the effectiveness and importance of
+maintaining high-quality test cases for evaluation purposes.
+                                                                                       1510
+D    Test case generation
+
+Generated test quality discussion: To ensure generated tests align with the target function’s require-
+ments, we employ several quality control measures, as discussed in Section 4.2. First, we provide the
+full target function in the LLM prompt to guide the generation of tests with the intended input and output
+formats. We then apply a Syntax-based filter to confirm that the generated tests correctly call the function
+with its signature and parameters. Additionally, to verify the accuracy of the tests, we execute them to
+confirm their pass status and measure their line coverage.
+   In some minor cases, weak tests or even wrong ones may still arise despite these measures. For instance,
+flaky tests could pass and achieve high coverage but produce inconsistent outputs due to randomness.
+To address this, we execute tests multiple times and exclude those with inconsistent results. Similarly,
+concerns about unintended function calls are mitigated by deduplicating test cases and ensuring diversity
+in how functions are invoked. This process yields an average of 99 test cases per problem (Table
+1), ensuring robust evaluation even if some weaker tests are included. While we do not require such
+extensive coverage for correctness, this approach enhances the likelihood of strong test cases identifying
+implementation issues effectively. Furthermore, the test enhancement module is provided with a few
+examples of generated tests from the previous step to enhance coverage of edge cases and corner cases to
+ensure specific requirements.
+
+
+                                                                         5.19                     af-CovEn
+                      StarCoder
+                                                                                                  bf-CovEn
+                                                                         4.93
+         Codellama-13b-Instruct
+                                                                             5.41
+        Phind-CodeLlama-34B-v2
+                                                                                    4.82
+    WizardCoder-Python-13B-V1.0
+                                                                                           5.18
+          Codellama-13b-Python
+                                                                                                   4.25
+          Codellama-34b-Python
+
+                                  0       10              20            30                 40
+                                                               Pass@1
+Figure 5: Performance of various CodeLMs on R EPO E XEC before (bf-) and after (af-) Coverage Enhancement
+(CovEn) stage.
+
+
+
+
+Test geneneration prompts: Below, we present two prompts designed for generating initial unit tests
+and improving the quality of existing tests.
+
+
+    Initial Test Generation Prompt
+
+    { function_under_test }
+    # test to check the correctness of "{ function_name }" function
+    assert
+
+
+
+                                                   1511
+Coverage Enhancement Prompts
+
+Prompt 1:
+Here are some Python unit test functions and the focal function that they test:
+# Test functions:
+{existing_test_functions}
+# Focal function:
+{function_under_test}
+Write more unit test functions that will increase the test coverage of the function under test.
+—————————————————————————————————–
+Prompt 2:
+Here are some Python unit test functions and the focal function that they test:
+# Test functions:
+{existing_test_functions}
+# Focal function:
+{function_under_test}
+Write more unit test functions that will cover corner cases missed by the original and will increase
+the test coverage of the function under test.
+—————————————————————————————————–
+Prompt 3:
+Here is a focal function under test:
+{function_under_test}
+This function under test can be tested with these Python unit test functions:
+{existing_test_functions}
+Here is an extended version of the unit test function that includes additional unit test cases that will
+cover methods, edge cases, corner cases, and other features of the function under test that were
+missed by the original unit test functions:
+
+
+
+
+                                                 1512
+E      Data Formating
+
+E.1      BasePrompt
+
+      Example of Full Context
+
+      import base64
+      import random
+      import unicodedata
+      import zlib
+      from typing import Union
+      from uuid import uuid4
+      from . _regex import *
+      from . errors import InvalidInputError
+      from . validation import is_snake_case , is_full_string , is_camel_case , is_integer , is_string
+
+      CAMEL_CASE_REPLACE_RE = re . compile (r ' ([ a -z ]|[ A -Z ]+) (?=[ A -Z ]) ')
+
+      class InvalidInputError ( TypeError ):
+          """
+          Custom error raised when received object is not a string as expected .
+          """
+
+           def __init__ ( self , input_data : Any ):
+               """
+               : param input_data : Any received object
+               """
+               type_name = type ( input_data ). __name__
+               msg = ' Expected " str ", received "{}" '. format ( type_name )
+               super () . __init__ ( msg )
+
+      def is_string ( obj : Any ) -> bool :
+          """
+          Checks if an object is a string .
+
+          * Example :*
+
+           >>> is_string ( ' foo ') # returns true
+           >>> is_string (b ' foo ') # returns false
+
+          : param obj : Object to test .
+          : return : True if string , false otherwise .
+          """
+          return isinstance ( obj , str )
+
+      def is_camel_case ( input_string : Any ) -> bool :
+          """
+          Checks if a string is formatted as camel case .
+
+          A string is considered camel case when :
+
+          - it 's composed only by letters ([a -zA -Z ]) and optionally numbers ([0 -9])
+          - it contains both lowercase and uppercase letters
+          - it does not start with a number
+
+          * Examples :*
+
+           >>> is_camel_case ( ' MyString ') # returns true
+           >>> is_camel_case ( ' mystring ') # returns false
+
+          : param input_string : String to test .
+          : type input_string : str
+          : return : True for a camel case string , false otherwise .
+          """
+          return is_full_string ( input_string ) and CAMEL_CASE_TEST_RE . match ( input_string ) is not None
+
+      def camel_case_to_snake ( input_string , separator = '_ '):
+          """
+          Convert a camel case string into a snake case one .
+          ( The original string is returned if is not a valid camel case string )
+
+          * Example :*
+
+           >>> camel_case_to_snake ( ' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+          : param input_string : String to convert .
+          : type input_string : str
+          : param separator : Sign to use as separator .
+          : type separator : str
+          : return : Converted string .
+          """
+
+
+
+
+                                                                  1513
+Example of Medium Context
+
+import base64
+import random
+import unicodedata
+import zlib
+from typing import Union
+from uuid import uuid4
+from . _regex import *
+from . errors import InvalidInputError
+from . validation import is_snake_case , is_full_string , is_camel_case , is_integer , is_string
+
+CAMEL_CASE_REPLACE_RE = re . compile (r ' ([ a -z ]|[ A -Z ]+) (?=[ A -Z ]) ')
+
+class InvalidInputError ( TypeError ):
+    """
+    Custom error raised when received object is not a string as expected .
+    """
+
+     def __init__ ( self , input_data : Any ):
+         """
+         : param input_data : Any received object
+         """
+
+def is_string ( obj : Any ) -> bool :
+    """
+    Checks if an object is a string .
+
+    * Example :*
+
+     >>> is_string ( ' foo ') # returns true
+     >>> is_string (b ' foo ') # returns false
+
+    : param obj : Object to test .
+    : return : True if string , false otherwise .
+    """
+
+def is_camel_case ( input_string : Any ) -> bool :
+    """
+    Checks if a string is formatted as camel case .
+
+    A string is considered camel case when :
+
+    - it 's composed only by letters ([a -zA -Z ]) and optionally numbers ([0 -9])
+    - it contains both lowercase and uppercase letters
+    - it does not start with a number
+
+    * Examples :*
+
+     >>> is_camel_case ( ' MyString ') # returns true
+     >>> is_camel_case ( ' mystring ') # returns false
+
+    : param input_string : String to test .
+    : type input_string : str
+    : return : True for a camel case string , false otherwise .
+    """
+
+def camel_case_to_snake ( input_string , separator = '_ '):
+    """
+    Convert a camel case string into a snake case one .
+    ( The original string is returned if is not a valid camel case string )
+
+    * Example :*
+
+     >>> camel_case_to_snake ( ' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+    : param input_string : String to convert .
+    : type input_string : str
+    : param separator : Sign to use as separator .
+    : type separator : str
+    : return : Converted string .
+    """
+
+
+
+
+                                                            1514
+      Example of Small Context
+
+      import base64
+      import random
+      import unicodedata
+      import zlib
+      from typing import Union
+      from uuid import uuid4
+      from . _regex import *
+      from . errors import InvalidInputError
+      from . validation import is_snake_case , is_full_string , is_camel_case , is_integer , is_string
+
+      CAMEL_CASE_REPLACE_RE = re . compile (r ' ([ a -z ]|[ A -Z ]+) (?=[ A -Z ]) ')
+
+      class InvalidInputError ( TypeError ):
+
+           def __init__ ( self , input_data : Any ):
+
+      def is_string ( obj : Any ) -> bool :
+
+      def is_camel_case ( input_string : Any ) -> bool :
+
+      def camel_case_to_snake ( input_string , separator = '_ '):
+          """
+          Convert a camel case string into a snake case one .
+          ( The original string is returned if is not a valid camel case string )
+
+          * Example :*
+
+           >>> camel_case_to_snake ( ' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+          : param input_string : String to convert .
+          : type input_string : str
+          : param separator : Sign to use as separator .
+          : type separator : str
+          : return : Converted string .
+          """
+
+
+
+
+E.2      InstructPrompt
+
+
+
+      Instruction Prompt Templates
+
+      Prompt 1:
+      ### Instruction :
+
+      Write a Python function `{ target_function_signature }` to solve the following
+           problem :
+      { target_function_docstring }
+
+      ### Response :
+      { BasePrompt }
+
+  —————————————————————————————————– Prompt 2:
+      ### Instruction :
+
+      { dependency_context }
+      The provided code snippet includes necessary dependencies for implementing the
+            `{ target_function_name }` function . Write a Python function `{
+           target_function_signature }` to solve the following problem :
+      { target_function_docstring }
+
+      ### Response :
+      { target_function_prompt }
+
+
+
+                                                                  1515
+Example of Prompt 1 for Small Context
+
+### Instruction :
+
+Write a Python function ` camel_case_to_snake ( input_string , separator = '_ ') ` to solve the following
+      problem :
+"""
+Convert a camel case string into a snake case one .
+( The original string is returned if is not a valid camel case string )
+
+* Example :*
+
+>>> camel_case_to_snake (' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+: param input_string : String to convert .
+: type input_string : str
+: param separator : Sign to use as separator .
+: type separator : str
+: return : Converted string .
+"""
+
+### Response :
+import base64
+import random
+import unicodedata
+import zlib
+from typing import Union
+from uuid import uuid4
+from . _regex import *
+from . errors import InvalidInputError
+from . validation import is_snake_case , is_full_string , is_camel_case , is_integer , is_string
+
+CAMEL_CASE_REPLACE_RE = re . compile (r '([ a -z ]|[ A -Z ]+) (?=[ A -Z ]) ')
+
+class InvalidInputError ( TypeError ):
+
+    def __init__ ( self , input_data : Any ):
+
+def is_string ( obj : Any ) -> bool :
+
+def is_camel_case ( input_string : Any ) -> bool :
+
+def camel_case_to_snake ( input_string , separator = '_ ') :
+    """
+    Convert a camel case string into a snake case one .
+    ( The original string is returned if is not a valid camel case string )
+
+    * Example :*
+
+    >>> camel_case_to_snake ( ' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+    : param input_string : String to convert .
+    : type input_string : str
+    : param separator : Sign to use as separator .
+    : type separator : str
+    : return : Converted string .
+    """
+
+
+
+
+                                                           1516
+    Example of Prompt 2 for Small Context
+
+    ### Instruction
+
+    import base64
+    import random
+    import unicodedata
+    import zlib
+    from typing import Union
+    from uuid import uuid4
+    from . _regex import *
+    from . errors import InvalidInputError
+    from . validation import is_snake_case , is_full_string , is_camel_case , is_integer , is_string
+
+    CAMEL_CASE_REPLACE_RE = re . compile (r '([ a -z ]|[ A -Z ]+) (?=[ A -Z ]) ')
+
+    class InvalidInputError ( TypeError ):
+
+        def __init__ ( self , input_data : Any ):
+
+    def is_string ( obj : Any ) -> bool :
+
+    def is_camel_case ( input_string : Any ) -> bool :
+
+    The provided code snippet includes necessary dependencies for implementing the ` camel_case_to_snake `
+           function . Write a Python function ` camel_case_to_snake ( input_string , separator = '_ ') ` to solve
+          the following problem :
+    """
+    Convert a camel case string into a snake case one .
+    ( The original string is returned if is not a valid camel case string )
+
+    * Example :*
+
+    >>> camel_case_to_snake (' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+    : param input_string : String to convert .
+    : type input_string : str
+    : param separator : Sign to use as separator .
+    : type separator : str
+    : return : Converted string .
+    """
+
+    ### Response :
+    def camel_case_to_snake ( input_string , separator = '_ ') :
+        """
+        Convert a camel case string into a snake case one .
+        ( The original string is returned if is not a valid camel case string )
+
+        * Example :*
+
+        >>> camel_case_to_snake ( ' ThisIsACamelStringTest ') # returns ' this_is_a_camel_case_string_test '
+
+        : param input_string : String to convert .
+        : type input_string : str
+        : param separator : Sign to use as separator .
+        : type separator : str
+        : return : Converted string .
+        """
+
+
+
+
+F   Studied LLMs: Supplemental results
+In this section, we offer supplementary results from the evaluation of LLMs on R EPO E XEC. Table 4
+presents the Dependency Invocation Rate (DIR) for the experimented LLMs. When comparing models of
+the same size, it is shown that instruction-tuned models more effectively follow human intent in utilizing
+the provided dependencies with InstructPrompt. For example, WizardCoder outperforms CodeLlama by
+5%, and the instruction-tuned version of Mixtral-8x7B shows a 10% improvement over its foundation
+version. This highlights the strong capability of instruction-tuned models to follow the given context
+effectively. Besides, using the Medium context leads to a significant decline in both Pass@k and DIR
+using BasePrompt. This implies the generation of empty function bodies using this template.
+   Indeed, Figure 6 illustrates the proportion of generated functions that are empty for each LLM using
+BasePrompt. The findings indicate that utilizing Medium context results in a substantial number of
+empty functions. This may be due to the input format of the context when using BasePrompt, which can
+mislead the model into interpreting dependency functions as few-shot examples. In the Medium context,
+the function bodies of dependencies are removed, making their format identical to the target function
+                                                               1517
+prompt. This similarity can mislead the LMs, resulting in empty solutions. Particularly, Starcoder-2
+is heavily impacted by this issue, as over 31% of its generated results are empty functions, revealing a
+significant weakness of the model. Meanwhile, small context effectively decreases the occurrence of
+empty function generation by the model and, in certain instances, improves models’ ability in dependency
+calls (e.g. CodeLlama-13b-Python, WizardCoder-Python-13B-V1.0, and Mixtral-8x7B-Instruct-v0.1 in
+Table 4). We believe that the following reasons could contribute to this observation. Firstly, employing
+small context reduces the input token count, preventing truncation when exceeding the maximum length
+limit, thus allowing uninterrupted solution generation by the model. This reduced context enables
+models to concentrate exclusively on dependency signatures, thereby enhancing the probability that
+generated solutions effectively utilize these dependency token names. Moreover, function names hold
+substantial semantic value by delineating the function’s purpose. Many studies have underscored that code
+summarization heavily relies on extracting information from function names (Haldar and Hockenmaier,
+2024; Mondal et al., 2023; Sontakke et al., 2022). Therefore, this concise representation of dependencies
+has the potential to improve how models utilize dependencies in generating code.
+   Additionally, Table 9 presents examples that support our findings in Section 6.1. For instance, in the
+first example, we observe that the instruction-tuned model can effectively utilize the given dependencies
+to manage edge cases to raise an error, whereas the pretrained model fails to do so. This supports our
+first findings. Meanwhile, the second and third examples demonstrate that pretrained models try to
+reimplement or devise workarounds instead of leveraging the available context. Additionally, in the
+second example, the instruction-tuned model successfully identifies the relevant dependencies; however, it
+complicates the situation and fails to produce the correct solution. This may suggest that hallucinations
+complicate the outputs generated by instruction-tuned models. In the third example, both types of models
+successfully pass the tests. However, although the context provides the dependency for creating a new
+Future object, these models attempt to reimplement the _create_future function but fail to optimize
+memory usage effectively. This observation implies the potential of code smell and technical debt in these
+generated codes.
+   Besides, we present supplementary results for both closed-source and open-source models in Table
+8. Specifically, we employ greedy decoding and report pass@1 and DIR metrics, selecting the best-
+performing results for each model based on either BasePrompt or InstructPrompt with Full context. The
+results demonstrate strong performance in both pass@k and DIR metrics with advanced reasoning models
+like DeepSeek-R1 and GPT-4o, highlighting their reliability in code generation. However, all pass@1
+results remain below 50%, underscoring the challenges posed by R EPO E XEC.
+
+G    Multi-round Debugging
+
+    Prompt for Debugging
+
+    { dependency_context }
+    # The provided code snippet includes necessary dependencies for implementing
+         the `{ target_function_name }` function . Write a Python function `{
+         target_function_signature }` to solve the following problem :
+    { target_function_docstring }
+
+    # Here is the current solution .
+    { error_solution }
+
+    # When executing the below test case .
+    { failed_test_case }
+
+    # The provided python code solution fails the test with the following errors ,
+         please correct them .
+    { error_log }
+
+    # Please provide the modified code for me to review and provide feedback .
+    { target_function_prompt }
+
+
+
+                                                  1518
+            ID    Model                                          Size (B)    Pass@1      DIR
+            1     DeepSeek-R1 (Guo et al., 2025)                 671          42.57     70.86
+            2     DeepSeek-V3 (Liu et al., 2024a)                671          42.00     80.35
+            3     Llama 3.1-Instruct (Dubey et al., 2024)        405          39.43     73.26
+            4     GPT-4o                                         -            38.00     68.15
+            5     QwQ-Preview (Team, 2024)                       32           37.43     57.07
+            6     DeepSeek-Coder-Instruct (Guo et al., 2024)     33           35.71     67.02
+            7     Yi-1.5 (Young et al., 2024)                    34           35.43     61.34
+            8     Qwen-2.5-Coder-Instruct (Hui et al., 2024)     14           34.28     65.68
+            9     CodeQwen1.5 (Bai et al., 2023)                 7            32.29     59.48
+            10    OpenCodeInterpreter (Zheng et al., 2024)       33           31.42     61.28
+            11    Phi-4 (Abdin et al., 2024)                     14           30.86     71.10
+            12    GPT-4o-mini                                    -            30.29     74.75
+            13    Llama 3.3-Instruct (Dubey et al., 2024)        70           29.43     67.20
+            14    DeepSeek-Coder (Guo et al., 2024)              6.7          28.86     57.44
+            15    Qwen-2.5-Instruct (Yang et al., 2024)          14           28.85     65.63
+            16    starcoder2 (Lozhkov et al., 2024)              15           28.57     60.97
+            17    Gemma2 (Team et al., 2024)                     27           28.00     71.68
+            18    Llama-3.1-Instruct (Dubey et al., 2024)        70           25.14     66.95
+
+                           Table 8: Performance of various LLMs on R EPO E XEC.
+
+
+   We employ Multi-round debugging in code generation, which iteratively refines and improves the
+generated code through multiple cycles of debugging. Following the execution of unit tests on the
+generated functions, we extract the error log if the code fails to run. We employ the following prompt to
+utilize the model for bug fixing. This process is iterated multiple times until either the correct code is
+achieved or the maximum number of rounds is reached. Specifically, we set the maximum number of
+rounds to 3 and experimented on three models WizardCoder, GPT-3.5 and CodeLlama-13b-Python.
+   Table 5 shows the improvement across three rounds of debugging in various models. We observe that
+GPT-3.5 and WizardCoder demonstrate a high capacity for debugging with improvement of over 10%
+and 7% in Pass@1, respectively, while CodeLlama fails to take advantage of this process. Additionally,
+the DIR has also shown a significant improvement (over 7%) after three rounds of debugging in these
+two instruction models (Figure 7). These findings indicate a promising approach using self-refinement
+with debugging for code generation, which can enhance both the correctness and the utilization of given
+dependencies.
+   We also present data on the number of error types corrected in each round of WizardCoder, as illustrated
+in Figure 8. We can see that AssertionError makes up the majority of errors across all rounds. This error
+type indicates either incorrect outputs from the generated code or the presence of empty function bodies
+(return None). However, by incorporating the test output guide, the model effectively addressed most
+of these errors. Furthermore, fundamental issues like SyntaxError or AttributeError were promptly
+rectified during the initial round.
+
+H    Context length, model size and families analysis
+Long-context models can enhance the ability to comprehend and select relevant context from lengthy
+inputs to effectively solve the required task. In this section, we examine how the context length supported
+by each model affects their performance in R EPO E XEC. Figure 9 demonstrates the relationship between
+support context length, model size, and model family in relation to pass@k and DIR scores.
+   We observe that context length has a weak correlation with model performance on our dataset. In con-
+trast, model size (scaling law) and model family, which encompass different training methods (pretraining
+or instruction tuning), training datasets, and architectures, show a more significant impact. The weak
+correlation with context length can be explained by our approach’s ability to already capture relevant
+                                                   1519
+                                                 8.11                                                 Full Context
+                           phi-2                           11.86                                      Medium Context
+                                   1.01                                                               Short Context
+                                                 7.89
+          Phind-CodeLlama-34B-v2                                       21.24
+                                          4.06
+                                              5.86
+                     Starcoder-2                                                   31.8
+                                                     9.63
+                                                7.04
+                       Starcoder                              14.79
+                                       2.17
+                                                  8.73
+            Codellama-13b-Python                               14.9
+                                       2.39
+                                                  8.79
+            Codellama-34b-Python                                   17.44
+                                         3.85
+
+                                   0                   5              10         15         20   25          30
+                                                                               Percentage (%)
+
+      Figure 6: Percentage of generated outputs that result in empty functions across various context types.
+
+
+
+information (e.g. dependency) for each data sample, resulting in the pruning of context length for practical
+usage (363 tokens on average shown in Table 1). Meanwhile, models that support long contexts are often
+trained on data containing a mix of relevant and irrelevant information and are evaluated on their ability
+to retrieve the correct context in a needle-in-a-haystack scenario (Roziere et al., 2023; Ivgi et al., 2023;
+Liu et al., 2024b). Therefore, models with varying context lengths might show a weak correlation to
+performance in our scenario.
+
+
+I   Dependency Extraction Tool
+
+We present pydepcall, a Python library designed to extract function dependencies from any repository.
+Our tool provides a quick, practical solution for scalability, requiring only three lines of code to extract
+dependencies for all functions in any repository. Specifically, our tool is based on two conventions for
+retrieving function dependencies of a programming language:
+
+
+    • Import Convention (for cross-file dependencies): The convention mentions how a programming
+      language imports modules within a repository. This can be utilized to extract dependency names from
+      different files. For instance, in Python, this can be done using statements such as "from file import
+      function/class/variable" or "from file1.file2 import function/class/variable."
+
+
+    • Calling Dependencies Convention: This principle pertains to how a program invokes variables,
+      functions, and classes. In Python, functions are typically called by specifying their names followed
+      by parentheses (e.g., function1(param1, param2)), or by using a dot notation to access attributes
+      or methods from a module (e.g., file1.function1, class1.attribute1).
+
+
+   Besides, pydepcall can extract dependencies at various depths, up to 100 levels deep, which can help
+the community explore the integration of a deeper context. We provide a brief overview of its usage in the
+following code snippet.
+                                                                           1520
+                                                                   round 0                 round 3
+
+                 70
+                                                                                      40
+                 60                                                                   35
+                 50                                                                   30
+                 40                                                                   25
+
+
+
+
+                                                                             Pass@1
+                                                      70.63
+
+
+
+
+                                                                                                                         42.64
+                                                                                              41.97
+           DIR
+
+
+                      70.6
+
+                                 63.65
+
+
+
+
+                                                                   63.54
+                                                                                      20
+
+
+
+
+                                                                                                                                    34.37
+                 30
+                                                                                      15
+
+
+
+
+                                                                                                           27.04
+                 20
+                                                                                      10
+                 10                                                                   5
+                 0                                                                    0
+                          GPT-3.5                          WizardCoder                               GPT-3.5               WizardCoder
+
+                                                                           LLMs
+   Figure 7: Improvement of instruction-tuning models on Pass@1 and DIR after 3-round debugging process.
+
+
+                                  NameError                                                   AssertionError       AssertionError
+
+                                         TypeError
+
+AssertionError                                              TypeError
+                                          AttributeError
+
+                                    SyntaxError                                               ValueError                                       NameError
+                       Round 1                                                 Round 2                                               Round 3
+
+                  Figure 8: Fixed error types of WizardCoder across 3 rounds of the debugging process.
+
+
+    pydepcall usage
+
+    from pydepcall import Extractor
+
+    # If you want to extract all module files in the repository
+    reposrc = YOUR_LOCAL_PATH_OF_REPO
+    extractor = Extractor ( reposrc )
+    output = extractor . extract ()
+
+    # If you want to extract a specific module file in the repository
+    reposrc = YOUR_LOCAL_PATH_OF_REPO
+    module_file = YOUR_LOCAL_PATH_OF_FILE_IN_REPO
+    extractor = Extractor ( reposrc , module_file )
+    output = extractor . extract ()
+
+
+
+
+                                                                           1521
+                                     CodeLlama            StarCoder              Phi        DeepSeek-Coder
+                                                                            70
+         40                                                                 65
+         35
+                                                                            60
+pass@1
+
+
+
+
+         30
+
+
+
+
+                                                                      DIR
+                                                                            55
+         25
+                                                                            50
+         20                                        Pearson: 0.02                                                   Pearson: 0.31
+                                                   Spearman: 0.43           45                                     Spearman: 0.49
+         15                                        Kendall: 0.33                                                   Kendall: 0.35
+              0      20      40      60     80      100    120 x1e3              0     20    40      60     80      100     120 x1e3
+                                  Context length                                                  Context length
+Figure 9: Correlation of context length to the model performance on R EPO E XEC. The size of the dots indicates the
+model size, while the color represents the model family.
+
+
+
+         Input Prompt & Solution                                       Generation output
+
+         # Prompt :                                                    # Model type : Pretrained
+         import base64                                                 # Passed : No
+         import random                                                 def reverse ( input_string : str ) -> str :
+         import unicodedata                                                """
+         ...                                                               Returns the string with its chars reversed .
+
+         class InvalidInputError ( TypeError ):                              * Example :*
+             ...
+                                                                             >>> reverse ( ' hello ') # returns ' olleh '
+         def is_string ( obj : Any ) -> bool :
+             ...                                                             : param input_string : String to revert .
+                                                                             : type input_string : str
+         def reverse ( input_string : str ) -> str :                         : return : Reversed string .
+             """                                                             """
+             Returns the string with its chars reversed .                    return input_string [:: -1]
+
+              * Example :*
+                                                                       --------------------------------------------------
+              >>> reverse ( ' hello ') # returns ' olleh '
+                                                                       # Model type : Instruction - tuned
+                                                                       # Passed : Yes
+              : param input_string : String to revert .
+                                                                       def reverse ( input_string : str ) -> str :
+              : type input_string : str
+                                                                           """
+              : return : Reversed string .
+                                                                           Returns the string with its chars reversed .
+              """
+                                                                             * Example :*
+         --------------------------- -----------------------
+                                                                             >>> reverse ( ' hello ') # returns ' olleh '
+         # Solution :
+         def reverse ( input_string : str ) -> str :                         : param input_string : String to revert .
+             """                                                             : type input_string : str
+             Returns the string with its chars reversed .                    : return : Reversed string .
+                                                                             """
+              * Example :*                                                   if not is_string ( input_string ):
+                                                                                  raise InvalidInputError ( input_string )
+              >>> reverse ( ' hello ') # returns ' olleh '                   return input_string [:: -1]
+
+              : param input_string : String to revert .
+              : type input_string : str
+              : return : Reversed string .
+              """
+              if not is_string ( input_string ):
+                   raise InvalidInputError ( input_string )
+
+              return input_string [:: -1]
+
+
+
+
+                                                                    1522
+# Prompt :                                               # Model type : Pretrained
+import random                                            # Passed : Yes
+import luigi                                             def get_configured_hdfs_client () :
+import luigi . configuration                                 """
+...                                                          This is a helper that fetches the
+                                                              configuration value for ' client ' in
+class hadoopcli ( luigi . Config ):                          the [ hdfs ] section . It will return the
+    command = ...                                             client that retains backwards
+    version = ...                                            compatibility when ' client ' isn 't configured
+                                                              .
+def get_configured_hadoop_version () :                       """
+    """                                                      return luigi . configuration . get_config () . get (
+    CDH4 ( hadoop 2+) has a slightly different                ' hdfs ', ' client ' , ' hadoopcli ')
+     syntax for interacting with hdfs
+    via the command line .                                --------------------------------------------------
+
+    The default version is CDH4 , but one can            # Model type : Instruction - tuned
+     override                                            # Passed : No
+    this setting with " cdh3 " or " apache1 " in the     def get_configured_hadoop_version () :
+      hadoop section of the config                           """
+    in order to use the old syntax .                         CDH4 ( hadoop 2+) has a slightly different
+    """                                                       syntax for interacting with hdfs
+--------------------------- -----------------------          via the command line .
+
+# Solution :                                                  The default version is CDH4 , but one can
+def get_configured_hadoop_version () :                         override
+    """                                                       this setting with " cdh3 " or " apache1 " in the
+    CDH4 ( hadoop 2+) has a slightly different                  hadoop section of the config
+     syntax for interacting with hdfs                         in order to use the old syntax .
+    via the command line .                                    """
+                                                              hadoop_cli = hadoopcli () . command . split ()
+    The default version is CDH4 , but one can                 hadoop_version = hadoopcli () . version
+     override                                                 if hadoop_version == " cdh3 ":
+    this setting with " cdh3 " or " apache1 " in the               return hadoop_cli + [ " fs "]
+      hadoop section of the config                            elif hadoop_version == " apache1 ":
+    in order to use the old syntax .                               return hadoop_cli + [ " dfs " ]
+    """                                                       else :
+    return hadoopcli () . version . lower ()                       return hadoop_cli
+
+
+
+
+                                                       1523
+# Prompt :                                               # Model type : Pretrained
+import asyncio                                           # Passed : Yes
+import builtins                                          def maybe_future (x: Any ) -> Future :
+import collections                                           """ Converts ``x `` into a `. Future `.
+...
+                                                              If ``x `` is already a `. Future `, it is
+def is_future ( x: Any ) -> bool :                             simply returned ; otherwise
+    return isinstance (x , FUTURES )                          it is wrapped in a new `. Future `. This is
+                                                               suitable for use as
+                                                              `` result = yield gen . maybe_future (f () ) ``
+def _create_future () -> Future :                              when you don 't know whether
+    future = Future () # type : Future                        ``f () `` returns a `. Future ` or not .
+    # Fixup asyncio debug info by removing
+     extraneous stack entries                                 .. deprecated :: 4.3
+    source_traceback = getattr ( future , "                   This function only handles `` Futures ``, not
+     _source_traceback " , () )                                other yieldable objects .
+    while source_traceback :                                  Instead of ` maybe_future `, check for the non
+        # Each traceback entry is equivalent to                - future result types
+     a                                                        you expect ( often just ``None ``) , and ``
+        # ( filename , self . lineno , self . name ,           yield `` anything unknown .
+     self . line ) tuple                                      """
+        filename = source_traceback [ -1][0]                  if is_future (x):
+        if filename == __file__ :                                  return x
+              del source_traceback [ -1]                      future = Future () # type : Future
+        else :                                                future . set_result (x)
+              break                                           return future
+    return future
+                                                          --------------------------------------------------
+def maybe_future (x: Any ) -> Future :
+    """ Converts ``x `` into a `. Future `.              # Model type : Instruction - tuned
+                                                         # Passed : Yes
+    If ``x `` is already a `. Future `, it is            def maybe_future (x: Any ) -> Future :
+     simply returned ; otherwise                             """ Converts ``x `` into a `. Future `.
+    it is wrapped in a new `. Future `. This is
+     suitable for use as                                      If ``x `` is already a `. Future `, it is
+    `` result = yield gen . maybe_future (f () ) ``            simply returned ; otherwise
+     when you don 't know whether                             it is wrapped in a new `. Future `. This is
+    ``f () `` returns a `. Future ` or not .                   suitable for use as
+                                                              `` result = yield gen . maybe_future (f () ) ``
+    .. deprecated :: 4.3                                       when you don 't know whether
+    This function only handles `` Futures ``, not             ``f () `` returns a `. Future ` or not .
+     other yieldable objects .
+    Instead of ` maybe_future `, check for the non            .. deprecated :: 4.3
+     - future result types                                    This function only handles `` Futures ``, not
+    you expect ( often just ``None ``) , and ``                other yieldable objects .
+     yield `` anything unknown .                              Instead of ` maybe_future `, check for the non
+    """                                                        - future result types
+--------------------------- -----------------------           you expect ( often just ``None ``) , and ``
+                                                               yield `` anything unknown .
+# Solution :                                                  """
+def maybe_future (x: Any ) -> Future :                        if isinstance (x , Future ):
+    """ Converts ``x `` into a `. Future `.                        return x
+                                                              elif isawaitable (x):
+    If ``x `` is already a `. Future `, it is                      return asyncio . ensure_future (x)
+     simply returned ; otherwise                              else :
+    it is wrapped in a new `. Future `. This is                    future = Future ()
+     suitable for use as                                           future . set_result (x)
+    `` result = yield gen . maybe_future (f () ) ``                return future
+     when you don 't know whether
+    ``f () `` returns a `. Future ` or not .
+
+    .. deprecated :: 4.3
+        This function only handles `` Futures ``,
+     not other yieldable objects .
+        Instead of ` maybe_future `, check for the
+     non - future result types
+        you expect ( often just ``None ``) , and ``
+     yield `` anything unknown .
+    """
+    if is_future ( x):
+         return x
+    else :
+         fut = _create_future ()
+         fut . set_result ( x)
+         return fut
+
+
+
+
+                   Table 9: Output samples of Pretrained and Instruction-tuned models.
+
+
+
+
+                                                       1524
+

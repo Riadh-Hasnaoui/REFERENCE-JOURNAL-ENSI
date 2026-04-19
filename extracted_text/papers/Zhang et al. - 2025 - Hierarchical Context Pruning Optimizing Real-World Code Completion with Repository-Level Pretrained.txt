@@ -1,0 +1,612 @@
+                                  The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+
+
+
+
+   Hierarchical Context Pruning: Optimizing Real-World Code Completion with
+                    Repository-Level Pretrained Code LLMs
+              Lei Zhang1,2, 3 , Yunshui Li1,2 , Jiaming Li1,2 , Xiaobo Xia4, 5 , Jiaxi Yang1,2
+        Run Luo1,2 , Minzheng Wang2,7 , Longze Chen1,2 , Junhao Liu6 , Qiang Qu1 , Min Yang1,3 *
+    1
+     Shenzhen Key Laboratory for High Performance Data Mining, Shenzhen Institutes of Advanced Technology, Chinese
+                                                      Academy of Sciences
+                                          2
+                                            University of Chinese Academy of Sciences
+  3
+    Key Laboratory of Intelligent Education Technology and Application of Zhejiang Province, Zhejiang Normal University
+                                   4
+                                     School of Computing, National University of Singapore
+                                        5
+                                          University of Science and Technology of China
+                                                 6
+                                                   University of California, Irvine
+                               7
+                                 MAIS, Institute of Automation, Chinese Academy of Sciences
+                                               {lei.zhang2, min.yang}@siat.ac.cn
+
+                           Abstract                                        such as GitHub Copilot, have become integral to daily de-
+                                                                           velopment workflows, significantly boosting developer pro-
+  Some of the latest released Code Large Language Models
+  (Code LLMs) have been trained on repository-level code
+                                                                           ductivity. As research on Code LLMs continues to advance
+  data, enabling them to perceive repository structures and uti-           (Bavarian et al. 2022; Sun et al. 2024), a new generation
+  lize cross-file code information. This capability allows us to           of models (Guo et al. 2024; Lozhkov et al. 2024; Team
+  directly concatenate the content of repository code files in             et al. 2024) trained on repository-level code data (Repo-
+  prompts to achieve repository-level code completion. How-                Code LLMs) has emerged. These models address the short-
+  ever, in real development scenarios, directly concatenating              comings of earlier file-level models, which struggled to
+  all code repository files in a prompt can easily exceed the              comprehend repository structures and integrate code across
+  context window of Code LLMs, leading to a significant de-                multiple files during completion tasks. However, in real-
+  cline in completion performance. Additionally, overly long               world development scenarios, directly concatenating an en-
+  prompts can increase completion latency, negatively impact-              tire code repository often exceeds the context window size
+  ing the user experience. In this study, we conducted extensive
+  experiments, including completion error analysis, topology
+                                                                           of these Repo-Code LLMs, resulting in significant perfor-
+  dependency analysis, and cross-file content analysis, to in-             mance degradation and increased inference latency. Thus,
+  vestigate the factors affecting repository-level code comple-            effectively harnessing the capabilities of Repo-Code LLMs
+  tion. Based on the conclusions drawn from these preliminary              to integrate cross-file information and construct high-quality
+  experiments, we proposed a strategy called Hierarchical                  completion prompts within the model’s context window re-
+  Context Pruning (HCP) to construct high-quality comple-                  mains an open challenge for further research.
+  tion prompts. We applied the HCP to six Code LLMs and
+  evaluated them on the CrossCodeEval dataset. The experi-                    In this study, we first evaluated six Repo-Code LLMs on
+  mental results showed that, compared to previous methods,                the CrossCodeEval (Ding et al. 2023) benchmark by con-
+  the prompts constructed using our HCP strategy achieved                  structing completion prompts through randomly concatenat-
+  higher completion accuracy on five out of six Code LLMs.                 ing all repository code. We conducted a detailed analysis
+  Additionally, the HCP managed to keep the prompt length                  and categorization of the erroneous completions produced
+  around 8k tokens (whereas the full repository code is ap-                by these models. The analysis revealed that at least 30%
+  proximately 50k tokens), significantly improving completion              of the errors were caused by cross-file information issues,
+  throughput. Our code and data will be publicly available.                highlighting the importance of constructing high-quality
+                                                                           repository-level completion prompts. Next, considering the
+Code — https://github.com/Hambaobao/HCP-Coder                              causal architecture characteristics of Code LLMs, we per-
+Extended version — https://arxiv.org/abs/2406.18294                        formed a topological sort of code files based on their depen-
+                                                                           dency relationships and conducted topological dependency
+                       Introduction                                        analysis experiments. The results showed that maintaining
+                                                                           the topological dependency order of code files within the
+Code completion tools powered by Code Large Language                       prompt significantly improved the accuracy of code comple-
+Models (Code LLMs) (Chen et al. 2021; Nijkamp et al.                       tions. Finally, we analyzed cross-file code content through
+2023b; Li et al. 2023; Fried et al. 2023; Allal et al. 2023),              experiments and found that global context information in
+    * Min Yang is the corresponding author.                                cross-file code can be completely removed without affect-
+Copyright © 2025, Association for the Advancement of Artificial            ing completion accuracy. Even when the specific implemen-
+Intelligence (www.aaai.org). All rights reserved.                          tations of all functions and class methods in cross-file code
+
+
+                                                                   25886
+are removed, there is no significant reduction in completion              Hardware & Hyperparameters
+accuracy.                                                                 We conduct all the expiriments on NVIDIA A100 GPUs.
+   Based on the results of these preliminary experiments, we              We employ greedy decoding strategy for all the models, and
+proposed a strategy named Hierarchical Context Pruning                    set max new tokens to 32. The model max length
+(HCP) to construct high-quality completion prompts. The                   of DeepseekCoder, Starcoder2 and CodeGemma is set to
+HCP models the code repository at the function level, retain-             16, 352, 16, 352 and 8, 160, respectively. All the prompts
+ing the topological dependencies between files while elim-                longer than the model max length are truncated from
+inating a large amount of irrelevant code content. In our                 the left.
+experiments, the HCP successfully reduced the input from
+over 50,000 tokens to approximately 8,000 tokens, and sig-
+nificantly enhanced the accuracy of completions.                                           Preliminary Studies
+   In summary, our contributions are threefold:                           Baseline Evaluation
+ • Pioneering Studies Based on Repository-Aware Code                      Infile Only We initially evaluated the model’s completion
+    LLMs: To the best of our knowledge, our research is pi-               ability using only information from the current file, with re-
+    oneering in exploring how to develop high-quality com-                sults presented in Table 1 under the Infile-Only row. The
+    pletion prompts by leveraging the repository structural               completion results are less than satisfactory. Even the best-
+    awareness of Repo-Code LLMs.                                          performing model achieved an accuracy of only about 30%.
+ • Thorough Preliminary Experiments: In this study, we
+    first conducted extensive preliminary experiments, in-                Random-All Additionally, based on the pre-training data
+    cluding baseline evaluation, completion error analysis,               format of these Code LLMs, we constructed completion
+    topological dependency analysis, and cross-file content               prompts by randomly concatenating all code files from the
+    analysis. The conclusions from these preliminary exper-               repository (truncating from the left to fit within the model’s
+    iments collectively form the rationale behind the HCP.                context window). The evaluation results are shown in Table
+ • Effective Method and Significant Improvements: Our                     1 under the Random-All row. The experimental results indi-
+    proposed HCP strategy achieved better results on five out             cate that including information from other files in the prompt
+    of six Code LLMs compared to previous baseline meth-                  significantly improved completion accuracy (with the excep-
+    ods. These experimental results demonstrate the effec-                tion of DScoder-1.3B). The performance of the DScoder-
+    tiveness of the HCP strategy. We will make our code and               1.3B model progressively declines when the prompt in-
+    data publicly available.                                              cludes multiple files, as can be seen in the experimental
+                                                                          results in Appendix. We suspect this is likely due to the
+                                                                          DScoder-1.3B model not being trained with a multi-file data
+                  Experiments Setup                                       format, rather than a reduction in the number of parameters.
+Dataset & Evaluation Metrics
+To assess the code completion performance of Code LLMs                    RAG-Based Methods We also evaluated other retrieval-
+in real development scenarios, we utilized CrossCodeEval                  augmented generation (RAG) methods, including RAG-
+(Ding et al. 2023) as the evaluation dataset. The Cross-                  BM25 (using BM25 as the relevance metric), RAG-OpenAI
+CodeEval (Ding et al. 2023) benchmark provides test cases                 (using OpenAI text embedding similarity as the relevance
+that require the use of cross-file code information for com-              metric), ReAcc (Lu et al. 2022), DraCo (Cheng, Wu, and Hu
+pletion. Without loss of generality, in this study, we have               2024), and Repofuse (Liang et al. 2024a). The experimental
+chosen Python language as the primary language for our                    results show that, for these Repo-Code LLMs, the comple-
+research.                                                                 tion accuracy of prompts constructed by simply concatenat-
+   We used the original data from CrossCodeEval, retaining                ing repository code files randomly is comparable to that of
+the original repository structure. For each test case, we first           these RAG-based methods. This highlights the potential of
+identified the file for completion and the cursor’s position              Repo-Code LLMs in repository-level code completion tasks.
+(the line and column where the completion occurs). We then
+removed the code after the cursor in that line to form au-                Completion Error Analysis
+thentic completion test cases. Ultimately, we obtained 2,655              To further investigate the issues of repository-level pre-
+real-world completion tests. Following the CrossCodeEval                  trained Code LLMs in real-world completion tasks, we sam-
+evaluation protocol, we evaluated the completion results us-              pled 200 error examples from each model’s Random-All
+ing two metrics: Exact Match (EM) and Edit Similarity (ES).               evaluation results for error analysis. Ultimately, we catego-
+The results based on the Identifier Match (Identifier EM/I-               rized the issues present in these models into eight classes:
+dentifier F1) metrics can be found in the appendix.                       Parameter Value Error, Non-existent Method Call, Improper
+                                                                          Method Invocation, Missing Method Invocation, Redun-
+Models & Prompt Templates                                                 dant Content Generation, Partial Content Missing, Incorrect
+We selected three series of Repo-Code LLMs for inves-                     Content Generation, and Exact Match Error. We shows the
+tigation: DeepSeek-Coder (Guo et al. 2024), Starcoder-2                   error distribution statistics for six Repo-Code LLMs in the
+(Lozhkov et al. 2024), and CodeGemma (Team et al. 2024).                  appendix of the extended version. We also provide examples
+The specific prompt templates used by these Repo-Code                     of each type of error along with corresponding error analysis
+LLMs are presented in the appendix of the extended version.               in the appendix.
+
+
+                                                                  25887
+                                                                                                                                  Baseline Evaluation
+           XF-Context                            DScoder-1.3B                       DScoder-6.7B            Starcoder2-3B                            Starcoder2-7B                     CodeGemma-2B                         CodeGemma-7B
+                                                   EM                  ES              EM           ES           EM                    ES              EM                     ES         EM                       ES             EM                         ES
+           Infile-Only                           16.72            56.58             28.14         68.36     21.92                 61.49              22.98                 63.58       20.64               56.26            30.58                    70.36
+           Random-All                             6.18            46.19             33.94         70.98     28.32                 66.87              31.45                 69.09       26.93               62.13            36.69                    74.42
+           RAG-BM25                              17.28            58.18             32.65         71.78     24.45                 63.84              26.26                 65.32       22.89               57.73            32.89                    70.81
+           RAG-OpenAI                            17.56            57.65             31.93         71.13     25.67                 64.39              26.72                 65.90       22.74               57.12            36.06                    74.19
+           ReACC                                 16.08            55.51             32.36         70.60     24.79                 63.59              26.54                 64.39       22.80               56.56            35.67                    73.47
+           DraCo                                 17.07            56.20             37.06         71.30     29.83                 65.50              31.71                 67.77       20.23               54.33            40.79                    73.36
+           RepoFuse                              22.59            68.85             27.92         73.09                 -                     -               -                   -          -                       -                 -                           -
+
+                      Table 1: The completion results of the baseline methods. EM denotes Exact Match, and ES denotes Edit Similarity.
+
+                                                                                           Median Tokenized Length                                                 Average Tokenized Length
+
+                                            Deepseek-Coder                                                                        Starcoder2                                                                      CodeGemma
+                 10000                                                                             8000                                                                               9000
+                                                                                                                                                                           7940
+                                                                                                                                                            7695
+                                                                                           9252                                                                                                                                                             8369
+                     8333                                                    8967                  6667                                                                               7500                                                    8112
+Num. of Tokens
+
+
+
+
+                                                                                                                                              6815
+                                                               7938                                                                                                                                                             7179
+                     6667                                                                          5333                                                                               6000
+
+                     5000                        5248                                              4000                         4513                                                  4500                        4739
+                                                                                                                                       3796          3904           3958
+                                                        4434          4559          4640                                                                                                                                 3989          4110          4164
+                     3333                                                                          2667                                                                               3000
+                                          3161                                                                           2694                                                                              2817
+                                                                                                                 1967
+                     1667          2272                                                            1333                                                                               1500          2050
+                            1445                                                                          1245                                                                               1309
+                        0                                                                            0                                                                                  0
+                               0             1             2             3             4                     0                1           2             3              4                         0            1             2              3            4
+                                             Dependent Level                                                                Dependent Level                                                                   Dependent Level
+
+Figure 1: The distribution of tokenized prompt lengths in the CrossCodeEval benchmark. The x-axis represents the dependent
+level, and the y-axis represents the number of tokens.   denotes the median value of the tokenized prompt length.  denotes
+the average value of the tokenized prompt length.
+
+
+Topological Dependency Analysis                                                                                                               to represent the prompt including all files in the repository.
+Definition 1. (Dependency Level) Let F denote a set of                                                                                           In Table 2, the D-level rows show the results of comple-
+files in a code repository, and let f ∈ F represent a specific                                                                                tion using cross-file information with different dependency
+file. We define the dependency levels as follows:                                                                                             levels. The results indicate that although the maximum de-
+                                                                                                                                              pendency depth of most files reaches 4 levels, only the infor-
+                                    I(f ) = {g | g is imported by f }                                                                         mation provided by D1 (f ) files is the most useful. Further-
+                                    D0 (f ) = {f }                                                                      (1)                   more, the effectiveness of using D∞ (f ) surpasses that of
+                                    Di+1 (f ) = Di (f ) ∪ I(Di (f ))                                                                          Random-All, indicating that besides D1 (f ) files, there are
+                                                                                                                                              many other useful files within the repository.
+   We first identified the file requiring completion, then ex-
+tracted all the import statements from the file with Tree-                                                                                    Cross-File Content Analysis
+Sitter1 , and used a breadth-first search (BFS) method to pro-                                                                                Definition 2. (Pruning Level) We define the pruning levels
+gressively add dependent files.                                                                                                               into three categories:
+   Figure 1 illustrates the growth in the number of dependent
+files (calculated by the length of the tokenized prompt) as                                                                                       • P-Level 0: No pruning is applied to the file content.
+the number of dependency layers increases. We used median                                                                                         • P-Level 1: All global context content is removed from
+and average as statistical measures and found that in the vast                                                                                      the file.
+majority of cases, the number of dependent files for a single                                                                                     • P-Level 2: All global context content, function bodies
+file increases slowly after reaching four layers of dependen-                                                                                       and class method bodies are removed from the file.
+cies. This suggests that using four layers of dependencies is                                                                                    Table 3 presents the results of completion using cross-file
+sufficient to cover most scenarios. We further define:                                                                                        information with different pruning levels. We can see that
+                              D∞ (f ) = D4 (f ) ∪ {F \ D4 (f )}                                                         (2)                   the results of P-level:1 outperform those of P-level:0, indi-
+                                                                                                                                              cating that the Global Context information from cross-file
+                 1
+                     https://tree-sitter.github.io/tree-sitter                                                                                content has minimal impact on the completion of the current
+
+
+                                                                                                                              25888
+                                                       Topological Dependency Analysis
+  XF-Context     DScoder-1.3B      DScoder-6.7B      Starcoder2-3B         Starcoder2-7B      CodeGemma-2B          CodeGemma-7B
+                   EM        ES      EM        ES      EM          ES        EM         ES      EM            ES      EM           ES
+  D-Level: 1     15.44    55.03    33.03    70.77    26.18       64.15     28.51      66.91   24.37        58.79    34.65       73.01
+  D-Level: 2     13.63    53.45    33.56    70.74    26.70       64.58     29.45      67.03   25.31        59.27    35.67       73.26
+  D-Level: 3     13.26    53.17    33.07    70.51    26.82       64.56     29.23      67.01   25.35        59.30    35.93       73.34
+  D-Level: 4     13.37    53.20    33.22    70.57    26.59       64.46     29.53      67.07   25.54        59.42    36.12       73.54
+  D-Level: ∞       5.76   46.22    35.29    71.51    30.43       67.34     33.03      69.57   29.08        62.91    39.32       75.35
+
+Table 2: Comparison of completion results using different context dependency levels across six models. All the prompts is
+truncated to the max context window of the Code LLMs from the left. ∞ denotes the prompt including all files in the repository.
+
+                                                          Cross-File Content Analysis
+  XF-Context     DScoder-1.3B      DScoder-6.7B      Starcoder2-3B         Starcoder2-7B      CodeGemma-2B          CodeGemma-7B
+                  EM         ES      EM        ES      EM          ES        EM         ES      EM            ES      EM           ES
+  P-Level: 0     6.18     46.19    33.94    70.98    28.32       66.87     31.45      69.09   26.93        62.13    36.69       74.42
+  P-Level: 1     6.55     46.58    36.20    71.90    30.73       67.97     34.43      70.65   29.30        63.46    39.55       75.70
+  P-Level: 2     9.83     49.63    34.73    70.89    30.02       66.41     31.26      68.24   27.34        61.13    38.31       74.32
+   + D-level:1   9.45     49.44    36.87    72.14    29.91       66.96     32.62      69.11   28.93        62.03    39.17       75.16
+   + D-level:2   8.70     48.61    36.38    71.66    29.64       66.99     32.96      69.13   28.44        61.76    39.06       74.91
+
+Table 3: The results of completion using cross-file information with different pruning levels. + D-level:x denotes the model
+uses the cross-file information with dependency level x.
+
+
+file. Additionally, the results of P-level:2 are only slightly            • File Node: Represents a code file, comprising Nodes that
+worse than those of D∞ (f ), and when combined with the                     represent the functions and classes within the file, along
+information from D1 (f ), they are almost equivalent to the                 with global context information.
+results of D∞ (f ). This suggests that the specific implemen-
+tations of most cross-file functions have minimal impact on              Hierarchical Context
+the completion of the current file, and retaining only the
+function header information is sufficient.                               As shown in the top right of Figure 2, following the settings
+                                                                         in Topological Dependency Analysis, we conduct a depen-
+                                                                         dency analysis on the files in the repository. We perform a
+           Hierarchical Context Pruning                                  topological sort based on the dependency relationships, cen-
+Based on the analysis results concerning the dependencies                tering around the file currently being completed. According
+and content of the files, we attempt to construct a hierarchi-           to the experimental results in Topological Dependency Anal-
+cal context prompt based on the importance and relevance                 ysis, only files at dependency level 1 significantly enhance
+of the repository content. This approach aims to enhance the             completion accuracy. Therefore, we select files designated
+accuracy of code completion models while effectively re-                 as D1 (f ) to serve as dependency files. Ultimately, the files
+ducing the length of the context. Figure 2 shows the specific            in the repository are categorized into three types: current
+process for constructing a hierarchical context prompt.                  file, dependency files, and other files. We will apply different
+                                                                         strategies to optimize each type of file.
+Fine-grained Repository Modeling
+                                                                         Current File. For the current file, any content within the
+In order to precisely control the content within the code                file may be needed during completion, so we retain all con-
+repository, we employ Tree-Sitter to parse the files within              tent of the file and convert it into the Fill-in-the-middle
+the repository. We model the content using three types of                (FIM) format.
+nodes:
+                                                                         Dependency Files. According to the experimental results
+ • Function Node: Represents a function or a class method                in Cross-File Content Analysis, removing the global con-
+   within a code file.                                                   text across files does not affect the accuracy of completions.
+ • Class Node: Represents a class in a code file, consisting             Therefore, for dependency files, we remove all global con-
+   of the class’s name, attributes, and Function Nodes.                  text from these files.
+
+
+                                                                 25889
+                                                                                         Topological Modeling
+
+                                                                                                                             Function/Method
+                              Function/Method Unit Modeling                              Class A        Class B               Unit Modeling Other Repository Files      Level 1
+                                                                                                                                                                                       Current File
+ Repository                                                                                                                                                          Dependencies
+                                                                                 …              …               …     …
+        __pycache__
+        benchmark             Function/Method-level Revelance Ranking
+                                                                                                                                                …
+        commands
+                                Other Functions                       Top-p Functions                  Top-k Functions
+        data
+        generation                                   …                                      …                   …
+        integrations
+        kernels
+        models                  Other Function Node                  Top-p Function Node               Top-k Function Node
+         __pycache__
+         albert                                                                                                                        Dependency-file Context                 In-file Context
+                                  Pruning All                    Pruning Function Body                    Keep All
+   […]
+         llama
+                                                                                                                                             Content of                        Content of
+             __pycache__      Pruned Other Function Node         Pruned Top-p Function Node         Pruned Top-k Function Node           configuration_xx.py                  modeling_xx.py
+             __init_.py
+             configuration…
+             modeling_xx.py                       File-Level Context Merging
+       […]                                                                                                                                                              Convert to FIM Format
+                                                                                                                                      Global Context Pruning
+  […]                                                                      …                                                                                                  In-file Context
+        tools
+                                                                                                                                      Dependency-file Context
+        utils                               File-Level Revelance Ranking
+        __init__.py                                                                                                                     Pruned Content of
+        activations_tf.py                                                  …                                                           configuration_xx.py                     FIM Format
+                                                                                                                                                                               Content of
+        activations.py                                                                                                                                                        Modeling_xx.py
+        audio_utils.py
+        cache_utils.py                          Other Repository File Context                             Dependency-file Context              In-file Context
+  […]
+                                                                                Hierarchical Cross-file Context Prompt
+
+
+Figure 2: The framework of hierarchical context pruning for improving the performance of code large language models in
+real-world code completion tasks.
+
+
+Other Files. We refer to files other than the current file                                                low-relevance content can significantly reduce the length of
+and its direct dependency files, namely {F \ D1 (f )} \ f },                                              the prompt input to the model.
+collectively as other files. For the content in other files, we                                              Let G denote the set of all functions and class methods in
+remove all global context, and then we employ function-                                                   the repository, Fk represent the functions sampled using the
+level sampling and pruning methods to optimize the content                                                top-k strategy, and Fp represent the functions sampled using
+of these files.                                                                                           the top-p strategy:
+
+Function-level Sampling                                                                                                             Gk = {g | g ∈ Topk (G)}
+                                                                                     2                                                                                                           (3)
+In this study, we used OpenAI’s text-embedding API to em-                                                                           Gp = {g | g ∈ Topp (G)}
+bed each function (or class method) and query code snippet
+in the repository. We then used the pre-computed similarity                                               where Gk ⊆ Gp . Content from functions and class methods
+of embeddings between the query and candidate functions                                                   not within the set Gk ∪ Gp was completely pruned.
+(or class methods) as an indicator of relevance. We select the
+code from the current line of completion and the 10 lines be-                                             Top-k Context Pruning. For functions (or class methods)
+fore and after it as a query to find functions and class meth-                                            within the set Gk , we retained their entire content.
+ods most relevant to the current completion content.
+   We implemented two sampling strategies (top-k and top-                                                 Top-p Context Pruning. For functions (or class methods)
+p) and designed distinct content pruning strategies for the                                               in the set Gp but not in Gk , we prune their implementations
+functions (or class methods) sampled under each strategy,                                                 and retained only their function headers (or class method
+see Function-level Pruning.                                                                               headers).
+
+Function-level Pruning
+                                                                                                          File-level Relevance Ranking
+According to the experimental results in Cross-File Content
+Analysis, the global context from all non-current files and                                               Relevance Weighting Each function or class method in
+most of the function bodies (or class method bodies) within                                               the repository is assigned a similarity score. We then apply
+the code repository can be pruned. Appropriately pruning                                                  different relevance weights to functions sampled using var-
+                                                                                                          ious sampling strategies, with highly relevant functions and
+   2
+       openai-text-embedding-ada-002                                                                      class methods receiving higher weights. In this experiment,
+
+
+                                                                                                25890
+                                                         Hierarchical Context Pruning (Top-p: 1.0)
+  XF-Context         DScoder-1.3B       DScoder-6.7B       Starcoder2-3B        Starcoder2-7B     CodeGemma-2B        CodeGemma-7B
+                       EM          ES    EM        ES       EM          ES        EM        ES      EM          ES      EM           ES
+  Previous SOTA      22.59     68.85    37.06    73.09     29.83      66.87     31.71    69.09    26.93       62.13   40.79       74.42
+  Top-k: 0            9.45     49.44    36.87    72.14     29.91      66.96     32.62    69.11    28.93       62.03   39.17       75.16
+  Top-k: 5            9.64     49.78    39.74    73.90     32.68      69.05     35.76    71.41    31.26       63.74   42.44       76.95
+  Top-k: 10           9.91     49.85    40.30    74.56     34.15      69.37     36.47    71.50    31.82       64.34   42.63       77.35
+
+               Table 4: The results of completion using hierarchical context pruning with different top-k values.
+
+                                                         Hierarchical Context Pruning (Top-k: 5)
+  XF-Context         DScoder-1.3B       DScoder-6.7B       Starcoder2-3B        Starcoder2-7B     CodeGemma-2B        CodeGemma-7B
+                       EM          ES    EM        ES       EM          ES        EM        ES      EM          ES      EM           ES
+  Previous SOTA      22.59     68.85    37.06    73.09     29.83      66.87     31.71    69.09    26.93       62.13   40.79       74.42
+  Top-p: 0.1         14.27     53.94    37.85    73.11     32.99      68.75     34.16    70.43    29.19       62.09   40.98       76.26
+  Top-p: 0.2         13.52     53.20    38.04    73.13     33.15      68.59     34.84    70.40    29.72       62.32   40.94       76.25
+  Top-p: 0.3         12.88     52.60    38.49    73.19     32.84      68.31     35.22    70.64    30.13       62.77   41.21       76.20
+
+               Table 5: The results of completion using hierarchical context pruning with different top-p values.
+
+
+our specific setup is as follows:                                           and we provides a more comprehensive results in the ap-
+                                                                           pendix of the extended version. We observed that increasing
+                 1.0, ∀g ∈ Gk                                              the top-k value beyond 5 did not result in significant im-
+       W (g) = 0.5, ∀g ∈ Gp \ Gk                              (4)           provements in accuracy. Therefore, we conclude that a top-k
+                 
+                    0.0, ∀g ∈ G \ (Gk ∪ Gp )                                value of 5 is sufficient.
+                                                                               We further fixed the top-k value at 5 and tested the impact
+where Gk and Gp represent the functions with the highest                    of varying top-p values (ranging from 0.1 to 0.9) on com-
+relevance scores sampled using the top-k and top-p strate-                  pletion accuracy. Partial experimental results are presented
+gies, respectively.                                                         in Table 5, with more comprehensive results available in the
+Class-level Relevance The similarity of a class is defined                  appendix of the extended version. Our observations indicate
+as the weighted sum of its class methods:                                   that increasing the top-p value enhances completion accu-
+                                                                            racy; however, beyond a top-p value of 0.3, the improvement
+                                                                            in accuracy slows considerably. Thus, we consider 0.3 to be
+                          X
+                 S(C) =       W (g) ∗ S(g)              (5)
+                             g∈C
+                                                                            a reasonable value.
+
+where, C represents the class, g represents the class method,               Comparison with Random-All Figure 3 visually com-
+and S(g) represents the similarity score of the class method.               pares the Hierarchical Context Pruning (HCP) strategy (top-
+                                                                            k=5, top-p=0.3) with the method of randomly concatenat-
+File-level Relevance The similarity of a file is defined as                 ing all repository code files across three dimensions: com-
+the weighted sum of its functions and classes:                              pletion accuracy, throughput rate, and input length. The vi-
+                   X                    X                                   sualization shows that, compared to random concatenation,
+           S(f ) =      W (g) ∗ S(g) +      S(c)        (6)                 HCP significantly reduces input length (enhancing through-
+                    g∈G                    c∈C                              put) while improving the model’s completion accuracy.
+where, G and C represent the set of functions and classes in
+the file, respectively.                                                                          Related Work
+   Finally, we sort the files at the file-level according to the            Code Large Language Models
+relevance score to determine their relative positions in the                General Code LLMs Building on the success of large
+prompt.                                                                     language models, researchers have explored further pre-
+                                                                            training these models on code data to enhance their per-
+Experimental Results                                                        formance on code-related tasks (Chen et al. 2021; Austin
+Top-k and Top-p Analysis We initially fixed top-p at 1.0                    et al. 2021; Cassano et al. 2022). This has led to the devel-
+and tested the impact of different top-k values on completion               opment and release of several powerful code-focused large
+accuracy. Table 4 presents some of the experimental results,                language models, such as the CodeX series (Chen et al.
+
+
+                                                                    25891
+                                    Completion Accuracy                                                                     Throughput                                                                         Tokenized Prompt Length
+                                   Random-All           HCP                                                            Random-All                       HCP                                                      Random-All                         HCP
+                45.0                                                                               25.0                                                                                18000
+                                                                                                                                                                                       51000
+
+
+
+                36.0                                                                               20.0                                                                                14400
+
+
+
+
+                                                                                 Tokens / Second
+
+
+
+
+                                                                                                                                                                      Num. of Tokens
+                                                                                                                                                                                                                                                                   11,689
+ Accuracy (%)
+
+
+
+
+                                                                                                                                                                                                                                                          11,184
+                                                                                                                                                                                                                                                 10,669
+                27.0                                                                               15.0                                                                                10800                                            10,144
+                                                                                                                                                                                                                                9,604
+                                                                                                                                                                                                                        9,032
+                                                                                                                                                                                                                8,438
+                                                                                                                                                                                                       7,839
+                                                                                                                                                                                               7,186
+                18.0                                                                               10.0                                                                                7200
+
+
+
+                 9.0                                                                                5.0                                                                                3600
+
+
+
+                 0.0                                                                                0.0                                                                                   0
+                                                                                                                                                                                                0.1     0.2      0.3     0.4     0.5     0.6      0.7      0.8      0.9
+                          -1.3B      -6.7B   SC2-3
+                                                   B
+                                                       SC2-7
+                                                            B
+                                                                CG-2
+                                                                    B
+                                                                        CG-7
+                                                                             B                               -1.3B       -6.7B
+                                                                                                                                 SC2-3
+                                                                                                                                         B
+                                                                                                                                             SC2-7
+                                                                                                                                                  B
+                                                                                                                                                      CG-2
+                                                                                                                                                          B
+                                                                                                                                                              CG-7
+                                                                                                                                                                  B
+                       DSC        DSC                                                                     DSC        DSC
+                                                 Model                                                                              Model                                                                                       Top-p
+
+
+Figure 3: left: Comparison of completion results using random-all and the hierarchical context pruning across six models.
+middle: Comparison of throughput using random-all and the hierarchical context pruning across six models. right: Comparison
+of prompt length using random-all and the hierarchical context pruning of different top-p values (top-k=5).
+
+
+2021), CodeGen series (Nijkamp et al. 2023c), CodeT5+                                                                                        and Tarlow 2023), such as ReAcc (Lu et al. 2022), Re-
+(Wang et al. 2023), and Lemur (Xu et al. 2023). These mod-                                                                                   poCoder (Zhang et al. 2023), RepoHyper (Phan et al. 2024)
+els have demonstrated strong capabilities in handling code-                                                                                  and RepoFuse (Liang et al. 2024b), adopted a retrieval-
+related tasks.                                                                                                                               augmented generation approach. This approach involves re-
+                                                                                                                                             trieving relevant code snippets from the repository and con-
+Infilling Code LLMs Infilling scenarios make up the ma-                                                                                      catenating them as comments at the beginning of the cur-
+jority of code completion tasks in the real world. Bavarian                                                                                  rent file to leverage cross-file code information. Recent work
+et al. (2022) demonstrated that pre-training Code LLMs with                                                                                  has further considered additional factors to improve the
+a certain proportion of fill-in-the-middle format code data                                                                                  repository-level completion accuracy of Code LLMs. For
+enables these models to fill in missing code based on the sur-                                                                               example, CoCoGen (Bi et al. 2024) incorporated compiler
+rounding context, without compromising their original left-                                                                                  feedback, while DraCo (Cheng, Wu, and Hu 2024) took data
+to-right generation capabilities. Building on these findings,                                                                                flow factors into account. However, most of these efforts
+many subsequent Code LLMs, such as Incoder (Fried et al.                                                                                     have not utilized the Fill-in-the-Middle capability of Code
+2023), SantaCoder (Allal et al. 2023), CodeGen2 (Nijkamp                                                                                     LLMs. Additionally, since Repo-Code LLMs are relatively
+et al. 2023a), CodeLLama (Rozière et al. 2024), Starcoder                                                                                   new, these works did not take advantage of the new capabili-
+(Li et al. 2023; Lozhkov et al. 2024), DeepSeek-Coder (Guo                                                                                   ties offered by Repo-Code LLMs in their design. To the best
+et al. 2024) and StableCoder (Pinnaparaju et al. 2024), have                                                                                 of our knowledge, our research is pioneering in exploring
+been developed with enhanced infilling capabilities.                                                                                         how to develop high-quality completion prompts by lever-
+                                                                                                                                             aging the repository-awareness of Repo-Code LLMs.
+Repository-Level Code Benchmarks
+To better assess the repository-level code completion capa-
+bilities of Code LLMs, researchers have developed several
+comprehensive benchmarks. CrossCodeEval (Ding et al.                                                                                                                                    Conclusion
+2023) introduced a multilingual cross-file code completion
+benchmark that underscores the importance of understand-
+ing cross-file context in real-world software development                                                                                    In this study, we conducted extensive experiments on six
+environments. RepoBench (Liu, Xu, and McAuley 2023)                                                                                          newly released Code LLMs that were trained on repository-
+is a new benchmark specifically designed for evaluating                                                                                      level code data, and proposed an effective method for
+code auto-completion systems at the repository level. It                                                                                     constructing high-quality repository-level code completion
+includes three interconnected evaluation tasks, code snip-                                                                                   prompts. Our preliminary experimental results showed that
+pet retrieval, code completion, and end-to-end process-                                                                                      maintaining the topological dependency order of code files
+ing, emphasizing the critical role of multi-file context. Re-                                                                                in the prompt can improve completion accuracy, while re-
+cently, additional repository-level code completion bench-                                                                                   moving global cross-file context and specific function im-
+marks have emerged, such as CoderEval (Zhang et al. 2024)                                                                                    plementations does not significantly reduce accuracy. Based
+and EvoCodeBench (Li et al. 2024).                                                                                                           on these findings, we proposed the Hierarchical Context
+                                                                                                                                             Pruning (HCP) method to construct efficient repository-
+                                                                                                                                             level code completion prompts. Compared to previous state-
+Repo-level Code Completion
+                                                                                                                                             of-the-art methods, our HCP approach achieved better re-
+Due to the lack of repository structure awareness in earlier                                                                                 sults on five out of six Code LLMs and effectively controlled
+Code LLMs, most research efforts (Shrivastava, Larochelle,                                                                                   input length, demonstrating the effectiveness of our method.
+
+
+                                                                                                                              25892
+                  Acknowledgments                                        Li, R.; Allal, L. B.; Zi, Y.; Muennighoff, N.; Kocetkov,
+This work was supported by Open Research Fund of Key                     D.; Mou, C.; Marone, M.; Akiki, C.; Li, J.; Chim, J.; and
+Laboratory of Intelligent Education Technology and Appli-                et al. 2023. StarCoder: may the source be with you!
+cation of Zhejiang Province, Zhejiang Normal University                  arXiv:2305.06161.
+(Grant No. jykf21002w), National Natural Science Founda-                 Liang, M.; Xie, X.; Zhang, G.; Zheng, X.; Di, P.; wei jiang;
+tion of China (62376262), MoE Key Laboratory of Brain-                   Chen, H.; Wang, C.; and Fan, G. 2024a. REPOFUSE:
+inspired Intelligent Perception and Cognition, University of             Repository-Level Code Completion with Fused Dual Con-
+Science and Technology of China (Grant No. 2421002).                     text. arXiv:2402.14323.
+                                                                         Liang, M.; Xie, X.; Zhang, G.; Zheng, X.; Di, P.; wei jiang;
+                       References                                        Chen, H.; Wang, C.; and Fan, G. 2024b. REPOFUSE:
+                                                                         Repository-Level Code Completion with Fused Dual Con-
+Allal, L. B.; Li, R.; Kocetkov, D.; Mou, C.; Akiki, C.; Fer-             text. arXiv:2402.14323.
+randis, C. M.; Muennighoff, N.; Mishra, M.; and et al.,
+A. G. 2023.        SantaCoder: don’t reach for the stars!                Liu, T.; Xu, C.; and McAuley, J. 2023. RepoBench: Bench-
+arXiv:2301.03988.                                                        marking Repository-Level Code Auto-Completion Systems.
+                                                                         arXiv:2306.03091.
+Austin, J.; Odena, A.; Nye, M.; Bosma, M.; Michalewski,
+H.; Dohan, D.; Jiang, E.; Cai, C.; Terry, M.; Le, Q.; and                Lozhkov, A.; Li, R.; Allal, L. B.; Cassano, F.; Lamy-Poirier,
+Sutton, C. 2021. Program Synthesis with Large Language                   J.; Tazi, N.; Tang, A.; Pykhtar, D.; Liu, J.; Wei, Y.; Liu, T.;
+Models. arXiv:2108.07732.                                                Tian, M.; Kocetkov, D.; and et al., A. Z. 2024. StarCoder 2
+                                                                         and The Stack v2: The Next Generation. arXiv:2402.19173.
+Bavarian, M.; Jun, H.; Tezak, N.; Schulman, J.; McLeavey,
+                                                                         Lu, S.; Duan, N.; Han, H.; Guo, D.; won Hwang, S.; and
+C.; Tworek, J.; and Chen, M. 2022. Efficient Training of
+                                                                         Svyatkovskiy, A. 2022. ReACC: A Retrieval-Augmented
+Language Models to Fill in the Middle. arXiv:2207.14255.
+                                                                         Code Completion Framework. arXiv:2203.07722.
+Bi, Z.; Wan, Y.; Wang, Z.; Zhang, H.; Guan, B.; Lu, F.;                  Nijkamp, E.; Hayashi, H.; Xiong, C.; Savarese, S.; and
+Zhang, Z.; Sui, Y.; Shi, X.; and Jin, H. 2024. Iterative Re-             Zhou, Y. 2023a. CodeGen2: Lessons for Training LLMs on
+finement of Project-Level Code Context for Precise Code                  Programming and Natural Languages. arXiv:2305.02309.
+Generation with Compiler Feedback. arXiv:2403.16792.
+                                                                         Nijkamp, E.; Pang, B.; Hayashi, H.; Tu, L.; Wang, H.; Zhou,
+Cassano, F.; Gouwar, J.; Nguyen, D.; Nguyen, S.; Phipps-                 Y.; Savarese, S.; and Xiong, C. 2023b. CodeGen: An Open
+Costin, L.; Pinckney, D.; Yee, M.-H.; Zi, Y.; Anderson, C. J.;           Large Language Model for Code with Multi-Turn Program
+Feldman, M. Q.; Guha, A.; Greenberg, M.; and Jangda, A.                  Synthesis. arXiv:2203.13474.
+2022. MultiPL-E: A Scalable and Extensible Approach to
+                                                                         Nijkamp, E.; Pang, B.; Hayashi, H.; Tu, L.; Wang, H.; Zhou,
+Benchmarking Neural Code Generation. arXiv:2208.08227.
+                                                                         Y.; Savarese, S.; and Xiong, C. 2023c. CodeGen: An Open
+Chen, M.; Tworek, J.; Jun, H.; Yuan, Q.; de Oliveira Pinto,              Large Language Model for Code with Multi-Turn Program
+H. P.; Kaplan, J.; Edwards, H.; Burda, Y.; Joseph, N.; Brock-            Synthesis. arXiv:2203.13474.
+man, G.; and et al. 2021. Evaluating Large Language Models               Phan, H. N.; Phan, H. N.; Nguyen, T. N.; and Bui, N. D. Q.
+Trained on Code. arXiv:2107.03374.                                       2024. RepoHyper: Better Context Retrieval Is All You Need
+Cheng, W.; Wu, Y.; and Hu, W. 2024. Dataflow-Guided Re-                  for Repository-Level Code Completion. arXiv:2403.06095.
+trieval Augmentation for Repository-Level Code Comple-                   Pinnaparaju, N.; Adithyan, R.; Phung, D.; Tow, J.;
+tion. arXiv:2405.19782.                                                  Baicoianu, J.; Datta, A.; Zhuravinskyi, M.; Mahan, D.; Bel-
+Ding, Y.; Wang, Z.; Ahmad, W. U.; Ding, H.; Tan, M.;                     lagente, M.; Riquelme, C.; and Cooper, N. 2024. Stable
+Jain, N.; Ramanathan, M. K.; Nallapati, R.; Bhatia, P.; Roth,            Code Technical Report. arXiv:2404.01226.
+D.; and Xiang, B. 2023. CrossCodeEval: A Diverse and                     Rozière, B.; Gehring, J.; Gloeckle, F.; Sootla, S.; Gat, I.; Tan,
+Multilingual Benchmark for Cross-File Code Completion.                   X. E.; Adi, Y.; Liu, J.; Sauvestre, R.; Remez, T.; Rapin, J.;
+arXiv:2310.11248.                                                        and et al., A. K. 2024. Code Llama: Open Foundation Mod-
+Fried, D.; Aghajanyan, A.; Lin, J.; Wang, S.; Wallace, E.;               els for Code. arXiv:2308.12950.
+Shi, F.; Zhong, R.; tau Yih, W.; Zettlemoyer, L.; and Lewis,             Shrivastava, D.; Larochelle, H.; and Tarlow, D. 2023.
+M. 2023. InCoder: A Generative Model for Code Infilling                  Repository-Level Prompt Generation for Large Language
+and Synthesis. arXiv:2204.05999.                                         Models of Code. arXiv:2206.12839.
+Guo, D.; Zhu, Q.; Yang, D.; Xie, Z.; Dong, K.; Zhang, W.;                Sun, Q.; Chen, Z.; Xu, F.; Cheng, K.; Ma, C.; Yin, Z.; Wang,
+Chen, G.; Bi, X.; Wu, Y.; Li, Y. K.; Luo, F.; Xiong, Y.; and             J.; Han, C.; Zhu, R.; Yuan, S.; Guo, Q.; Qiu, X.; Yin, P.; Li,
+Liang, W. 2024. DeepSeek-Coder: When the Large Lan-                      X.; Yuan, F.; Kong, L.; Li, X.; and Wu, Z. 2024. A Sur-
+guage Model Meets Programming – The Rise of Code Intel-                  vey of Neural Code Intelligence: Paradigms, Advances and
+ligence. arXiv:2401.14196.                                               Beyond. arXiv:2403.14734.
+Li, J.; Li, G.; Zhang, X.; Dong, Y.; and Jin, Z.                         Team, C.; Hartman, A. J.; Hu, A.; Choquette-Choo, C. A.;
+2024. EvoCodeBench: An Evolving Code Generation                          Zhao, H.; Fine, J.; Hui, J.; Shen, J.; Kelley, J.; Howland,
+Benchmark Aligned with Real-World Code Repositories.                     J.; Bansal, K.; Vilnis, L.; Wirth, M.; Nguyen, N.; Michel, P.;
+arXiv:2404.00599.                                                        Choy, P.; Joshi, P.; Kumar, R.; Hashmi, S.; Agrawal, S.; Zuo,
+
+
+                                                                 25893
+S.; Warkentin, T.; and Gong, Z. 2024. CodeGemma: Open
+Code Models Based on Gemma.
+Wang, Y.; Le, H.; Gotmare, A. D.; Bui, N. D. Q.; Li, J.;
+and Hoi, S. C. H. 2023. CodeT5+: Open Code Large
+Language Models for Code Understanding and Generation.
+arXiv:2305.07922.
+Xu, Y.; Su, H.; Xing, C.; Mi, B.; Liu, Q.; Shi, W.; Hui, B.;
+Zhou, F.; Liu, Y.; Xie, T.; Cheng, Z.; Zhao, S.; Kong, L.;
+Wang, B.; Xiong, C.; and Yu, T. 2023. Lemur: Harmo-
+nizing Natural Language and Code for Language Agents.
+arXiv:2310.06830.
+Zhang, F.; Chen, B.; Zhang, Y.; Keung, J.; Liu, J.; Zan,
+D.; Mao, Y.; Lou, J.-G.; and Chen, W. 2023. RepoCoder:
+Repository-Level Code Completion Through Iterative Re-
+trieval and Generation. arXiv:2303.12570.
+Zhang, Y.; Zhang, W.; Ran, D.; Zhu, Q.; Dou, C.; Hao, D.;
+Xie, T.; and Zhang, L. 2024. Learning-based Widget Match-
+ing for Migrating GUI Test Cases. In Proceedings of the
+46th IEEE/ACM International Conference on Software En-
+gineering, ICSE ’24. ACM.
+
+
+
+
+                                                               25894
+

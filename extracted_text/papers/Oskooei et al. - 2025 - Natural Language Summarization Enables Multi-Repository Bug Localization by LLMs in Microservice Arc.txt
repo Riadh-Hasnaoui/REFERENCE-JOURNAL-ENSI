@@ -1,0 +1,526 @@
+                                        Natural Language Summarization Enables Multi-Repository Bug
+                                             Localization by LLMs in Microservice Architectures
+                                                             Amirkia Rafiei Oskooei                                                    S. Selcan Yukcu
+                                                        amirkia.oskooei@intellica.net                                             selcan.yukcu@intellica.net
+                                                      amirkia.oskooei@std.yildiz.edu.tr                               Intellica Business Intelligence Consultancy, R&D
+                                             Intellica Business Intelligence Consultancy, R&D                                               Center
+                                                                   Center                                                              Istanbul, Turkey
+                                            Yildiz Technical University, Dept. of Computer Eng.
+                                                              Istanbul, Turkey
+
+                                                          Mehmet Cevheri Bozoglan                                                     Mehmet S. Aktas
+arXiv:2512.05908v1 [cs.SE] 5 Dec 2025
+
+
+
+
+                                                        cevheri.bozoglan@intellica.net                                               aktas@yildiz.edu.tr
+                                              Intellica Business Intelligence Consultancy, R&D                      Yildiz Technical University, Department of Computer
+                                                                    Center                                                               Engineering
+                                                               Istanbul, Turkey                                                       Istanbul, Turkey
+
+
+
+
+                                        Figure 1: A comparison of isolated vs. context-aware summarization. (Red) An isolated summary describes a file’s low-level
+                                        implementation details. (Green) Our context-aware approach, primed with a repository-level "seed context," produces a summary
+                                        that explains the file’s architectural role and purpose, which is more effective for bug localization.
+                                        Abstract                                                                     and performing NL-to-NL search instead of cross-modal re-
+                                        Bug localization in multi-repository microservice architec-                  trieval. Our approach builds context-aware summaries at
+                                        tures is challenging due to the semantic gap between natural                 file, directory, and repository levels, then uses a two-phase
+                                        language bug reports and code, LLM context limitations,                      search: first routing bug reports to relevant repositories, then
+                                        and the need to first identify the correct repository. We pro-               performing top-down localization within those repositories.
+                                        pose reframing this as a natural language reasoning task                     Evaluated on DNext, an industrial system with 46 reposito-
+                                        by transforming codebases into hierarchical NL summaries                     ries and 1.1M lines of code, our method achieves Pass@10 of
+                                                                                                                     0.82 and MRR of 0.50, significantly outperforming retrieval
+                                                                                                                     baselines and agentic RAG systems like GitHub Copilot and
+                                        Permission to make digital or hard copies of all or part of this work        Cursor. This work demonstrates that engineered natural lan-
+                                        for personal or classroom use is granted without fee provided that           guage representations can be more effective than raw source
+                                        copies are not made or distributed for profit or commercial advantage
+                                        and that copies bear this notice and the full citation on the first page.    code for scalable bug localization, providing an interpretable
+                                        Copyrights for components of this work owned by others than the au-          repository → directory → file search path, which is vital for
+                                        thor(s) must be honored. Abstracting with credit is permitted. To copy
+                                        otherwise, or republish, to post on servers or to redistribute to lists,
+                                                                                                                     building trust in enterprise AI tools by providing essential
+                                        requires prior specific permission and/or a fee. Request permissions         transparency.
+                                        from permissions@acm.org.
+                                        ICSE 2026, Rio de Janeiro, Brazil
+                                        © 2026 Copyright held by the owner/author(s). Publication rights             CCS Concepts
+                                        licensed to ACM.
+                                        ACM ISBN 978-1-4503-XXXX-X/2026/06                                           • Computing methodologies → Natural language processing;
+                                        https://doi.org/XXXXXXX.XXXXXXX                                              Artificial intelligence; • Software and its engineering;
+ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil                                                                   Rafiei Oskooei et al.
+
+
+Keywords
+Bug Localization, Code Retrieval, Microservice architecture,
+Large Language Model (LLM), Natural Language Processing
+(NLP), Software Engineering,
+
+ACM Reference Format:
+Amirkia Rafiei Oskooei, S. Selcan Yukcu, Mehmet Cevheri Bo-
+zoglan, and Mehmet S. Aktas. 2026. Natural Language Summa-
+rization Enables Multi-Repository Bug Localization by LLMs in
+Microservice Architectures. In Proceedings of 2026 International
+Conference on Software Engineering (ICSE 2026). ACM, New
+                                                                    Figure 2: The levels of code abstraction. While traditional
+York, NY, USA, 9 pages. https://doi.org/XXXXXXX.XXXXXXX
+                                                                    methods move down from Programming Language (PL) to low-
+                                                                    level vector embeddings, our approach moves up, transforming
+1    Introduction                                                   PL into a higher-level Natural Language (NL) representation
+                                                                    to enable semantic reasoning with LLMs.
+Large Language Models (LLMs) are increasingly applied
+to complex software engineering tasks like bug localization.
+However, current methods, which primarily rely on Retrieval-                enabling a scalable, end-to-end bug localization work-
+Augmented Generation (RAG) over raw source code, face                       flow.
+significant challenges in large-scale, industrial settings. These         ∙ A two-phase search framework that explicitly addresses
+systems often struggle with three key limitations. First, they              the multi-repository routing problem, a critical chal-
+must bridge the semantic gap, where the natural language                    lenge for bug localization in microservice architectures.
+of a user’s bug report often lacks semantic overlap with the              ∙ A comprehensive empirical evaluation on a large-scale
+technical terms in the code. Second, they are constrained by                industrial project, demonstrating the effectiveness of
+the LLM’s finite context window, which prevents them from                   our approach over strong RAG and retrieval-based
+comprehending an entire codebase holistically. Third, they are              baselines.
+often designed with an implicit single-repository assumption.             ∙ An interpretable and auditable reasoning process (repos-
+This makes them ineffective for large-scale software projects               itory → directory → file), which can enhance developer
+composed of many interacting microservices, as they lack a                  trust in AI-powered tools.
+mechanism to first route a bug report to the correct repository
+(codebase) before localization can begin.                           2     Methodology
+    In this work, we explore an alternative paradigm. As il-        To address the challenges of scale, context, and architectural
+lustrated in Figure 2, most current methods move down the           complexity outlined in Section 1, our methodology is designed
+abstraction ladder, transforming source code (PL) into low-         as a two-stage process. First, we transform the entire multi-
+level vector embeddings for similarity search. We hypothesize       repository codebase into a compact and semantically rich
+that for complex bug localization, it is more effective to move     NL Knowledge Base. Second, we employ a Two-Phase Search
+up the ladder. By representing code at a higher level of ab-        to efficiently navigate this knowledge base and pinpoint the
+straction—natural language (NL) summaries—we reframe                source of a bug. This approach systematically converts a
+the problem. This shift from a cross-modal retrieval task to        cross-modal search problem into a more effective NL-to-NL
+a unified NL-to-NL reasoning task is designed to directly           reasoning task.
+leverage the powerful semantic understanding of modern
+LLMs.                                                               2.1     Building Knowledge Base
+    We present a methodology to realize this approach. To
+manage the scale of enterprise systems, we first transform          The primary obstacle to applying LLMs on enterprise-scale
+the source code across all repositories within a project into a     systems is the finite context window. To overcome this, we
+compact, hierarchical NL knowledge base. This is achieved           construct a hierarchical representation of the codebase that
+through context-aware summarization, which creates semanti-         is both compact and information-rich. This offline process
+cally rich descriptions that capture the architectural purpose      involves two key steps.
+of each component. This compact representation helps miti-            Repository-Level Seed Context. The process begins by gen-
+gate the LLM’s context window limitations. The knowledge            erating a high-quality, repository-level summary for each
+base is then navigated using a scalable, two-phase hierarchi-       microservice, which serves as a "seed context." This holistic
+cal search that first identifies the most probable repository       summary ensures that lower-level descriptions understand
+before performing a targeted, top-down search for the faulty        their architectural role, a critical distinction shown in Fig-
+file.                                                               ure 1. To generate this seed context, we prompt an LLM
+    Our primary contributions are:                                  with a comprehensive set of artifacts, a process detailed in
+     ∙ A methodology for transforming a multi-repository            Figure 3:
+       software project into a hierarchical NL knowledge base,            ∙ The Repository Tree: The directory and file structure.
+Natural Language Summarization Enables Multi-Repository Bug Localization by LLMs in Microservice Architectures
+                                                                                                           ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil
+
+
+      ∙ Source Code: A linearized version of the codebase (code                  baselines on a complex, multi-repository benchmark? (2) How
+        snippets).                                                               critical is the hierarchical search component to the method’s
+      ∙ Processed Attachments: Project documentation, includ-                    accuracy and efficiency?
+        ing READMEs and descriptive text extracted from
+        diagrams (e.g., UML, ER) using a multi-modal OCR                         3.1     Experimental Setup
+        and Vision-Language Model (VLM) pipeline.                                   Dataset. Our evaluation is performed on DNext [7], a pro-
+                                                                                 prietary, industrial-scale microservice system for the telecom-
+   Bottom-Up Aggregation. With the seed context established,
+                                                                                 munications sector. Its scale (see Table 1) and use of real-
+we then construct the knowledge tree in a bottom-up fashion
+                                                                                 world, often noisy, bug reports provide a challenging bench-
+(Figure 4). For each source file, an LLM is prompted with
+                                                                                 mark that standard academic datasets cannot replicate. The
+its raw code and the repository’s seed context to generate a
+                                                                                 ground truth for each bug ticket is the set of files modified
+concise, context-aware summary. These file-level summaries
+                                                                                 in the pull request that resolved the issue.
+(the leaves of our tree) are then aggregated at the directory
+level. For each major directory (e.g., /service, /controller),                         Table 1: Statistics of the DNext microservice dataset.
+its constituent file summaries are provided to the LLM to
+generate a coherent directory-level summary, forming the
+intermediate nodes of the knowledge tree.                                                    Metric                                    Value
+                                                                                             Programming Language                      Java
+2.2     Two-Phase Search                                                                     Number of Repositories                    46
+During inference, we leverage the NL knowledge base to                                       Total Number of Code Files                7,077
+perform an efficient top-down search. This process is explicitly                             Total Physical Lines of Code              ∼1.1M
+designed to handle the multi-repository nature of microservice                               Number of Bug Tickets                     87
+architectures.                                                                               Average Buggy Files per Ticket            7.2
+   Phase 1: Search Space Routing. Given a bug report, the
+first challenge is to identify the correct microservice (reposi-
+tory). As illustrated in Figure 5, our framework routes the                         Baselines. We compare our method against two strong
+query by prompting an LLM to compare the bug report                              categories of baselines. For all LLM-based methods, including
+against the high-level, repository-level summaries of all mi-                    our own, we use the gpt-4.1 model to ensure a fair comparison
+croservices. This produces a ranked list of candidate repos-                     of reasoning capabilities.
+itories, ensuring the subsequent search is focused only on                           ∙ Flat Retrieval: We use traditional IR baselines, UniX-
+relevant code repositories.                                                            coder [10] and GraphCodeBERT [11], to retrieve the
+                                                                                       most similar code files based on cosine similarity be-
+   Phase 2: Top-Down Bug Localization. Within each candi-
+                                                                                       tween embeddings.
+date repository, we perform a two-step hierarchical search
+                                                                                     ∙ Agentic RAG: We evaluate against state-of-the-art,
+to find the specific buggy file (Figure 6). First, the LLM
+                                                                                       repository-aware code assistants that operate on source
+performs Directory-Level Filtering by comparing the bug
+                                                                                       code via RAG. We use two leading commercial systems:
+report against all directory-level summaries to identify the
+                                                                                       GitHub Copilot [9] and Cursor [4].
+top-𝑘 most relevant directories. Second, the search space
+is narrowed to the files within these directories for a final                        Metrics. We evaluate performance using standard metrics:
+File-Level Ranking. The LLM performs a detailed analysis of                      Pass@k and Recall@k. Pass@k measures the proportion of
+these filtered file summaries to produce the final ranked list                   bug reports where at least one correct file is found in the
+of files most likely to be the source of the bug.                                top-𝑘 results. Recall@k measures the fraction of all correct
+   This structured repository → directory → file search                          files for a given bug that are successfully retrieved within the
+path provides an inherently transparent and auditable rea-                       top-𝑘 results. Given that the maximum number of modified
+soning process.1 By decomposing the localization task into a                     files for any bug in our dataset is 10 (average 7.2), we set
+series of explicit, verifiable steps, our method addresses the                   𝑘 = 10 as a fair and comprehensive threshold that covers the
+"black box" nature of many end-to-end systems, contributing                      full scope of a typical fix without artificially inflating scores
+to the goal of Explainable AI in developer tools.                                with a large retrieval window. For the preliminary search
+                                                                                 space routing phase, we use a tighter 𝑘 = 3.
+3     Experiments and Evaluation
+We conduct an empirical study to evaluate our proposed                           3.2     Main Results
+architecture for LLM-based bug localization. Our evaluation                         Search Space Routing Performance. Table 2 shows our
+aims to answer two primary questions: (1) How effectively                        method’s effectiveness at the critical first step: routing a
+does our NL-to-NL approach perform against state-of-the-art                      bug to the correct microservice. Our summary-based router
+1                                                                                outperforms the Agentic RAG baselines on coverage metrics
+ To enhance the quality of reasoning at each stage, all prompts used dur-
+ing the inference process explicitly leverage Chain-of-Thought (CoT)             (Pass@3 and Recall@3). This is a crucial advantage for am-
+prompting techniques.                                                            biguous bugs that may span multiple services, as our method
+ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil                                                                  Rafiei Oskooei et al.
+
+
+
+
+Figure 3: The generation process for the repository-level summary. A multimodal pipeline processes various repository documents
+into a single text format. These attachments, along with the repository tree and source code, are used to prompt an LLM to
+create a comprehensive summary that serves as the seed context for all downstream tasks.
+
+
+
+
+Figure 4: Bottom-up construction of the knowledge tree. Leaf
+nodes (file-level summaries) are generated first, using the
+repository-level summary as seed context. These are then
+aggregated to create intermediate nodes (directory-level sum-
+maries), forming a hierarchical NL representation of the code-
+base.
+
+
+is more likely to include all relevant repositories in the initial
+search space.
+
+Table 2: Search Space Routing performance. Our NL-to-NL
+approach is more effective at identifying the correct set of
+candidate repositories.                                              Figure 5: The Search Space Routing process. The LLM com-
+                                                                     pares a bug report against repository-level summaries to iden-
+                                                                     tify a ranked list of candidate microservices, focusing the
+        Approach                  Pass@3       Recall@3    MRR       search.
+        Flat Retrieval              N/A             N/A    N/A
+        Agentic RAG
+          GitHub Copilot            0.82            0.82   0.77
+          Cursor                    0.91            0.91   0.72      base can be a more accurate and effective paradigm than
+                                                                     retrieving from raw source code in some use cases.
+        Ours                        0.93            0.93   0.67
+
+                                                                     3.3   Ablation Study: The Impact of Hierarchy
+  Bug Localization Performance. Table 3 shows the end-to-            To validate our claim that the hierarchical search is a critical
+end file localization performance. Our hierarchical approach         component for both accuracy and efficiency, we conduct
+achieves the highest Pass@10 and MRR, indicating it is               an ablation study. We compare our full method against an
+both more likely to find a correct file and to rank the first        ablated version, which omits the directory-level filtering step.
+correct file higher than any baseline. It also matches the           In this version, after routing to the correct repository, the
+best-performing baseline (Cursor) on Recall@10, the metric           LLM is prompted with the bug report and the summaries
+most sensitive to multi-file bugs. These results validate our        of all files within that repository to produce a final ranking
+central hypothesis: a structured search over an NL knowledge         directly.
+Natural Language Summarization Enables Multi-Repository Bug Localization by LLMs in Microservice Architectures
+                                                                                                           ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil
+
+
+                                                                                 and proving that our hierarchical design is critical for both
+                                                                                 performance and cost-effectiveness.
+
+                                                                                 3.4     Qualitative Analysis
+                                                                                 To understand why our NL-to-NL approach succeeds where
+                                                                                 retrieval fails, we present two case studies in Figure 7. These
+                                                                                 examples show how reasoning over the conceptual purpose
+                                                                                 of code, rather than just its keywords, allows our method to
+                                                                                 solve complex bugs.
+Figure 6: The top-down bug localization process. The search is                   4     Related Works
+first narrowed to candidate directories (Upper Red Rectangle)
+before a focused search over file-level summaries finds the                      Our work is situated at the intersection of code retrieval,
+exact bug location (Lower Red Rectangle).                                        LLM-based bug localization, and code summarization.
+                                                                                    NL-to-PL Code Retrieval. The foundational challenge in
+                                                                                 bug localization is bridging the cross-modal gap between
+Table 3: File-level bug localization performance. Our approach
+                                                                                 natural language (NL) and programming language (PL).
+outperforms both retrieval and Agentic RAG baselines.
+                                                                                 Foundational models like CodeBERT [8], UniXcoder [10],
+                                                                                 and GraphCodeBERT [11] established the viability of joint
+       Approach                  Pass@10      Recall@10     MRR                  NL-PL embeddings by incorporating code structure. While
+       Flat Retrieval                                                            subsequent work has sought to mitigate the persistent vocab-
+         UniXcoder                  0.23         0.16        0.14                ulary mismatch through techniques like dynamic execution
+         GraphCodeBERT              0.62         0.34        0.18                features [18] or NL-augmented retrieval [3], these methods
+       Agentic RAG                                                               still operate on the difficult cross-modal boundary our NL-
+         GitHub Copilot             0.61         0.27        0.25                to-NL approach is designed to circumvent.
+         Cursor                     0.57         0.49        0.27
+                                                                                    LLM-based Bug Localization. Modern systems leverage
+       Ours (Hierarchical)          0.82         0.49        0.50                LLMs for more sophisticated reasoning. Strategies include
+                                                                                 augmenting the query or code before retrieval [13, 16], com-
+                                                                                 bining retrieval with iterative codebase analysis [1], or lever-
+Table 4: Ablation study on the impact of hierarchical search.                    aging structured context via external memory [25] and code
+The ‘w/o filtering‘ row shows the significant performance                        graphs [17]. State-of-the-art agentic frameworks like OrcaLoca [26]
+degradation and cost increase when the directory-level filtering                 and COSIL [14] demonstrate impressive navigation, and hier-
+is removed.                                                                      archical approaches like BugCerberus [2] use specialized mod-
+                                                                                 els at different granularities. However, BugCerberus focuses
+Method             Pass@10       Recall@10        MRR            Avg.            on vertical granularity (File → Statement) within a single
+                                                                Tokens           repository context. Despite their power, these frameworks
+                                                                                 are architecturally constrained to single-repository settings.
+w/ filtering         0.82           0.49           0.50          37K
+                                                                                 They fundamentally lack a mechanism for multi-repository
+                                                                + 38K
+                                                                                 routing, making them unsuitable for modern microservice
+w/o filtering        0.67           0.31           0.23
+                    (-18%)        (-37%)         (-54%)             108K         architectures where identifying the correct repository is the
+                                                               (+44%)            critical first step. Our two-phase framework directly addresses
+                                                                                 this critical gap.
+                                                                                    Automatic Code Summarization. The field of automatic
+   The results of our ablation study, presented in Table 4,                      code summarization [22] provides the foundation for our rep-
+powerfully validate our central architectural claim. Removing                    resentation engineering. Research has shown that code search
+the directory-level filtering step forces the LLM to solve a                     is significantly improved when code snippets are paired with
+classic "needle-in-a-haystack" problem, searching for a few                      NL descriptions [12]. Recent advances have moved beyond
+relevant files within the noisy context of an entire repository’s                method-level summaries to tackle higher-level units using
+summaries. This leads to a catastrophic drop in performance                      hierarchical [6, 19, 20, 23] and context-aware [21] generation
+across all metrics, with MRR plummeting by 54% and Re-                           strategies. While our previous work [19] demonstrated the
+call@10 falling by 37%. In contrast, our hierarchical method                     feasibility of hierarchical summarization for single-repository
+acts as a cognitive scaffold, breaking the complex localization                  contexts, this paper extends that foundation into a compre-
+task into manageable steps to focus the LLM’s reasoning.                         hensive framework for multi-repository microservice archi-
+This approach is not only substantially more accurate but                        tectures. We introduce the Search Space Router to solve the
+also more scalable, as the ablated version requires a 44%                        critical "missing link" of repository identification and enhance
+increase in prompt tokens, making it prohibitively expensive                     the summarization strategy with context-aware propagation.
+ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil                                                                       Rafiei Oskooei et al.
+
+
+
+Case Study 1: Conditional Logic Bug                                       representation. By doing so, we transform bug localization
+                                                                          from a difficult cross-modal retrieval problem into a more
+Bug Report: "Revision number is not increased in certain cases.           tractable NL-to-NL reasoning task optimized for scale and
+External Reference is added but revision remains as zero. However,
+                                                                          architectural complexity.
+a PATCH request to replace the ‘/name‘ field does increase the
+revision... This should be fixed for financialAccount and partyAc-           Positioning Our Work. Our contribution is therefore not a
+count
+                                                                          new summarization model, but rather a novel act of represen-
+The Challenge: A successful tool must understand the code’s con-          tation engineering. We systematically apply established sum-
+ditional business logic—why one PATCH operation behaves differ-           marization techniques to build a purpose-built NL knowledge
+ently from another—not just find files related to "Account".              base, an intermediate representation designed specifically for
+Baseline Failure: The Agentic RAG retrieved generic files, such as:       the task of bug localization (which is a re-usable asset for
+∙ controller/PartyAccountController.java                                  other use-cases as mentioned in Section 5). This architec-
+∙ model/FinancialAccount.java                                             tural pattern is the key that unlocks two distinct advantages
+Analysis: This approach completely missed the nuanced validation          over existing methods: it provides the holistic context nec-
+logic central to the bug.                                                 essary to solve the critical multi-repository routing problem,
+                                                                          and it reframes the task into a unified NL-to-NL reasoning
+Our Method’s Success: Our method identified the crucial service
+classes and, most importantly, the specific validator governing the       challenge that better leverages the semantic power of LLMs.
+patch operation:                                                          Consequently, our framework is not only more scalable for
+∙ service/FinancialAccountService.java                                    complex microservice environments but also inherently more
+∙ validation/PartyAccountJsonPatch...Validator.java                       interpretable, offering a non-black-box reasoning path that
+Analysis: By understanding the file’s architectural role, it pin-         is critical for enterprise adoption where developer trust is
+pointed the exact component responsible for the faulty logic.             paramount.
+
+
+Case Study 2: Referential Integrity Bug
+                                                                          5   Discussion
+                                                                          Our empirical results validate our central hypothesis: for
+Bug Report: "There’s a data integrity issue in order management.
+                                                                          bug localization in complex systems, an engineered natural
+The system is allowing us to create new service orders that refer
+                                                                          language representation of source code can be sometimes
+to service specifications that don’t actually exist in the catalog..."
+                                                                          more effective than the code itself. Our findings, including
+The Challenge: The bug is caused by a missing validation check            the ablation study, confirm that the hierarchical search over
+between two different business domains. The tool must reason              this representation is not only more accurate but also more
+about the expected interaction, not just search for existing code.        cost-effective. This section discusses the broader implications
+Baseline Failure: The Agentic RAG identified the general topic            of this architectural shift and acknowledges the limitations
+(‘ServiceOrder‘) but returned irrelevant mappers and high-level           of our work.
+application files:
+∙ controller/ServiceOrderController.java                                    Implications for AI-Powered Developer Tools. This work
+∙ mapper/ServiceOrderMapper.java                                          has several practical implications for the design of future SE
+Analysis: It found the right topic but could not diagnose the specific,   tools:
+missing integrity check.                                                      ∙ A Scalable Architecture for Microservices: The single-
+Our Method’s Success: Our method correctly identified the special-              repository assumption of most current tools is a criti-
+ized validator classes where the missing logic should have been                 cal architectural limitation. Our two-phase framework
+implemented:                                                                    offers a concrete, scalable solution for applying LLM-
+∙ validators/OrderItemServiceSpec...PatchValidator.java                         based reasoning to enterprise-scale, multi-repository
+∙ util/ServiceSpecificationExistenceValidatorHelper.java                        systems—a ubiquitous industrial paradigm.
+Analysis: It succeeded by reasoning about the required interaction            ∙ A New Paradigm via Reusable Knowledge Bases: The
+between system components, even when the code for it was absent.                hierarchical NL knowledge base is a reusable asset.
+                                                                                Beyond bug localization, it can power a new class of
+                                                                                developer tools for tasks like conceptual code search,
+Figure 7: Qualitative analysis of two challenging bugs. Our                     automated onboarding of new engineers, and architec-
+method succeeds by reasoning about conceptual logic, while                      tural analysis, similar to tools such as DeepWiki [5].
+the baseline fails by relying on superficial keyword matching.                  Our system is also capable of integrating with current
+                                                                                code agents, allowing them to collaborate in identifying
+                                                                                the location of the bugs and then resolving them.
+Critically, retrieval over NL summaries has been shown to be                  ∙ Enhancing Trust through Interpretability: The “black
+a viable alternative to searching over code [24]. While this                    box” nature of many AI tools is a barrier to enterprise
+body of work typically treats summaries as a documenta-                         adoption. Our method’s transparent reasoning path
+tion end-product, our key contribution is to systematically                     (repository → directory → file) is auditable by
+engineer these summaries into a task-specific intermediate                      developers, fostering the trust required for effective
+Natural Language Summarization Enables Multi-Repository Bug Localization by LLMs in Microservice Architectures
+                                                                                                           ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil
+
+
+       human-AI collaboration in high-stakes environments,                        [2] Jianming Chang, Xin Zhou, Lulu Wang, David Lo, and Bixin Li.
+       as discussed by [15].                                                          2025. Bridging Bug Localization and Issue Fixing: A Hierarchi-
+                                                                                      cal Localization Framework Leveraging Large Language Models.
+                                                                                      arXiv preprint arXiv:2502.15292 (2025).
+   Limitations and Future Work. Our study has two primary                         [3] Junkai Chen, Xing Hu, Zhenhao Li, Cuiyun Gao, Xin Xia, and
+limitations. First, the initial generation of the knowledge                           David Lo. 2024. Code search is all you need? improving code
+                                                                                      suggestions with code search. In Proceedings of the IEEE/ACM
+base is computationally intensive. As detailed in Appen-                              46th international conference on software engineering. 1–13.
+dix D, while the initial construction of the hierarchical NL                      [4] Cursor AI. 2025. Cursor AI. https://cursor.sh/ [Accessed
+knowledge base is a one-time offline process, it introduces a                         2025-09-20].
+                                                                                  [5] DeepWiki Project. 2025. DeepWiki. https://deepwiki.org/ [Ac-
+non-negligible computational cost (≈$80 for DNext). In our                            cessed 2025-09-03].
+industrial integration, this process is performed after each                      [6] Nilesh Dhulshette, Sapan Shah, and Vinay Kulkarni. 2025. Hi-
+major release rather than after every commit. This scheduling                         erarchical repository-level code summarization for business ap-
+                                                                                      plications using local llms. In 2025 IEEE/ACM International
+choice is motivated by the nature of the generated summaries:                         Workshop on Large Language Models for Code (LLM4Code).
+since they capture the high-level purpose and architectural role                      IEEE, 145–152.
+                                                                                  [7] DNext Technology. 2025. DNext Technology: Cloud Native
+of files rather than their exact implementation details, rapid                        Digital Customer Engagement Platform. https://www.dnext-
+implementation changes rarely invalidate them. However, as                            technology.com/ [Accessed 2025-09-02].
+projects scale, both the cost and the maintenance scheduling                      [8] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng
+                                                                                      Feng, Ming Gong, Linjun Shou, Bing Qin, Ting Liu, Daxin Jiang,
+algorithm for updating these summaries should be addressed                            et al. 2020. CodeBERT: A Pre-Trained Model for Programming
+in future work to improve efficiency and sustainability.                              and Natural Languages. In Findings of the Association for Com-
+   Second, our evaluation, while substantial, was conducted                           putational Linguistics: EMNLP 2020. 1536–1547.
+                                                                                  [9] GitHub, Inc. and OpenAI. 2021. GitHub Copilot. https://github.
+on a single large-scale industrial Java project. Validating the                       com/features/copilot [Accessed 2025-09-20].
+approach on projects in other languages (e.g., Python, Go)                       [10] Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming Zhou, and
+                                                                                      Jian Yin. 2022. UniXcoder: Unified Cross-Modal Pre-training for
+and architectural patterns (e.g., monolithic architectures) is                        Code Representation. In Proceedings of the 60th Annual Meeting
+an important next step for assessing generalizability.                                of the Association for Computational Linguistics (Volume 1:
+                                                                                      Long Papers). 7212–7225.
+                                                                                 [11] Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng, Duyu Tang,
+6    Conclusion                                                                       Shujie Liu, Long Zhou, Nan Duan, Alexey Svyatkovskiy, Shengyu
+                                                                                      Fu, et al. 2020. Graphcodebert: Pre-training code representations
+Bug localization in modern, multi-repository software sys-                            with data flow. arXiv preprint arXiv:2009.08366 (2020).
+tems is a critical bottleneck where existing RAG-based tools                     [12] Geert Heyman and Tom Van Cutsem. 2020. Neural Code Search
+fail due to architectural and context limitations. In this pa-                        Revisited: Enhancing Code Snippet Retrieval through Natural
+                                                                                      Language Intent. CoRR abs/2008.12193 (2020). arXiv preprint
+per, we introduced a novel framework that reframes this                               arXiv:2008.12193 (2020).
+challenge as a tractable NL-to-NL reasoning task. By sys-                        [13] Sarthak Jain, Aditya Dora, Ka Seng Sam, and Prabhat Singh.
+                                                                                      2024. Llm agents improve semantic code search. arXiv preprint
+tematically engineering source code into a hierarchical NL                            arXiv:2408.11058 (2024).
+knowledge base and navigating it with a scalable, two-phase                      [14] Zhonghao Jiang, Xiaoxue Ren, Meng Yan, Wei Jiang, Yong Li,
+search, our approach improves upon strong RAG and retrieval                           and Zhongxin Liu. 2025. CoSIL: Software Issue Localization via
+                                                                                      LLM-Driven Code Repository Graph Searching. arXiv preprint
+baselines on a large-scale industrial benchmark. Ultimately,                          arXiv:2503.22424 (2025).
+this work demonstrates the power of representation engi-                         [15] Tomek Korbak, Mikita Balesni, Elizabeth Barnes, Yoshua Bengio,
+neering in software engineering. By shifting the paradigm                             Joe Benton, Joseph Bloom, Mark Chen, Alan Cooney, Allan
+                                                                                      Dafoe, Anca Dragan, et al. 2025. Chain of thought monitorability:
+from retrieving over raw code to reasoning over a curated,                            A new and fragile opportunity for ai safety. arXiv preprint
+human-understandable knowledge base, we open a promising                              arXiv:2507.11473 (2025).
+                                                                                 [16] Haochen Li, Xin Zhou, and Zhiqi Shen. 2024. Rewriting the code:
+new direction for AI-powered developer tools that are more                            A simple method for large language model augmented code search.
+scalable, accurate, and trustworthy.                                                  arXiv preprint arXiv:2401.04514 (2024).
+                                                                                 [17] Wei Liu, Ailun Yu, Daoguang Zan, Bo Shen, Wei Zhang, Haiyan
+                                                                                      Zhao, Zhi Jin, and Qianxiang Wang. 2024. Graphcoder: Enhancing
+Acknowledgments                                                                       repository-level code completion via code context graph-based
+                                                                                      retrieval and language model. arXiv preprint arXiv:2406.07003
+This work was conducted at the R&D Center of Intellica                                (2024).
+Business Intelligence Consultancy and was supported by                           [18] Jorge Martinez-Gil. 2024. Improving source code similarity detec-
+the Scientific and Technological Research Council of Turkey                           tion through graphcodebert and integration of additional features.
+                                                                                      arXiv preprint arXiv:2408.08903 (2024).
+(TÜBİTAK) under the TEYDEB 1501 program (Grant No.                               [19] Amirkia Rafiei Oskooei, Selcan Yukcu, Mehmet Cevheri Bozoglan,
+3240105).                                                                             and Mehmet S Aktas. 2025. Repository-Level Code Understand-
+                                                                                      ing by LLMs via Hierarchical Summarization: Improving Code
+   A generative AI tool (Gemini 2.5 Pro) was used solely to                           Search and Bug Localization. In International Conference on
+assist with grammar and clarity improvements; the authors                             Computational Science and Its Applications. Springer, 88–105.
+bear full responsibility for the scientific content and integrity                [20] David Sounthiraraj, Jared Hancock, Yassin Kortam, Ashok Jav-
+                                                                                      vaji, Prabhat Singh, and Shaila Shankar. 2025. Code-Craft: Hier-
+of this work.                                                                         archical Graph-Based Code Summarization for Enhanced Context
+                                                                                      Retrieval. arXiv preprint arXiv:2504.08975 (2025).
+                                                                                 [21] Chia-Yi Su, Aakash Bansal, Yu Huang, Toby Jia-Jun Li, and
+References                                                                            Collin McMillan. 2025. Context-aware code summary generation.
+ [1] Moumita Asad, Rafed Muhammad Yasir, Armin Geramirad, and                         Journal of Systems and Software (2025), 112580.
+     Sam Malek. 2025. Leveraging Large Language Model for In-                    [22] Weisong Sun, Yun Miao, Yuekang Li, Hongyu Zhang, Chunrong
+     formation Retrieval-based Bug Localization. arXiv preprint                       Fang, Yi Liu, Gelei Deng, Yang Liu, and Zhenyu Chen. 2024.
+     arXiv:2508.00253 (2025).                                                         Source code summarization in the era of large language models.
+ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil                                                                     Rafiei Oskooei et al.
+
+
+  Setup: The target microservice (repository) is opened as                 ∙ Cursor: We utilized version v1.5 (release date: August
+  the root folder in the IDE (VS Code with GitHub Copilot                    21, 2025) of the standalone IDE.
+  / Cursor). The agent’s context is therefore limited to that
+  single repository.                                                   C    Prompt Templates
+                                                                       To provide further insight into our methodology, this section
+    Prompt: You are a bug localizer. Given the bug descrip-            contains the core prompt templates used for both the offline
+    tion below, rank the top-10 files that likely cause the            knowledge base generation and the online bug localization
+    bug. Rank them in order of relevance.                              phases. Figure 10 illustrates the six key prompts that power
+                                                                       our framework. These templates are simplified for clarity but
+Figure 8: Prompt template for file-level bug localization using        represent the essential structure and inputs provided to the
+Agentic RAG baselines.                                                 LLM at each stage of the process.
+
+    Setup: All 46 microservice repositories are opened to-             D    Cost of Knowledge Base Construction
+    gether in a single workspace from their shared root di-            To summarize the entire project and generate the hierarchical
+    rectory. This allows the agent to see all folders simulta-         NL knowledge base, we used gpt-4.1-mini. The total cost for
+    neously.                                                           summarizing all repositories was approximately $80 (USD).
+                                                                       While this is a manageable one-time cost in our industrial
+    Prompt: You are a multi-repository bug localizer, se-              setting, it highlights the need for future research on scheduling
+    lecting a search space within a large microservice archi-          algorithms to incrementally update and maintain summaries
+    tecture. Each microservice is represented as a folder in           in a cost-efficient manner.
+    workspace. Given the bug description below, rank the
+    top-3 microservices (folders) that likely cause the bug.
+    Rank them in order of relevance.
+
+Figure 9: Prompt template for multi-repository routing (search
+space selection) using Agentic RAG baselines.
+
+
+     arXiv preprint arXiv:2407.07959 (2024).
+[23] Weisong Sun, Yiran Zhang, Jie Zhu, Zhihui Wang, Chunrong
+     Fang, Yonglong Zhang, Yebo Feng, Jiangping Huang, Xingya
+     Wang, Zhi Jin, et al. 2025. Commenting Higher-level Code Unit:
+     Full Code, Reduced Code, or Hierarchical Code Summarization.
+     arXiv preprint arXiv:2503.10737 (2025).
+[24] Vali Tawosia, Salwa Alamir, Xiaomo Liu, and Manuela Veloso.
+     2025. Meta-RAG on Large Codebases Using Code Summarization.
+     arXiv preprint arXiv:2508.02611 (2025).
+[25] Inseok Yeo, Duksan Ryu, and Jongmoon Baik. 2025. Improving
+     LLM-Based Fault Localization with External Memory and Project
+     Context. arXiv preprint arXiv:2506.03585 (2025).
+[26] Zhongming Yu, Hejia Zhang, Yujie Zhao, Hanxian Huang, Ma-
+     trix Yao, Ke Ding, and Jishen Zhao. 2025. Orcaloca: An llm
+     agent framework for software issue localization. arXiv preprint
+     arXiv:2502.00350 (2025).
+
+
+A     Commercial Tool Prompting Strategy
+To ensure a fair and reproducible comparison against the
+Agentic RAG baselines (GitHub Copilot and Cursor), we
+followed a standardized prompting procedure. Figures 8 and
+9 detail the exact setup and prompt templates used for both
+the multi-repository routing and file-level localization tasks.
+
+B     Version Information
+All interactions with the Agentic RAG baselines were con-
+ducted using their respective interactive “Chat” or “Ask”
+modes to ensure the full reasoning capabilities of the under-
+lying models were engaged. The specific versions used in our
+experiments were:
+     ∙ GitHub Copilot: We utilized version v1.104 (release
+       date: August 29, 2025) of the VS Code extension.
+Natural Language Summarization Enables Multi-Repository Bug Localization by LLMs in Microservice Architectures
+                                                                                                           ICSE 2026, April 12, 2026, Rio de Janeiro, Brazil
+
+
+
+
+(a) Repository Summary Generation                            (b) File Summary Generation                            (c) Directory Summary Aggregation
+
+
+
+
+   (d) Multi-Repository Routing                               (e) Directory-Level Filtering                                 (f) File-Level Ranking
+
+Figure 10: Core prompt templates used in our methodology. The top row (a-c) corresponds to the offline Knowledge Base
+generation phase, while the bottom row (d-f) corresponds to the online, inference-time bug localization phase.
+

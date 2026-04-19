@@ -1,0 +1,1061 @@
+                                                                                                                                                                                      2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE)
+
+
+
+
+                                                                                                                                                                            Rete: Learning Namespace Representation
+                                                                                                                                                                                       for Program Repair
+                                                                                                                                                                                                  Nikhil Parasaram, Earl T. Barr, and Sergey Mechtaev
+
+                                                                                                                                                                                                                University College London
+                                                                                                                                                                                                                London, United Kingdom
+                                                                                                                                                                                                   {nikhil.parasaram.19, e.barr, s.mechtaev}@ucl.ac.uk
+   2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) | 978-1-6654-5701-9/23/$31.00 ©2023 IEEE | DOI: 10.1109/ICSE48619.2023.00112
+
+
+
+
+                                                                                                                                                                  Abstract—A key challenge of automated program repair is           five correct patches because it prefers variables in the local
+                                                                                                                                                               finding correct patches in the vast search space of candidate        neighbourhood to more suitable visible variables.
+                                                                                                                                                               patches. Real-world programs define large namespaces of vari-           We propose R ETE, a new program repair technique, to
+                                                                                                                                                               ables that considerably contributes to the search space explosion.
+                                                                                                                                                               Existing program repair approaches neglect information about         address this problem. R ETE prioritises visible variables in a
+                                                                                                                                                               the program namespace, which makes them inefficient and              program namespace by their likelihood of being used at a
+                                                                                                                                                               increases the chance of test-overfitting. We propose R ETE, a        given program location. In the spirit of neuro-symbolic com-
+                                                                                                                                                               new program repair technique, that learns project-independent        putation [7], R ETE combines program analysis and machine
+                                                                                                                                                               information about program namespace and uses it to navigate the      learning to learn rich project specific semantic information
+                                                                                                                                                               search space of patches. R ETE uses a neural network to extract
+                                                                                                                                                               project-independent information about variable CDU chains, def-      about the namespace. Specifically, it uses variables’ CDU
+                                                                                                                                                               use chains augmented with control flow. Then, it ranks patches by    chains, def-use chains augmented with control flow, to learn
+                                                                                                                                                               jointly ranking variables and the patch templates into which the     latent, low-dimensional representations of program variables
+                                                                                                                                                               variables are inserted. We evaluated R ETE on 142 bugs extracted     that capture their semantic affinities.
+                                                                                                                                                               from two datasets, ManyBugs and BugsInPy. Our experiments               R ETE generates patches by inserting program variables into
+                                                                                                                                                               demonstrate that R ETE generates six new correct patches that
+                                                                                                                                                               fix bugs that previous tools did not repair, an improvement of       patch templates. It separates patch template generation and
+                                                                                                                                                               31% and 59% over the existing state of the art.                      prioritisation into two steps and defines an interface for each
+                                                                                                                                                                                                                                    step to facilitate the use of different algorithms for each one.
+                                                                                                                                                                  Index Terms—Program Repair, Deep Learning, Patch Priori-
+                                                                                                                                                               tisation, Variable Representation.                                   Thus, R ETE is a framework that integrates existing program
+                                                                                                                                                                                                                                    repair approaches. R ETE prioritises patches by combining
+                                                                                                                                                                                                                                    the ranks of variables and the ranks of patch templates into
+                                                                                                                                                                                     I. I NTRODUCTION                               which the variables are inserted into a single ranking. Any
+                                                                                                                                                                  Automated program repair struggles to find correct patches        combination of tools can be used to extract these individual
+                                                                                                                                                               in vast search spaces of patches. First, exploring a large search    template and variable ranks. We implement three instances
+                                                                                                                                                               space takes time, so program repair techniques can fail to find      of template ranking using existing approaches: (1) the plastic
+                                                                                                                                                               a patch because they exceed their time budget. Second, even          surgery hypothesis [8] that extracts templates from the buggy
+                                                                                                                                                               if a program repair technique finds a patch that passes the test     program, mutates them, and prioritises the mutated templates
+                                                                                                                                                               suite, this patch may be incorrect, i.e. it may overfit the test     based on the syntactic distance from the donor code; (2)
+                                                                                                                                                               suite, because test suites incompletely capture specifications.      Prophet’s enumerative synthesiser and machine learning based
+                                                                                                                                                                  Every program defines a namespace and uses scoping rules          prioritiser [1]; and (3) Trident’s constraints-based synthe-
+                                                                                                                                                               to control variable visibility. Existing program repair algo-        siser [9] and combine them with our various variable ranking
+                                                                                                                                                               rithms neglect information about program’s namespace when            algorithms (Section III).
+                                                                                                                                                               searching for repairs, which reduces their effectiveness and            We implemented R ETE for C and Python. We chose C
+                                                                                                                                                               increases test-overfitting [1]. Patch generation techniques that     because of C’s importance and because many program repair
+                                                                                                                                                               use machine learning usually fall into three categories: They        techniques have targeted it. We target Python because of
+                                                                                                                                                               (1) ignore information about program variables, effectively          its ever-increasing importance and the fact that its default
+                                                                                                                                                               only learning to choose the template into which to insert            dynamic typing heightens the importance of namespace in-
+                                                                                                                                                               variables [2]; (2) only extract variables from local context [3],    formation, since without static types, every visible variable is
+                                                                                                                                                               [4]; or (3) learn information about program namespace im-            a candidate for fixing a bug.
+                                                                                                                                                               plicitly [5], but have difficulty handling long-range dependen-         To evaluate R ETE, we use two benchmarks: 107 bugs
+                                                                                                                                                               cies [6]. At each program location, many visible variables           extracted from BugsInPy [10] and 35 bugs extracted from
+                                                                                                                                                               are not local, so tools that fall into the first two categories      ManyBugs [11]. We extracted these bugs to match R ETE’s
+                                                                                                                                                               cannot effectively synthesize patches that require non-local         defect class described in Section III-A (with a restriction
+                                                                                                                                                               visible variables. CoCoNut [5] falls into the third category,        to inserting/modifying single line statements). The evaluation
+                                                                                                                                                               so, in principle, it can learn long-range dependencies, but          demonstrates that R ETE generates patches for 29 of our 107
+                                                                                                                                                               our experiments (Table IX) show that it fails to generate            BugsInPy bugs, and generates 8 for our 35 bugs ManyBugs.
+
+                                                                                                                                                             1558-1225/23/$31.00 ©2023 IEEE                                     1264
+                                                                                                                                                             DOI 10.1109/ICSE48619.2023.00112
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             When we adapted Prophet to work on Python, despite its                       R ETE efficiently synthesises the correct patch in Figure 1a
+             age, it outperformed the previously available state of the art,           by prioritising the correct patch in the first 1000 patches. To do
+             CoCoNut: fixing 21 bugs to CoCoNut’s 16 bugs on our dataset               this, R ETE employs a novel method to rank variables using a
+             (section V). On Python, R ETE outperforms Prophet-for-Python              project-independent representation of a program’s namespace.
+             by six correct fixes. When using R ETE’s variable prioritisation,
+             Prophet-for-Python generates 3 more bugs than it does on                  A. R ETE’s Template Generation
+             its own. On the ManyBugs dataset, Trident’s constraint-based
+             algorithm, augmented with R ETE’s template enumeration and                   R ETE’s core contribution, learning program namespaces, is
+             variable prioritisation, generates more correct patches than the          orthogonal to existing program repair algorithms. Thus, R ETE
+             state of the art tools SOSRepair [12], Prophet [1] and Trident            provides an extensible framework for program repair, which
+             on their own.                                                             seamlessly integrates existing patch generation algorithms.
+                The paper makes the following contributions:                           We consider three archetypal algorithms: the plastic surgery
+                • We introduce the problem of learning program names-
+                                                                                       hypothesis [8], Prophet’s enumerative synthesiser [1], and
+                   pace and present two solutions using deep learning and              Trident’s constraints-based synthesiser [9].
+                   feature engineering which use information from program                 We now show how R ETE uses the plastic surgery hypoth-
+                   analysis.                                                           esis. Our interpretation of the plastic surgery approach starts
+                • We present a generic algorithm to integrate variable
+                                                                                       with existing program statements as partial patches and edits
+                   prioritisation into existing repair techniques, instantiated        them using one of three operations: replacing a variable with
+                   for the Plastic Surgery Hypothesis, Prophet and Trident.            a hole , appending an operator with holes for its operands,
+                • We realise these contributions in R ETE , and evaluate them
+                                                                                       or removing an operator and its operands. The synthesis
+                   on real bugs in C and Python projects.                              algorithm searches for a minimal edit patch. The cost of
+                                                                                       adding or removing an operator equals the number of holes
+                R ETE’s implementation, and the scripts and data used to
+                                                                                       added or removed. Consider the statement x + a × b, the set
+             evaluate it, can be found in the accompanying package https:
+                                                                                       {x+y, a+self .W }, and the rewrite chain x+y →1 x+ 1 →2
+             //github.com/norhh/Rete
+                                                                                       x + 1 × 2 →3 x + a × 2 →4 x + a × b. The chain shows that
+                                      II. OVERVIEW                                     x+a×b is 2 edits from the set because the cost of both →1 and
+                To repair real-world bugs, program repair has to explore               →2 is 1 and the cost of both →3 and →4 is 0. Section III-D
+             huge search spaces of candidate patches. Consider the devel-              explains how we set the edit costs. R ETE later fills the variable
+             oper patch for a bug in Black [13] in Figure 1a. Even if we               holes with concrete variables using the ranking it learns.
+             restrict the number of field accesses with the operator ’.’ to               In Figure 1c, the code block in lines 1-5 (The if block with
+             the maximum of two, there are 11 118 visible variables and                the comment) is two edits away from the required patch in
+             object field accesses at the fix location. A popular approach             Figure 1c:
+             for reducing the search space, employed by a large number of              1.self.pl              → is_decorator
+                                                                                       2.self.pl.is_decorator → self.pl.is_comment
+             existing program repair tools, is to ignore the variables that are        where self.pl represents self.previous_line
+             not local to the fix. However, considering only local variables
+             makes some bugs impossible to repair and increases the                    This patch is correct, if self.previous_line is not
+             likelihood of generating test-overfitting patches. For example,           None1 . As is common practice in APR, R ETE guards such
+             the field access self.previous_line.is_comment in                         deferences with NoneType checks. Given these edits and its
+             Figure 1a, which is used in the fix, does not exist anywhere              NoneType heuristic, R ETE generates the human-equivalent
+             else in the entire program. Even assuming that a prioritisation           patch as shown in Figure 1a.
+             algorithm shortlists 100 candidate variables and we know the
+             exact fix template given in Figure 1b, constructing such a patch          B. R ETE’s Variable Prioritisation
+             would require examining 4950 possibilities to fill the variables             R ETE’s variable ranking model shortlists the most likely
+             into the template.                                                        variables at the location of the fix based on a par-
+                Program repair approaches relying on program synthesis                 tial patch. This reduces not only the number of vari-
+             struggle to generate patches for programs with large names-               ables to examine but also the likelihood of test-overfitting.
+             paces. For example, Trident [9] enumerates patches using                  In Figure 1c, the correct variables to fill the holes in
+             patch templates from its search space and checks whether                  " 1 and self.previous_line. 2 " are ranked 4th and
+             they satisfy the specification constraints. Applied to the bug            5th , much less than 782 and 12, the number of visible variables
+             in Figure 1, for simplicity, let’s assume that Trident uses T             at each hole. The rank for the second variable is not as good
+             patch templates, Trident must enumerate ca. 8–9 orders of                 as that of the first since no identifier that could fix the problem
+             magnitude (T × 111182 ) patches to find this fix, a clearly               appeared in a similar context sufficiently often for the model to
+             infeasible number of patches. Prophet [2] and SPR [14] map                learn it. Purely ML-based approaches, e.g. those using Neural
+             variables to the values that they hold during test execution.             Machine Translation (CoCoNut), struggle to fix such bugs,
+             They use this mapping to instantiate templates. If the number             since the field, is_comment is too sparse for the model to
+             of candidate variables are large, this can lead to test-overfitting,      learn to associate it with self.previous_line.
+             since many variables can take the same values during test
+             execution, leaving these tools unable to differentiate them.                 1 NoneType is Python’s unit type.
+
+
+
+                                                                                   1265
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+                 if (                                                              if (                                                        if (
+                         is_decorator                                                     is_decorator                                              is_decorator
+                         and s e l f . p r e v i o u s _ l i n e                          and s e l f . p r e v i o u s _ l i n e                   and s e l f . p r e v i o u s _ l i n e
+                  ):                                                               ):                                                          ) : # Code b l o c k u s e d t o g e n e r a t e f i x
+                         return 0 , 0                                                     return 0 , 0                                              return 0 , 0
+
+             + if (
+             +     is_decorator
+                                                                                          1          2                                                1
+             +     and s e l f . p r e v i o u s _ l i n e                         if         and        :                                     if         and s e l f . p r e v i o u s _ l i n e . 2 :
+             +     and s e l f . p r e v i o u s _ l i n e . i s _ c o m m e n t
+             + ):                                                                         return 0 , 0                                                return 0 , 0
+             +    return 0 , 0
+
+
+                  newlines = 2                                                     newlines = 2                                                newlines = 2
+                  i f c u r r e n t _ l i n e . depth :                            i f c u r r e n t _ l i n e . depth :                       i f c u r r e n t _ l i n e . depth :
+                        n e w l i n e s −= 1                                             n e w l i n e s −= 1                                        n e w l i n e s −= 1
+
+
+               (a) The developer fix for a bug in Black.                           (b) A template for a hypothetical repair tool.              (c) Edited locations with abstract variables.
+                                             Fig. 1: A bug in Black Python formatter, and how it can be fixed with patch templates.
+
+                                                          III. R ETE                                                       R ETE solves a restricted version of this general problem: it
+                The central “signal” hypothesis of this project is that vari-                                           optimises O only over instantiated templates δ (v). Because of
+             ables with similar semantics are used in similar ways across                                               this restriction, R ETE decomposes the patch ordering problem
+             code bases; this usage signal complements and can supersede                                                into two subproblems: that of ordering templates, aka δ ,
+             signal in raw lexical similarity of names. We introduce con-                                               (Section III-B) and, for each template, the problem of finding
+             ditional def-use chains to capture usage signal.                                                           the correct variables to fill those holes, a.k.a. finding v
+                We consider a C-like programming language L. Program                                                    (Section III-C).
+             p ∈ L is a set of function declarations. In p, let V be its
+             set of variables, and S be the set of all statements in L.                                                 B. Prioritising Templates via Distance
+             Let represent a missing variable and V = V ∪ { }. The                                                         Let α[vars(α)/ ] be the buggy context with holes replacing
+             language L extends L by replacing V with V . Let δ ∈ ∆                                                     all its variables, vars(α). We formulate the problem of finding
+             be a patch; δ(p) denotes the application of δ to p. ∆ ⊂ ∆                                                  the best template for a particular bug in the program p as
+             is a set of patch templates where δ (p) ∈ L , ∀δ ∈ ∆ . δ (v)                                               a graph search problem, starting from α . Let G = (∆ ∪
+             denotes instantiating δ with the variables v ∈ V n , where                                                 {α }, E) be our graph. The distance function d : E −→ W
+             |v| = n. R ETE’s defect class [15] consists of those bugs that                                             weights each (δ s , δ t ) = e ∈ E. Templates are ordered by
+             instantiations of its patch templates can fix.                                                             their distance from α .
+                                                                                                                           Different APR approaches define d differently. Section IV-A
+                                                                                                                        gives our definition. Techniques such as DirectFix [16] define
+             A. The Patch Ordering Problem
+                                                                                                                        d as the minimal number of sub-expression substitutions
+                Generate-and-validate program repair approaches find                                                    required to construct the patch from a buggy statement. Tech-
+             patches by enumerating and testing a large number of candi-                                                niques such as Prophet [2] order templates using Maximum
+             date patches. Typically, the first patch found that enables the                                            likelihood estimation, implicitly defining d using probability.
+             program to pass the test suite is returned as the solution. Thus,
+             the order in which the patches are enumerated is crucial. First,                                           C. Learning Namespace Representations
+             it affects patch quality since not all patches that pass the tests
+             are correct. Second, it affects the speed of patch generation                                                 In this paper, we introduce namespace representations learn-
+             since it determines the number of test executions required to                                              ing, which aims to learn latent, low-dimensional representa-
+             find a suitable patch.                                                                                     tions of program variables, which preserves semantic proper-
+                Problem 1 (The Patch Ordering Problem): Given a test                                                    ties of variable uses, and thus facilitates such applications as
+             suite T , and a program p that does not pass T and a set of                                                variable prioritisation for patch synthesis.
+             patches ∆, find the bijection O : ∆ → [1..|∆|] such that                                                      We now describe how we capture a variable’s uses in a Con-
+                                                                                                                       ditional DU (CDU) chain, a new data structure that augments
+                      argmax P O(δi ) < O(δj ) | δi (p) is correct                                                      a classical DU chain with control information. A variable may
+                         O                                                                                              have many CDU chains, so we describe how we sample them
+                                                                   
+                      ∨ δi (p) is plausible ∧ δj (p) is implausible ,                                                   before describing how we use them to learn embeddings that
+                                                                                                                        capture affinities between variables (their names and uses) and
+             where δ(p) is plausible if it passes all tests in T and implau-                                            holes, each of which represents a potential variable use.
+             sible otherwise.                                                                                              The predicate D : S × V indicates if a variable is defined
+                O is a patch ordering that simultaneously maximises the                                                 in a statement; the predicate U : S × V indicates if a variable
+             probability that correct patches precede plausible patches,                                                is used in a statement. For a variable v and a definition d (i.e.
+             and the probability that plausible patches, in turn, precede                                               D(d, v)), we say that d reaches an arbitrary use-statement s
+             implausible patches.                                                                                       (i.e. U (s, v)), if there exists at least one execution path from d
+
+                                                                                                                  1266
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+                                             Embeddings
+                                                                                          To train its variable prioritiser model, R ETE repeatedly
+                                                                                       serialises each CDU chain and masks each use of a variable,
+                                                            Variable
+                                                                                       not just the defined variable, ignoring all other tokens. For
+                          A Large Language Model
+                                                           Prioritiser                 instance, three CDU chains containing five variable uses would
+                                                                                       generate 15 distinct masked training instances. Figure 2 shows
+                                                                                       us how the model works. For a CDU chain for the variable
+                 a    =      0               >     b      P (token = )
+                                                                                       a ending with a > b, one instance replaces the final use of
+                          Fig. 2: Processing a sample CDU chain.                       a with to mask it out and then feeds it to a pre-trained
+                                                                                       large language model to convert the input into a sequence
+                                                                                       of embeddings. R ETE then runs these embeddings through a
+             to s along which no other statement s0 6= s satisfies D(s0 , v). A        feed-forward network with a softmax layer to realise the task-
+             def-use chain of the variableVv is the sequence of all statements         specific fine-tuning.
+                                              n
+             s1 , ..., sn s.t. 1) D(s1 , v) ∧ i=2 U (si , v); 2) The definition of        Many CDU chains can traverse a given buggy line, so, while
+             v in s1 reaches si for all i > 1 along at least one path; and             its individual CDU chains may be short, the aggregate length
+             3) ∀i, j s.t. i < j ∧ i 6= 1, si precedes sj in the source code.          of a variable’s set of CDU chains can be large. Transformers
+                A node d of a graph b-dominates a node e if every path                 take a maximum length sequence of tokens as input. Thus,
+             starting from a node b to e traverses d. Domb (d) denotes the             the serialisation of a variable’s CDU chains may need to
+             set of all nodes that b-dominate the node d. For the statement            be compressed. Section IV-B details how R ETE’s framework
+             s in program p, let (g1 . . . gn ) be the set of conditional              serialises and compresses CDU chains.
+             statements in p each of whose elements gi dominate s. For
+             the sequence seq = ha1 , . . . , an i, we write x ∈ seq to denote
+                                                                                       D. Jointly Prioritising Patches
+             ∃i ∈ {1, . . . , n}. x = ai .
+                Definition 1 (Conditional Definition-Use (CDU) Chain):                    R ETE ranks patches by combining template and variable pri-
+                For the variable v, a conditional def-use chain w.r.t. an initial      orities. R ETE uses min priority queue, ordered by Equation (1).
+             node b in a control flow graph is the sequence of statements              Equation (1) defines score(δ (v)) using td (δ ) ∈ N which
+             c = hs1 , . . . , sn i where                                              gives δ , the priority of the template and P (δ , , v) ∈ [0, 1],
+                                                                                       the probability of v ∈ V being the candidate to fill the single
+                • A subsequence of c is the DU chain d of the variable v;              hole . Template distance td (Section III-B) calculates the
+                  and                                                                  distance of the template from the source node extracted from
+                • Any statement si ∈
+                                   / d is a conditional statement s.t.                 the localiser (i.e. td (δ ) = d(δ S , δ )). The variable prioritiser
+                    ∀sj ∈ d. i < j =⇒ si ∈ Dom b (sj ).                                described in Section III-C provides variable probabilities. A
+                CDU chains are formed by interleaving a DU chain of v                  Lower score means a better patch.
+             with all conditional statements that b-dominate a statement
+             in the underlying subsequence of the DU chain. In c, the                                                     θ       X                1
+                                                                                          score(δ (v)) = td (δ ) +                                             (1)
+             condition gi precedes the arbitrary element s in c’s DU chain                                             |h(δ )|               P (δ , i , vi )
+                                                                                                                                 i ∈ h(δ )
+             if gi dominates s. Definition 1 non-deterministically orders
+             the conditions w.r.t. each other, subject to the constraint that          where θ is a constant we use to control the growth of the
+             a conditional must precede all statements it dominates. Using             summands, and the function h(δ ) returns the set of holes
+             b-domination allows us to choose a starting node closer to a              in δ . We use P (δ ,1 i ,vi ) in the summation because it gives
+             variable’s uses than a program’s entry.                                   lower score for variables with a higher probability. As the
+                Our intuition is that CDU chains of a given length likely              range of td(δ ) is in W, various template scores differ by
+             have more information about their variable than arbitrary                 integers, the variable prioritisation score starts to matter when
+             code snippets of the same length. CDU chains are related                  P (δ , i , vi )< θ, as the score breaks the barrier of 1. We use
+             to program slices, which consist of all the statements and                θ = 0.073 as this value performed the best in our experiments.
+             predicates that might affect a set of variables at a program              We prioritise patches by separately prioritising templates and
+             point [17]–[19]. Unlike slices, CDU chains ignore, by design,             variables rather than directly prioritising instantiated patches
+             a variable’s data dependencies for two reasons: 1) to avoid the           because the number of instantiated patches is much larger than
+             data dependency clusters that bloat many slices [20] and 2) to            the number of templates, making it infeasible in practice.
+             focus on capturing variable-specific signal.
+                The variable prediction task takes a list of statements with                            IV. R ETE ’ S I MPLEMENTATION
+             a hole at a variable use and predicts the correct variable to fill           Figure 3 shows R ETE’ architecture, which has three main
+             that hole. R ETE models as a masked language modelling prob-              components: (1) Patch Generator, (2) Patch Prioritiser com-
+             lem. Pre-trained, masked language models for code, based on               bining Variable Prioritiser and Template Prioritiser, and (3)
+             transformers [21], fine-tuned with a small amount of labelled             Patch Checker. R ETE’s implementation takes in a buggy
+             data, achieve state-of-the-art performance in different software          program p and a suspicious line number and feeds p to its
+             engineering applications [22]–[24]. Accordingly, R ETE adopts             patch prioritiser, which combines its template and variable
+             this approach to learn affinities between variables and their             prioritisers to produce a patch that it checks with its Patch
+             uses in CDU chains.                                                       Checker. If the check fails, R ETE generates and checks patches
+
+                                                                                   1267
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+                                                                        Patch Prioritiser
+                                                                                               Equation (1), exceeds the distance of the next template. R ETE’s
+                         Buggy Program
+                                                    Patch                     Variable         framework constructs new templates from existing ones by
+                                                   Generator                 Prioritiser
+                        Suspicious Line                                                        replacing, appending, or removing statements. Replacing a
+                                                                             Template          statement cannot change the number of holes: it must both
+                                                                             Prioritiser
+                                                 Candidate Patch                               fill a hole and replace a variable with a hole. Append and
+                                                                                               remove change the number of holes, so long as the resulting
+                                          Fail
+                                                     Patch
+                                                                   OK                          template has at least one hole, i.e. remains a template. When
+                                                                               Patch
+                                                    Checker                                    filling a hole, we try each of the variable prioritiser’s top 30
+                                 Fig. 3: Architecture of R ETE.                                variables. This restriction was because maintaining all possible
+                                                                                               bindings is quite expensive, and we observed that it was
+                                                                                               unnecessary in practice on our corpus. We hypothesize that
+             until it finds a successful patch. R ETE implementation is a                      this observation generalises. We picked 30 as it effectively
+             framework, so its implementation components are not fixed;                        balanced cost and performance on our corpus. When creating
+             they can be instantiated with various existing approaches. For                    a template, R ETE’s framework nondeterministically chooses
+             instance, its checker can be anything ranging from a test suite                   an operation. We chose the templates surrounding the line
+             to a patch specification extracted from symbolic execution.                       of code as the set of initial templates, and we restricted the
+                When realised as a generate-and-validate approach, R ETE                       template size to a single statement and the size of the set to
+             prioritises tests that failed the previous run for efficiency in                  20 templates.
+             practice. To combine templates and variable priorities, R ETE
+             lazily constructs a priority queue ordered by Equation (1).
+                                                                                               B. Variable Prioritisation with CodeBert
+                                                                                                  We instantiate the pre-trained component of R ETE’s variable
+             A. Lazily Prioritising Templates                                                  prioritiser (VP) with CodeBERT [31] and fine-tuned CodeBert
+                To realise R ETE’s template prioritisation scheme (Sec-                        for C and Python datasets. Since CodeBert is not trained for
+             tion III-B), we need to define the buggy context, our templates,                  C, we replaced C-specific symbols, such as N U LL with 0,
+             and a distance function for our templates, then use these com-                    and dropped volatile quantifiers. We then feed this modified
+             ponents to build a weighted graph. To define the buggy con-                       CDU chain to CodeBert to produce embeddings for the task-
+             text, we use fault localisation. Many different localisers have                   specific model that fine-tunes CodeBert to R ETE’s variable
+             been used in APR for C. For our C dataset, we use the Ochiai                      prioritisation task: to accurately predict variables for holes in
+             statistical fault localisation [25], since it performs well [26].                 CDU chains. VP’s task-specific fine-tuned subcomponent is
+             Variation in localisation has confounded tool comparison in C.                    a feed-forward layer with a softmax function, implemented
+             Perhaps, for this reason, prior work on Java APR [27], [28]                       using Huggingface’s open-source transformer [32].
+             assumes perfect localisation, as it facilitates tool comparison.                     At inference time, we have a buggy statement with a hole.
+             CoCoNut is the only previous Python APR work of which we                          We gather the CDU chains that share this statement, as they
+             are aware, and it assumes perfect localisation. For our Python                    comprise the variables that can fill the hole. Under preliminary
+             dataset, we follow its lead.                                                      experimentation, concatenating these chains was inaccurate, so
+                We turn to the confirmation of the Plastic Surgery Hypoth-                     we decided to build a query by interleaving them. To do so,
+             esis (PSH) [8] to define our templates. PSH shows that many                       we order statements by reachability, then line number. If one
+             fixes can be constructed from existing code in a codebase.                        statement is reachable from another in the program’s control
+             Relying on the PSH, we construct templates starting from                          flow graph, the statement that is reached follows the other
+             atomic statements surrounding the buggy context. We templa-                       in the interleaving; if the statements are mutually reachable or
+             tise these statements by replacing their variables with holes,                    unreachable, we order them by line number. We perform these
+             one at a time. A statement with three variable uses would                         actions to maximise variable diversity, as we want to improve
+             generate three distinct templates, each with a single hole. We                    the cases where uncommon variables are used to fix the bug
+             start with only single-holed templates to preserve signal in the                  by increasing unique variable information in our CDU chains.
+             names of the other variables in keeping with R ETE’s central                         To fine-tune the model, we trained the task-specific sub-
+             conceit: the application of Firth’s dictum [29] to variables.                     model on interleaved CDU chains so that the training data
+                The distance between two templates is the difference in                        matches the prediction queries. To produce the shared hole
+             the number of holes each has. Thus, we prefer templates                           needed for interleaving, we converted each input program into
+             with fewer holes, in keeping with PSH, are likely to generate                     a set of single-holed programs, each with a different variable
+             instantiations closer to the buggy statement in edit distance.                    replaced with a hole. We interleaved the set of CDU chains
+                Starting from this initial set of templates, R ETE’s framework                 that pass through each single-holed program’s holed statement.
+             uses Dijkstra’s algorithm [30] to lazily construct its template                      CodeBERT’s window size is 512 tokens. In our corpus, 5692
+             graph. First, the framework interconnects the initial templates                   CDU chains pass through a buggy line on average, each having
+             with zero cost edges to favour their use. It weights subse-                       an average length of 34. Naïvely interleaving these produces
+             quent edges by the distance of the templates they connect.                        inputs whose average length is 5692 × 34 > 512. To cope
+             It moves to the next template only when it has enumerated                         with this mismatch, we compress our inputs. First, we consider
+             all variable instantiations of the current template whose score,                  only cardinality at most five subsets of the CDU chains that
+
+                                                                                            1268
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+               Feature               Description                                           BG107   107 bugs from the BugsInPy [10] dataset.
+                                                                                           P28     28 Python programs with artificially added holes.
+               lvalue                count of variable definitions                         MB35    The ManyBugs [11] subset used in Trident [9].
+               rvalue                count of variable uses
+               for_init              count of for loop initialisation uses
+               for_cond              count of for loop condition uses                  TABLE II: Evaluation corpus of bugs in R ETE’s defect class.
+               for_lcv               count of loop control uses                                                     Validator
+               while_cond            count of while loop condition uses
+               if_cond               count of if condition uses                            V   Validation against Tests                            -
+               hole_to_def           distance between hole and the def                     T   Trident’s patch Specification                      [9]
+               last_use              distance to last use                                  A   Angelix’s patch Specification                     [38]
+               hole_window           count of uses in k lines around hole                  S   SOSRepair’s patch Specification                   [12]
+               operator_histo        multiset of counts of operator/function uses                                 Patch Generator
+               is_global             local/global variables
+                                                                                           A   Angelix’s Angelic Values                         [38]
+                                                                                           S   SOSRepair’s Database of Snippets                 [12]
+             TABLE I: The features that our random forest uses. Each                       P   SPR’s Transformation Schemas                     [14]
+             feature is tracked for each variable in scope.                                C   CoCoNut’s Neural Machine Translation              [5]
+                                                                                           E   Trident’s Naïve template enumeration              [9]
+                                                                                           G   GenProg’s Genetic Algorithm                      [39]
+                                                                                           S   Plastic Surgery Algorithm                         [8]
+             pass through a single-holed statement. Then pick that subset                                        Patch Prioritisation
+             whose chains maximise the number of distinct variables that
+                                                                                           D   DirectFix’s modification minimisation            [16]
+             they use, to maximise, as with dropping duplicates above, to                  C   CoCoNut’s Neural Machine Translation              [5]
+             increase diverse information on variables. This is the NP hard                E   Trident’s expression size minimisation            [9]
+             unweighted maximum coverage problem [33], whose solution                      T   Trident’s side effects minimisation               [9]
+                                                                                           P   Prophet’s Maximum Likelihood Estimation           [1]
+             we greedily approximate [34]. If required, we next reduce the                 S   Plastic Surgery Algorithm                         [8]
+             number of conditions in each chain in the interleaving to the                                      Variable Prioritisation
+             two that use the most variables. If the input is still too long,              E   Naïve variable enumeration                         -
+             we truncate it.                                                               H   Heuristic discussed in Section V-B                 -
+                  a) Random Forest Variable Prioritiser: Several existing                  B   CodeBERT                                         [31]
+                                                                                           G   GraphCodeBERT                                    [40]
+             program repair techniques [4], [35] use machine learning with                 D   CodeBERT fine-tuned on DU chains             Section III-C
+             feature engineering to tackle test-overfitting. These techniques              C   CodeBERT fine-tuned on CDU chains            Section III-C
+             include features related to program variables, some of which                  F   Random Forest                                Section V-B
+             are language-specific and not applicable to C or Python. In               TABLE III: Program Repair Components Used in Evaluation.
+             the spirit of these techniques, we implemented an alternative
+             approach, based on feature engineering. This approach uses
+             a random forest, and the language-independent features in                       b) Experimental Setup: We split the test suite into two
+             Table I, to rank program variables. We train this random forest           parts (20-80), taking care that the smaller part includes at least
+             using Scikit-learn [36].                                                  one failing test. The smaller part is sent to a subject APR
+                                                                                       tool for patch generation. A patch is plausible if it passes the
+                                                                                       test suite. We consider a patch correct if it is plausible, and
+                                       V. E VALUATION
+                                                                                       manual inspection deems it equivalent to the patch written
+                This evaluation uses many configurations of APR tech-                  by the developer. All the patches generated and used in this
+             niques, so it starts by analytically defining APR components,             evaluation are available in the reproduction package.
+             then using those components to establish a new taxonomy. It                  For all training and fine-tuning, we used the buggy datasets
+             then turns to describing experiments whose aim is to answer               with a split of 90-10 for training and testing. All the hyperpa-
+             the following questions:                                                  rameters are tuned by using K-fold cross-validation with k = 5
+                • Do our conditional definition-use (CDU) chains contain               and grid search. No layers were frozen, since we had a large
+                  strong signal about variable usage? (Section V-B)                    enough dataset and a set of low learning rates during the grid
+                • Is R ETE ’s prioritisation strategy effective? (Section V-C)
+                                                                                       search. We use Adam optimiser with a weight decay fix [37].
+                • Does the best combination of R ETE ’s components ad-
+                                                                                          We conducted experiments inside a Docker container on
+                  vance the state of the art? (Section V-D)                            a CPU of 2.7 GHz machine running on Ubuntu 21.04 with
+                                                                                       16GB of memory and Geforce RTX 3070M. We used 4 hours
+                  a) Corpus: Our corpus consists of three bug datasets                 timeout for each tool.
+             whose bugs belong to R ETE’s defect class (Section III-A),
+             as shown in Table II. The programs in P28 were sam-
+             pled uniformly from GitHub on 21/10/21. We exclude two                    A. Tool Configurations and Baselines
+             samples namely wireshark-37122-37123 and gzip-3fe0caeada-                    R ETE’s key contribution is in the variable prioritisation,
+             39a362ae9d from MB37 used in Trident [9], since we could                  which is designed to improve patch prioritisation for program
+             build them along with our ML libraries. MB35 and BG107                    repair, and is orthogonal to existing patch generation and
+             include a test suite; the number of tests averages 62.8 for               prioritisation techniques. To evaluate its impact in isolation, we
+             BG107 and 91.3 for MB35. P28 does not need one as we                      dissect existing program repair techniques into interchangeable
+             used it to train and evaluate R ETE’s neural variable ranker.             parts, and consider their combinations with R ETE’s approach.
+
+                                                                                    1269
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+                             Configuration      Tool       Reference                   instances such as inserting for/while block, sequence of atomic
+                                  VPP          Prophet           [1]                   statements, method declaration, etc. We used this constraint
+                                  TTE          Trident           [9]                   to make the patch generation more feasible by reducing the
+                                  AAD         Angelix           [38]                   search space.
+                                  SS         SOSRepair          [12]
+                                  VCC         CoCoNut           [31]
+                                  VG          GenProg           [39]                   B. CDU Chains Contain Strong Signal
+                       TABLE IV: Configurations of standard tools.                        To demonstrate the variable usage signal CDU chains con-
+                                                                                       tain, we compare token predictors against CodeBert fine-tuned
+             This analysis differs from the existing high-level classification         on CDU chains on our variable prediction task.
+             of APR tools [41] into heuristic-based, constraint-based, and                We use four variable prioritisation baselines — H, F, B,
+             learning-based since our goal was to abstract over irrelevant             and G — introduced in Table III. The first, H, ranks candidate
+             components of existing tools that would complicate the objec-             variables based on their frequency in a program. The second,
+             tive evaluation of the proposed technique.                                F, is the random forest implemented using explicit feature
+                We analytically divided repair techniques into three main              engineering; outperforming this technique means that our
+             parts: patch generation, patch checking and patch prioriti-               neural approach is outperforming manual feature engineering.
+             sation. Patch generation explores the space of patches by                 More information on the features used by the random forest
+             enumeration [14], meta-heuristics [39], neural machine trans-             available in our reproduction package. These two baselines
+             lation [5], [42], or SMT-based program synthesis [43]. Patch              frame the results; we use the two neural baselines — CodeBert
+             checking determines whether a candidate patch meets the cor-              B and GraphCodeBert G — without fine-tuning to demonstrate
+             rectness criteria, either via validation against a test suite [39] or     variable signal in CDU chains. We did not fine-tune Graph-
+             verification, as by solving constraints [9]. Patch prioritisation         CodeBert with CDU chains because it takes both source code
+             ranks patches by their likely correctness, as with syntactic              and that code’s dataflow as input. The difference between the
+             distance [16] or machine learning [2]. We denote such tech-               performance of CodeBert and GraphCodeBert in Table V do
+             niques as Xba , where X is a validator, a is a patch generator,           not appear to warrant the engineering required to extract the
+             and b is a patch prioritiser. For R ETE, we further split patch           dataflow GraphCodeBert needs. We note that CDU chains, by
+             prioritisation into template and variable prioritisation, and             construction, implicitly contain dataflow information, which a
+             combine them using the technique described in Section III-D.              neural network trained using them may learn and exploit.
+                                                                    a
+             Such configurations are denoted by the notation XR(b,c)      , where         Internally, all of these approaches rank candidate variables,
+             b denotes a template prioritisation technique, and c denotes a            so it is natural to compare them using standard rank measures.
+             variable prioritisation technique.                                        Unfortunately, none works well in our setting. We do not use
+                The considered components are tabulated in Table III. Based            mean average precision (MAP) or normalised discounted gain
+             on this notation, Angelix [38] is AAD since it uses its own patch         (NDCG) because we only care about the rank of the first
+             specification and synthesis methods while using DirectFix [16]            plausible patch, not their density in a prefix of the complete
+             patch prioritisation. Angelix uses logical constraints that en-           ranking. We do not use Mean reciprocal rank (MRR) because
+             code program semantics and information extracted from tests,              it does not account for search space reduction. We rank the
+             and validates candidate patches against these constraints; we             candidate variables w.r.t. to the number of variables in-scope,
+             refer to this validation method as A. Trident is denoted by TTE           which differs for different samples. MRR does not distinguish
+             since it uses different constraints that encode information about         cases such as ranking 6th out of 6 vs. 6th out of 1000 variables
+             side effects. Finally, Prophet is VPP since it extends SPR [14]           in-scope.
+             using an ML-based patch prioritiser. All techniques used as                  Instead, we introduce a new measure, which we call the
+             baselines are tabulated in Section V-A.                                   fraction searched measure. This measure returns the length
+                All the techniques in Table III, except for CoCoNut (VCC ),            of the prefix of ranked variables that must be checked over
+             are implemented for C. In order to make a more objective                  the total number of candidates, i.e. the fraction of the variable
+             comparison, we ported Prophet to Python and trained it on                 search space we had to check. For example, assume we have
+             Python programs in the configuration VR(P,    P
+                                                             C) . Prophet orders       a search space of 100 variables and, under a particular ranker,
+             partially/fully instantiated patches using machine learning and           the 16th variable is the first that can fill a hole. In this case, the
+             concretising the partially instantiated patches using SPR’s               ranker reduced the search space to 16%. Formally, let p ∈ L
+             condition synthesis algorithm [14]. In SPR’s algorithm, when              be a program and p ∈ L be p with some of its variables
+             multiple possible candidate variables have the same potential             replaced with holes. Let r( i , p ) be the rank that the variable
+             value map, we improve Prophet by supplanting it with R ETE’s              ranker r assigns to the ground truth variable in p that fills i
+             variable prioritisation to prioritise variables to satisfy the con-       in p . The r’s fraction searched is
+             dition. VR(P,
+                       P
+                           C) differs from VP in cases where multiple variables
+                                            P
+
+
+             satisfy the conditions, VR(P, C) uses its variable prioritiser (i.e.
+                                          P                                                                          1       X          r( i , p )
+                                                                                                  F (r, p, p ) =
+             C) to order these unordered candidate variables. Section VI                                           h(p )               var ( i , p )
+                                                                                                                            i ∈h(p )
+             discusses why we consider these baselines. We restrict the
+             defect class to inserting or modifying a single atomic statement          where h(p ) counts the holes in p and var ( i , p ) ⊆ V
+             for all tools that we ran in the evaluation. This does not cover          denotes the set of all the variables in-scope i in p .
+
+                                                                                   1270
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             TABLE V: The performance of variable prioritisation tech-                  TABLE VI: On BG107, variable and template prioritisation
+             niques using the fraction searched measure. The best config-               perform better. The best configuration is bolded.
+             uration C, CodeBert fine-tuned with CDU chains, is bolded.
+                                                                                                                                    Correct                                               Plausible
+                                                                                            Dataset      Samples
+             Dataset    samples       H        F        B       G       D        C                                    V   E
+                                                                                                                                    V   S
+                                                                                                                                                  V   S
+                                                                                                                                                                VS
+                                                                                                                                                                            V   E
+                                                                                                                                                                                          VR(S,
+                                                                                                                                                                                           S
+                                                                                                                                                                                                   VR(S,
+                                                                                                                                                                                                    S
+                                                                                                                                                                                                            VR(S,
+                                                                                                                                                                                                             S
+                                                                                                                          R(E, F)       R(S, H)       R(S, F)    R(S, C)        R(E, F)         H)       F)       C)
+
+             Python        802k    0.476   0.039    0.232    0.204    0.18   0.033          Black               4     0             0             2             2            0             3         3       3
+             C             652k    0.416   0.032    0.260    0.252    0.07   0.028          Fastapi             3     0             0             0             0            0             0         0       0
+                                                                                            Httpie              3     1             1             2             2            1             2         3       3
+                                                                                            Keras              11     0             1             2             2            0             1         7       7
+             -   if (tif->tif_rawcc > 0 && tif->tif_rawcc != orig_rawcc
+             +   if ((tif->tif_rawcc > 0)
+                                                                                            Sanic               1     0             0             0             0            0             0         0       0
+                     && (tif->tif_flags & TIFF_BEENWRITING) != 0                            Y-DL                3     0             0             1             1            0             0         1       1
+                     && !TIFFFlushData1(tif))                                               Spacy               2     0             0             1             1            0             0         1       1
+                   {                                                                        Tqdm                4     1             1             2             2            1             1         3       3
+                                                                                            PySnooper           1     0             1             1             1            0             1         2       2
+                                                                                            Tornado             6     0             0             1             2            0             0         2       2
+              Fig. 4: Dev. patch for libtiff-2007-11-02-371336d-s865f7b2.                   Matplotlib          8     0             2             2             2            0             2         3       3
+                                                                                            Luigi              15     1             5             7             7            1             7         7       7
+                                                                                            Scrapy             10     0             2             2             2            0             2         2       2
+                To compute var ( , p ), we consider only variables whose                    Pandas             36     0             2             4             5            0             2         4       5
+             type matches the hole’s type. For Python, this does not help
+                                                                                            Overall           107     3             15            27            29           3            21        38      39
+             much since everything is an object and many objects seam-
+             lessly slot into many expressions because of default functions,
+                                                                                        TABLE VII: Average patch ranking for MB35: variable priori-
+             like __bool__(). Hence, we restrict rankings to a fixed
+                                                                                        tisation indeed helps since TR(S,
+                                                                                                                      S
+                                                                                                                          C) and TR(S, F) outperform other
+                                                                                                                                   S
+             vocabulary of variables that varies by bug. We construct this
+                                                                                        tools by a large margin. Ranks that cannot be assessed are
+             vocabulary by limiting the accessors (".") to 2 to leverage the
+                                                                                        marked with “-”.
+             Law of Demeter [44] and avoid variable explosion.
+                Table V shows that CodeBERT [31], fine-tuned with CDU                   Bug                                   TTE             TR(E,
+                                                                                                                                                E
+                                                                                                                                                    F)
+                                                                                                                                                                           TR(S,
+                                                                                                                                                                             S
+                                                                                                                                                                                 H)
+                                                                                                                                                                                               TR(S,
+                                                                                                                                                                                                 S
+                                                                                                                                                                                                     F)
+                                                                                                                                                                                                           TR(S,
+                                                                                                                                                                                                             S
+                                                                                                                                                                                                                 C)
+
+             Chains, (Column C) outperforms the baselines. In particular,               gmp-a1d3d-f17cb              165350                  2563                   87339                        933        843
+             it outperforms the neural baselines — vanilla CodeBERT (B)                 libtiff-09e82-f2d98           13313                   311                   14241                        552        513
+             and GraphCodeBert (G) — by an order of magnitude. We                       libtiff-764db-2e42d           90471                  7655                     724                          2          7
+                                                                                        libtiff-a72cf-0a36d          ≈ 1012                     -                52428627                      15924      15842
+             observe that CodeBERT, when fine-tuned on CDU chains,                      libtiff-37133-865f7          ≈ 1018                     -                   40842                       8786       8566
+             (Column C), performs better when compared to its counterpart               php-70075-5a8c9                  87                    51                     619                        890        782
+             fine-tuned on DU chains (Column D). Using this, we can                     php-e65d3-1d984               90471                 36840                  110436                       5072       5439
+                                                                                        php-63673-2adf5                  61                     7                      52                          7          3
+             conclude that extending DU chains with conditions helps
+             improve performance. As expected, we observe that feature                  Average                 ≈ 2 × 1017                               -           6585360                    4021        3999
+             engineering allows random forest (Column F) to outperform
+             vanilla CodeBert and GraphCodeBert, which are not benefiting
+             from CDU chains. These results are strong evidence that CDU                    Table VI shows that VR(S,        S
+                                                                                                                                  C) significantly outperforms all the
+
+             chains are valuable source of signal for the variable prediction           other combinations. Combining PSH and R ETE’s VP does
+             task. We find:                                                             indeed improve patch synthesis since VR(S,                S
+                                                                                                                                                    C) and VR(S, F) both
+                                                                                                                                                            S
+
+
+                                                                                        significantly outperform VR(S, H) and VR(E, F) . VR(E, F) could fix only
+                                                                                                                               S             E      E
+
+
+                 CDU chains contain strong signal: CodeBert fine-tuned on               three bugs, whereas VR(S,       S
+                                                                                                                            F) fixes 27 and VR(S, H) fixes 15. This is
+                                                                                                                                                 S
+
+
+                 CDU chains (Column C in Table V) outperforms the neu-                  because most patches are closer to pre-existing code located
+                 ral baselines by an order of magnitude; its performance                somewhere in the buggy program’s code [8]; hence, when
+                 edge over random forest (F) means fewer expensive                      VR(E,
+                                                                                          E
+                                                                                              F) tries to construct a patch in such cases, it faces the harder
+
+                 checks of candidate patches.                                           task of doing so from the ground up without guidance. VR(S,                   S
+                                                                                                                                                                        F)
+                                                                                        fixes more bugs than VR(S, H) , since it enumerates patches more
+                                                                                                                          S
+
+
+                Although CDU chains permit CodeBert to outperform our                   intelligently (Section III-C). VR(S,          S
+                                                                                                                                        C) fix two more correct bugs
+
+             random forest baseline, its inference is expensive. It takes               when compared against VR(S, F) since CDUs identify relevant
+                                                                                                                                 S
+
+
+             0.65s on average to respond to queries, compared to ca. 0.004s             variables better than our random forest baseline.
+             for our random forest.                                                         For C, we used the eight bugs in intersection of MB35
+                                                                                        and the subset of R ETE ’s defect class on which its best
+             C. Effectiveness of R ETE’s Prioritisation                                 configuration produces a fix. We use Trident [9] as a val-
+                To understand the effectiveness of R ETE’s patch prioriti-              idator: C compiles slowly, and Trident’s efficient patch spec-
+             sation, we compare component combinations for Python and                   ification inference obviates many compilations. We com-
+             then C. Below, PSH refers to the plastic surgery hypothesis                pare these five component combinations: TTE (vanilla Tri-
+             and VP to variable prioritiser. For Python, we use BG107 and               dent), TR(E, E
+                                                                                                       F) , TR(S, H) , TR(S, F) and TR(S, C) . Table VII shows the
+                                                                                                              S           S               S
+
+
+             these component combinations:                                              results. In some cases, the ranks of patches from TR(S,               S
+                                                                                                                                                                   F) and
+
+                 VR(S,
+                   S
+                       C) PSH with CDU chain VP                                         TR(S, C) are extremely low compared to those TT ’s patches.
+                                                                                           S                                                              E
+
+
+                 VR(S,
+                   S
+                       F) PSH with Random Forest VP                                     This is because TTE constructs statements from ground up,
+                 VR(S,
+                   S
+                       H) PSH with Heuristic VP                                         hence bugs such as libtiff-a72cf60-0a36d7f and
+                 VR(E,
+                   E
+                       F) Naïve enumeration with Random Forest VP                       libtiff-371336d-865f7b2 (Figure 4) cannot be syn-
+
+                                                                                     1271
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             TABLE VIII: This table compares Prophet and CoCoNut
+                                              S
+             against R ETE’s best variant (VR(S, C) ) and Prophet enhanced with
+                       P
+             R ETE (VR(P, C) ). For correct and plausible patches, R ETE out-
+             performs the other baselines by generating 7 and 13 additional
+             correct patches against Prophet and CoCoNut, respectively. All
+             the R ETE variants are bolded.
+                                               Correct                       Plausible
+               Dataset      Samples
+                                        VPP   VR(P,
+                                               P
+                                                    C) VC
+                                                        C
+                                                               VR(S,
+                                                                S
+                                                                     C) VP
+                                                                         P
+                                                                             VR(P,
+                                                                              P
+                                                                                   C) VC
+                                                                                       C
+                                                                                                 VR(S,
+                                                                                                  S
+                                                                                                       C)
+
+
+               Black               4     1     2        1          2     3    3         3         3
+               FastApi             3     0     0        0          0     0    0         0         0
+               Httpie              3     1     2        1          2     3    3         2         3
+               Keras              11     2     2        1          2     4    4         3         7
+               Sanic               1     0     0        0          0     0    0         0         0                                                            S
+               Y-DL                3     0     0        0          1     0    0         0         1
+                                                                                                            Fig. 5: Patches generated per unit time by R ETE (VR(S, C) ),
+                                                                                                                      P                 C
+               Spacy               2     1     1        0          1     1    1         1         1         Prophet (VP ) and CoCoNut (VC ).
+               Tqdm                4     1     2        1          2     2    2         1         3
+               PySnooper           1     1     1        1          1     1    1         1         2
+               Tornado             6     0     0        0          2     0    0         0         2
+               Matplotlib          8     2     2        2          2     2    2         2         3
+               Luigi              15     8     8        5          7     8    8         8         7
+               Scrapy             10     2     2        1          2     2    2         3         2
+               Pandas             36     3     3        3          5     5    5         6         5
+               Overall           107    22    25        16     29       31    31        30       39
+
+             TABLE IX: The number of patches that require non-local
+             variables. A variable is considered non-local if it is not directly
+             used in the method. All R ETE configurations are bolded.
+             Using R ETE with variable prioritisation helps generate non-
+             local variables.
+                                                             VCC       VPP   VR(P,
+                                                                              P
+                                                                                   C)
+                                                                                             VR(S,
+                                                                                              S
+                                                                                                   C)
+                                                                                                            Fig. 6: The number of patches generated by TTE and TR(S, S
+                                                                                                                                                                       F) per
+                                                                                                            unit time: TR(S,
+                                                                                                                         S
+                                                                                                                             F) generates patches faster than T T
+                                                                                                                                                                 E
+                                                                                                                                                                   .
+             Correct Patches                                 16        22          25            29
+             Correct Patches with non-local Variables         0         0           1             5
+                                                                                                            we repeat this process 10 times with 10 different orders and
+                                                                                                                                                                 S
+                                                                                                            average the results. At all budgets, R ETE (VR(S,       C) ) outperforms
+             thesized by TTE as they require constructing a fresh expression                                Prophet and CoCoNut.
+             with 8-13 different variables and operators. In such cases, we                                    Table VIII compares R ETE against Prophet [2] and Co-
+             resorted to estimating TTE ’s rank on them by assuming that                                    CoNut [31] in terms of the number of correct and plausible
+             candidate variables were uniformly ordered. Unfortunately,                                     patches each generates. All R ETE variants are bolded in the
+             we could not estimate TR(E, E
+                                           F) ’s performance the same way,                                  table. Prophet (VPP ) generates 22 and CoCoNut (VCC ) 16 correct
+             since it uses F as its VP. On average, the search space is                                     patches. R ETE’s best configuration (VR(S,    S
+                                                                                                                                                            C) ) generates 29 cor-
+             reduced by a few orders of magnitude on these seven bugs.                                      rect patches. On Python, R ETE improves the state of the art
+             The rankings of configurations TR(S,  S
+                                                     H) and TR(S, C) affirm that
+                                                              S
+                                                                                                            by 31% vs. Prophet and 59% vs. CoCoNut. Prophet, enhanced
+             both R ETE’s template and variable prioritisers play a pivotal                                 with R ETE’s variable prioritisation (VR(P,   P
+                                                                                                                                                            C) ), fixes three more
+             role in synthesising patches.                                                                  bugs than vanilla Prophet [2]. Interestingly, we observe each of
+                                                                                                            these two tools exclusively fixes some patches, like patches in
+                On both our Python and C datasets, enhancing other                                          Luigi and Pandas. Although VR(P,        P
+                                                                                                                                                       C) generates more correct
+                techniques with R ETE’s template and variable prioritisers                                  patches than Prophet, they generate the same number of total
+                improves their performance.                                                                 patches. This may indicate that Prophet enhanced with Rete’s
+                                                                                                            variable prioritisation reduces the overall overfitting of the
+                                                                                                            generated patches.
+             D. R ETE’s Performance
+                                                                                                               A variable is non-local if it is not used in the buggy method.
+                We now show that R ETE advances the state of the art in                                     For example, if the variable var is directly used somewhere
+             1) time to generate patches and 2) number of correct patches.                                  in the method, but var.a is not, var is local and var.a
+             We close by showing how it speeds Trident, the state of the                                    is non-local. Under this definition, most in-scope variables in
+             art C APR tool for handling side effects.                                                      Python are non-local. Table IX shows that integrating variable
+                                                              S
+                Figure 5 shows how many patches R ETE (VR(S,     C) ), Prophet                              prioritisation helps synthesise patches that require non-local
+                P                     C
+             (VP ) and CoCoNut (VC ) produce per unit time. All 107                                         variables: VR(S,
+                                                                                                                         S
+                                                                                                                             C) fixes five bugs that require non-local variables,
+             programs from the dataset are uniformly ordered and then                                       whereas the other tools struggle to synthesise correct patches
+             each tool’s execution time to patch each bug, with a timeout of                                that require them.
+             four hours, is summed, upto the time budget. For each budget,
+
+                                                                                                        1272
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             TABLE X: Plausible and correct patches for bugs in MB35 (C dataset). R ETE integrated with Trident, the column labelled
+             TR(S,
+               S
+                   F) , generates 18 plausible patches out of 35, of which 8 are correct. The next largest total, GenProg, the column labelled
+             V , generates 19, of which only two are correct. No other tool configuration generates more correct patches than TR(S,
+              G                                                                                                                     S
+                                                                                                                                       F) .
+
+
+                                                                         Plausible                                                   Correct
+               Bug         kLoC      Total
+                                               TR(S,
+                                                 S
+                                                     F)
+                                                          TTE       AAD          VPP      SS         VG      TR(S,
+                                                                                                               S
+                                                                                                                   F)
+                                                                                                                        TTE    AAD             VPP   SS   VG
+               gmp           145       2          1        1         2               1     0          1         0       0       0              0     0    0
+               gzip          491       3          3        3         3               2     0          1         1       1       1              1     0    0
+               libtiff        77      10          8        5         5               5     8          7         4       3       2              1     2    2
+               php         1,099      19          6        6         6               9     4          9         3       3       3              4     3    0
+               wireshark   2,814       1          1        1         1               1     1          1         0       0       0              0     1    0
+               Overall                35         18       15        17           18       13         19         8       6       6              6     6    2
+
+
+
+                                                                                                     Patch Generation and Checking: Various patch gener-
+                VR(S,
+                  S
+                      C) fixes five bugs that require non-local variables,
+                                                                                               ation approaches have been proposed: SPR [14] explores
+                whereas other tools struggle to synthesise correct patches
+                                                                                               the space of patches by enumeration, GenProg [39] uses
+                that require non-local variables.
+                                                                                               meta-heuristic search, CoCoNut [5] and Cure [42] use neural
+                                                                                               machine translation, and techniques like SemFix [43] and
+                Table X compares the performance of R ETE-enhanced Tri-
+                           S                                                                   Angelix [38] employs SMT-based program synthesis. Program
+             dent [9] (TR(S, F) ) against the state of the art. We did not include
+                                                                                               repair typically realises patch checking by 1) testing as in
+             TR(S, C) for C, despite the fact that it generates better rankings,
+               S
+                                                                                               generate-and-validate techniques [39] or by 2) solving con-
+             because Trident’s validation step is much faster on average
+                                                                                               straints as in semantic techniques [9], [12], [43]. R ETE is a
+             than querying CodeBert (0.28 vs. 0.65 seconds). A faster GPU
+                                                                                               generic framework that does not impose a fixed patch gener-
+             than ours would probably alleviate this issue.
+                                                                                               ation or checking technique. In this work, we evaluate three
+                Although TR(S,  S
+                                  F) does not synthesise new patches relative to
+                                                                                               instantiations of R ETE: for the plastic surgery hypothesis [8],
+             the state of the art, it does synthesise more correct patches.
+                                                                                               for Prophet’s enumerative synthesiser [1], and for Trident’s
+             Angelix also generated the two correct patches that TR(S,             S
+                                                                                     F)
+                                                                                               constraint-based synthesiser [9]
+             generated beyond those generated by vanilla Trident. This is
+             due to patch construction. Angelix (AAD ) constructs patches                           Patch Prioritisation: Various patch prioritisation tech-
+             by minimally modifying the existing expressions using SMT                         niques have been proposed. DirectFix [16] prioritises smaller
+             queries, while R ETE’s PSH template constructor tries to find                     changes. Prophet [2] learns a probabilistic model for ranking
+             patches close to a set of existing statements. One such patch is                  patches. CapGen [45] uses AST node information to esti-
+             Figure 4. Here, Angelix and TR(S,      S                                          mate the likelihood of concrete patches. GetaFix [46] uses
+                                                      F) both successfully generate
+             this patch, since it is easy to modify the existing expres-                       a hierarchical clustering algorithm that clusters mined fix
+             sion to reach the patch by simply dropping the expression                         patterns into general and specific fix patterns and uses code
+             tif->tif_rawcc != orig_rawcc. Vanilla Trident, in                                 context to choose an appropriate fix pattern. These approaches
+             contrast, does not since the patch requires an expression                         ignore information about program variables. Several recent
+             with 11 components, which is infeasible due to combinatoric                       techniques [4], [35], although they focus only on variables
+             explosion. To understand the importance of R ETE’s variable                       in the local context, do learn variable-related features and
+             prioritisation more clearly, we ran an experiment by varying                      thus can prioritise variables. In contrast to these techniques,
+             the time limits on these seven bugs that TTE synthesises to                       R ETE does not require feature engineering and outperforms
+             compare it against TR(S,                                                          our language-agnostic feature engineering approach, as shown
+                                         F) . Figure 6 shows that TR(S, F) synthesises
+                                       S                            S
+
+
+             patches much faster than TT .       E                                             in Section V.
+                                                                                                    Deep Learning for Program Repair: Deep learning
+                                             S
+                R ETE-enhanced Trident (TR(S,  F) ) repairs bugs faster than                   has been applied for automatically repairing bugs. DeepRe-
+                                   E
+                vanilla Trident (TT ) while fixing two more bugs.                              pair [47] leverages learned code similarities using recursive
+                                                                                               autoencoders [48] to select repair ingredients from code frag-
+                                                                                               ments that are similar to the buggy code. Several techniques
+                                    VI. R ELATED W ORK                                         leverage deep learning to directly sort and transform code [5],
+                Depending on the correctness criterion, we classify program                    [49]. CoCoNut [5] is a generate and validate approach that
+             repair techniques into static and test-driven. Static techniques                  directly generates multiple patches by using an ensemble of
+             rely on static analysis or formal specification, while test-driven                context-aware neural network architecture. RewardRepair [50]
+             techniques rely on tests. R ETE is a new test-driven technique.                   uses execution data to improve upon patch synthesis. Var-
+             We divide program repair algorithms into four conceptual                          CLR [51] uses Recoder [52] synthesises a sequence of edits
+             parts: patch generation, which explores the space of candidate                    over directly synthesising the correct program. SequenceR [53]
+             patches, patch prioritisation which determines which of the                       clusters similar variables by directly passing a stream of
+             two given patches are more likely to be correct, and patch                        tokens to an encoder. Although deep learning techniques
+             checking that checks the input patch against a given specifi-                     implicitly learn information about the program namespace,
+             cation. R ETE’s key contribution is in patch prioritisation.                      our experiments show that state-of-the-art deep learning based
+
+                                                                                         1273
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             tools have difficulty handling the long-range dependencies                        national Conference on Software Engineering (ICSE). IEEE, 2016, pp.
+             problem [6]. R ETE addresses this problem by combining deep                       702–713.
+                                                                                           [2] ——, “Automatic patch generation by learning correct code,” in Pro-
+             learning with program analysis in the form of extraction of                       ceedings of the 43rd Annual ACM SIGPLAN-SIGACT Symposium on
+             CDU chains to learn a project-independent representation of                       Principles of Programming Languages, 2016, pp. 298–312.
+             the program namespace. We could not use Cure [42] as                          [3] Y. Xiong, J. Wang, R. Yan, J. Zhang, S. Han, G. Huang, and L. Zhang,
+                                                                                               “Precise condition synthesis for program repair,” in 2017 IEEE/ACM
+             a baseline since its reproduction package is not currently                        39th International Conference on Software Engineering (ICSE). IEEE,
+             public. Additionally, more recent tools, such as Recoder [52]                     2017, pp. 416–426.
+             and RewardRepair [50] were not compared against in the                        [4] Y. Xiong and B. Wang, “L2s: A framework for synthesizing the most
+                                                                                               probable program under a specification,” ACM Transactions on Software
+             evaluation since they were implemented on Java.                                   Engineering and Methodology (TOSEM), vol. 31, no. 3, pp. 1–45, 2022.
+                   Test-overfitting in Program Repair: Test-driven tech-                   [5] T. Lutellier, H. V. Pham, L. Pang, Y. Li, M. Wei, and L. Tan, “Coconut:
+             niques are subject to test-overfitting [41], [54], [55], and                      combining context-aware neural translation models using ensemble for
+                                                                                               program repair,” in Proceedings of the 29th ACM SIGSOFT international
+             several techniques have been designed to address this chal-                       symposium on software testing and analysis, 2020, pp. 101–114.
+             lenge. Apart from the patch prioritisation techniques discussed               [6] H.-S. Le, A. Allauzen, and F. Yvon, “Measuring the influence of
+             above, researchers have proposed using pre-defined databases                      long range dependencies with neural network language models,” in
+                                                                                               Proceedings of the NAACL-HLT 2012 Workshop: Will We Ever Really
+             of transformations to increase the chance of generating correct                   Replace the N-gram Model? On the Future of Language Modeling for
+             patch [56]–[58], or generating additional tests [59], [60]. R ETE                 HLT, 2012, pp. 1–10.
+             is complementary to these techniques.                                         [7] M. K. Sarker, L. Zhou, A. Eberhart, and P. Hitzler, “Neuro-symbolic
+                                                                                               artificial intelligence: Current trends,” 2021. [Online]. Available:
+                   Variable Representation: There are various techniques                       https://arxiv.org/abs/2105.05330
+             used to represent variables, each with its own strengths                      [8] E. T. Barr, Y. Brun, P. Devanbu, M. Harman, and F. Sarro, “The
+             and weaknesses. Word2vec [61] and its extensions, such as                         plastic surgery hypothesis,” in Proceedings of the 22nd ACM SIGSOFT
+                                                                                               International Symposium on Foundations of Software Engineering, 2014,
+             GloVe [62] and FastText [63], are simpler approaches that                         pp. 306–317.
+             model variable representations by encoding tokens. However,                   [9] N. Parasaram, E. T. Barr, and S. Mechtaev, “Trident: Controlling side
+             these techniques may not capture the full complexity and nu-                      effects in automated program repair,” IEEE Transactions on Software
+                                                                                               Engineering, no. 01, pp. 1–1, 2021.
+             ance of natural language. To overcome these limitations, more                [10] R. Widyasari, S. Q. Sim, C. Lok, H. Qi, J. Phan, Q. Tay, C. Tan, F. Wee,
+             advanced techniques, such as ELMo [64] and BERT [65],                             J. E. Tan, Y. Yieh et al., “Bugsinpy: a database of existing bugs in
+             use pre-trained language models to achieve a deeper under-                        python programs to enable controlled testing and debugging studies,”
+                                                                                               in Proceedings of the 28th ACM joint meeting on european software
+             standing of language [66], [67]. These approaches have been                       engineering conference and symposium on the foundations of software
+             successfully applied in a range of code modification tasks,                       engineering, 2020, pp. 1556–1560.
+             including suggesting variable names from code contexts [68],                 [11] C. Le Goues, N. Holtschulte, E. K. Smith, Y. Brun, P. Devanbu,
+                                                                                               S. Forrest, and W. Weimer, “The manybugs and introclass benchmarks
+             rewriting method and class names [69], and automated pro-                         for automated repair of c programs,” IEEE Transactions on Software
+             gram repair [4], [35], [47]. They have also been used for type                    Engineering, vol. 41, no. 12, pp. 1236–1256, 2015.
+             inference from natural language information [70], [71] and                   [12] A. Afzal, M. Motwani, K. Stolee, Y. Brun, and C. Le Goues, “Sosre-
+                                                                                               pair: Expressive semantic search for real-world program repair,” IEEE
+             detecting bugs [72], [73]. These techniques, while possessing                     Transactions on Software Engineering, 2019.
+             substantial strengths, are nonetheless impeded by sparse data,               [13] Łukasz Langa and collaborators, “Black, a python code formatter,” https:
+             particularly when learning about global information outside                       //github.com/psf/black, 2022, accessed: 2022-05-05.
+                                                                                          [14] F. Long and M. Rinard, “Staged program repair with condition synthe-
+             the network’s context window. This can result in suboptimal                       sis,” in Proceedings of the 2015 10th Joint Meeting on Foundations of
+             performance in certain code modification tasks. R ETE ame-                        Software Engineering, 2015, pp. 166–178.
+             liorates this data sparsity issue by using CDU chains, which                 [15] M. Monperrus, “A critical review of" automatic patch generation learned
+                                                                                               from human-written patches": Essay on the problem statement and the
+             contain important information that increases the likelihood of                    evaluation of automatic software repair,” in Proceedings of the 36th
+             incorporating global information into the network’s context.                      International Conference on Software Engineering, 2014, pp. 234–242.
+             This approach is effective, as demonstrated by the results in                [16] S. Mechtaev, J. Yi, and A. Roychoudhury, “Directfix: Looking for
+                                                                                               simple program repairs,” in 2015 IEEE/ACM 37th IEEE International
+             Table IX, which show that R ETE generates more fixes related                      Conference on Software Engineering, vol. 1. IEEE, 2015, pp. 448–458.
+             to global variables when compared with other techniques.                     [17] M. Weiser, “Program slicing,” IEEE Transactions on software engineer-
+                                                                                               ing, no. 4, pp. 352–357, 1984.
+                                                                                          [18] K. B. Gallagher, “Using program slicing in software maintenance,” Ph.D.
+                                    VII. C ONCLUSION                                           dissertation, University of Maryland, Baltimore County, 1990.
+                Existing program repair approaches neglect information                    [19] T. Gyimóthy, A. Beszédes, and I. Forgács, “An efficient relevant slic-
+                                                                                               ing method for debugging,” in Software Engineering—ESEC/FSE’99.
+             about the program’s namespace when searching for repairs,                         Springer, 1999, pp. 303–321.
+             which reduces their effectiveness and increases test overfitting.            [20] S. Islam, J. Krinke, D. Binkley, and M. Harman, “Coherent clusters in
+             This work aims to address this problem by augmenting patch                        source code,” Journal of systems and software, vol. 88, pp. 1–24, 2014.
+                                                                                          [21] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+             prioritisation with information about program namespace.                          Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” Advances in
+             R ETE extracts information from CDU chains and uses it for                        neural information processing systems, vol. 30, 2017.
+             patch prioritisation. Our evaluation shows that R ETE can repair             [22] E. Biswas, M. E. Karabulut, L. Pollock, and K. Vijay-Shanker, “Achiev-
+                                                                                               ing reliable sentiment analysis in the software engineering domain using
+             real bugs in open-source projects faster compared to state-of-                    bert,” in 2020 IEEE International Conference on Software Maintenance
+             the-art and also finds more correct repairs.                                      and Evolution (ICSME). IEEE, 2020, pp. 162–173.
+                                                                                          [23] T. Zhang, B. Xu, F. Thung, S. A. Haryono, D. Lo, and L. Jiang,
+                                         R EFERENCES                                           “Sentiment analysis for software engineering: How far can pre-trained
+                                                                                               transformer models go?” in 2020 IEEE International Conference on
+              [1] F. Long and M. Rinard, “An analysis of the search spaces for generate        Software Maintenance and Evolution (ICSME). IEEE, 2020, pp. 70–
+                  and validate patch generation systems,” in 2016 IEEE/ACM 38th Inter-         80.
+
+                                                                                      1274
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             [24] S. Lu, D. Guo, S. Ren, J. Huang, A. Svyatkovskiy, A. Blanco,                [45] M. Wen, J. Chen, R. Wu, D. Hao, and S.-C. Cheung, “Context-
+                  C. Clement, D. Drain, D. Jiang, D. Tang et al., “Codexglue: A machine            aware patch generation for better automated program repair,” in 2018
+                  learning benchmark dataset for code understanding and generation,”               IEEE/ACM 40th International Conference on Software Engineering
+                  arXiv preprint arXiv:2102.04664, 2021.                                           (ICSE). IEEE, 2018, pp. 1–11.
+             [25] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “On the accuracy of           [46] J. Bader, A. Scott, M. Pradel, and S. Chandra, “Getafix: Learning
+                  spectrum-based fault localization,” in Testing: Academic and industrial          to fix bugs automatically,” Proceedings of the ACM on Programming
+                  conference practice and research techniques-MUTATION (TAICPART-                  Languages, vol. 3, no. OOPSLA, pp. 1–27, 2019.
+                  MUTATION 2007). IEEE, 2007, pp. 89–98.                                      [47] M. White, M. Tufano, M. Martinez, M. Monperrus, and D. Poshyvanyk,
+             [26] D. Zou, J. Liang, Y. Xiong, M. D. Ernst, and L. Zhang, “An empirical             “Sorting and transforming program repair ingredients via deep learning
+                  study of fault localization families and their combinations,” IEEE               code similarities,” in 2019 IEEE 26th International Conference on
+                  Transactions on Software Engineering, vol. 47, no. 2, pp. 332–347, 2019.         Software Analysis, Evolution and Reengineering (SANER). IEEE, 2019,
+             [27] K. Liu, A. Koyuncu, T. F. Bissyandé, D. Kim, J. Klein, and Y. Le Traon,          pp. 479–490.
+                  “You cannot fix what you cannot find! an investigation of fault localiza-   [48] M. White, M. Tufano, C. Vendome, and D. Poshyvanyk, “Deep learning
+                  tion bias in benchmarking automated program repair systems,” in 2019             code fragments for code clone detection,” in 2016 31st IEEE/ACM
+                  12th IEEE conference on software testing, validation and verification            International Conference on Automated Software Engineering (ASE).
+                  (ICST). IEEE, 2019, pp. 102–113.                                                 IEEE, 2016, pp. 87–98.
+             [28] K. Liu, S. Wang, A. Koyuncu, K. Kim, T. F. Bissyandé, D. Kim, P. Wu,        [49] W. U. Ahmad, S. Chakraborty, B. Ray, and K.-W. Chang, “Unified
+                  J. Klein, X. Mao, and Y. L. Traon, “On the efficiency of test suite based        pre-training for program understanding and generation,” arXiv preprint
+                  program repair: A systematic assessment of 16 automated repair systems           arXiv:2103.06333, 2021.
+                  for java programs,” in Proceedings of the ACM/IEEE 42nd International       [50] H. Ye, M. Martinez, and M. Monperrus, “Neural program repair with
+                  Conference on Software Engineering, 2020, pp. 615–627.                           execution-based backpropagation,” in 2022 IEEE/ACM 44th Interna-
+             [29] J. R. Firth, “A synopsis of linguistic theory, 1930-1955,” Studies in            tional Conference on Software Engineering (ICSE). IEEE, 2022, pp.
+                  linguistic analysis, 1957.                                                       1506–1518.
+             [30] E. W. Dijkstra et al., “A note on two problems in connexion with graphs,”   [51] Q. Chen, J. Lacomis, E. J. Schwartz, G. Neubig, B. Vasilescu, and
+                  Numerische mathematik, vol. 1, no. 1, pp. 269–271, 1959.                         C. Le Goues, “Varclr: Variable semantic representation pre-training via
+             [31] Z. Feng, D. Guo, D. Tang, N. Duan, X. Feng, M. Gong, L. Shou,                    contrastive learning,” in 44th IEEE/ACM 44th International Conference
+                  B. Qin, T. Liu, D. Jiang, and M. Zhou, “CodeBERT: A pre-trained                  on Software Engineering. ACM, 2022, pp. 2327–2339. [Online].
+                  model for programming and natural languages,” in Findings of the                 Available: https://doi.org/10.1145/3510003.3510162
+                  Association for Computational Linguistics: EMNLP 2020. Online:              [52] Q. Zhu, Z. Sun, Y.-a. Xiao, W. Zhang, K. Yuan, Y. Xiong, and L. Zhang,
+                  Association for Computational Linguistics, Nov. 2020, pp. 1536–1547.             “A syntax-guided edit decoder for neural program repair,” in Proceedings
+                  [Online]. Available: https://aclanthology.org/2020.findings-emnlp.139            of the 29th ACM Joint Meeting on European Software Engineering
+             [32] T. Wolf, L. Debut, V. Sanh, J. Chaumond, C. Delangue, A. Moi,                    Conference and Symposium on the Foundations of Software Engineering,
+                  P. Cistac, T. Rault, R. Louf, M. Funtowicz, J. Davison, S. Shleifer,             2021, pp. 341–353.
+                  P. von Platen, C. Ma, Y. Jernite, J. Plu, C. Xu, T. L. Scao, S. Gugger,     [53] Z. Chen, S. J. Kommrusch, M. Tufano, L.-N. Pouchet, D. Poshyvanyk,
+                  M. Drame, Q. Lhoest, and A. M. Rush, “Transformers: State-of-                    and M. Monperrus, “Sequencer: Sequence-to-sequence learning for end-
+                  the-art natural language processing,” in Proceedings of the 2020                 to-end program repair,” IEEE Transactions on Software Engineering,
+                  Conference on Empirical Methods in Natural Language Processing:                  2019.
+                  System Demonstrations. Online: Association for Computational
+                                                                                              [54] E. K. Smith, E. T. Barr, C. Le Goues, and Y. Brun, “Is the cure
+                  Linguistics, Oct. 2020, pp. 38–45. [Online]. Available: https:
+                                                                                                   worse than the disease? overfitting in automated program repair,” in
+                  //www.aclweb.org/anthology/2020.emnlp-demos.6
+                                                                                                   Proceedings of the 2015 10th Joint Meeting on Foundations of Software
+             [33] R. M. Karp, “Reducibility among combinatorial problems,” in Complex-
+                                                                                                   Engineering, 2015, pp. 532–543.
+                  ity of computer computations. Springer, 1972, pp. 85–103.
+                                                                                              [55] X. B. D. Le, F. Thung, D. Lo, and C. Le Goues, “Overfitting in
+             [34] D. S. Hochbaum, “Approximating covering and packing problems:
+                                                                                                   semantics-based automated program repair,” Empirical Software Engi-
+                  set cover, vertex cover, independent set, and related problems,” in
+                                                                                                   neering, vol. 23, no. 5, pp. 3007–3033, 2018.
+                  Approximation algorithms for NP-hard problems, 1996, pp. 94–143.
+                                                                                              [56] D. Kim, J. Nam, J. Song, and S. Kim, “Automatic patch generation
+             [35] H. Ye, J. Gu, M. Martinez, T. Durieux, and M. Monperrus, “Automated
+                                                                                                   learned from human-written patches,” in 2013 35th International Con-
+                  classification of overfitting patches with statically extracted code fea-
+                                                                                                   ference on Software Engineering (ICSE). IEEE, 2013, pp. 802–811.
+                  tures,” IEEE Transactions on Software Engineering, 2021.
+             [36] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion,             [57] J. Kim and S. Kim, “Automatic patch generation with context-based
+                  O. Grisel, M. Blondel, P. Prettenhofer, R. Weiss, V. Dubourg et al.,             change application,” Empirical Software Engineering, vol. 24, no. 6,
+                  “Scikit-learn: Machine learning in python,” the Journal of machine               pp. 4071–4106, 2019.
+                  Learning research, vol. 12, pp. 2825–2830, 2011.                            [58] A. Koyuncu, K. Liu, T. F. Bissyandé, D. Kim, J. Klein, M. Monperrus,
+             [37] I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,”            and Y. Le Traon, “Fixminer: Mining relevant fix patterns for automated
+                  arXiv preprint arXiv:1711.05101, 2017.                                           program repair,” Empirical Software Engineering, pp. 1–45, 2020.
+             [38] S. Mechtaev, J. Yi, and A. Roychoudhury, “Angelix: Scalable multiline       [59] J. Yang, A. Zhikhartsev, Y. Liu, and L. Tan, “Better test cases for
+                  program patch synthesis via symbolic analysis,” in Proceedings of the            better automated program repair,” in Proceedings of the 2017 11th Joint
+                  38th international conference on software engineering, 2016, pp. 691–            Meeting on Foundations of Software Engineering, 2017, pp. 831–841.
+                  701.                                                                        [60] X. Gao, S. Mechtaev, and A. Roychoudhury, “Crash-avoiding program
+             [39] C. Le Goues, M. Dewey-Vogt, S. Forrest, and W. Weimer, “A systematic             repair,” in Proceedings of the 28th ACM SIGSOFT International Sym-
+                  study of automated program repair: Fixing 55 out of 105 bugs for 8               posium on Software Testing and Analysis, 2019, pp. 8–18.
+                  each,” in 2012 34th International Conference on Software Engineering        [61] T. Mikolov, I. Sutskever, K. Chen, G. S. Corrado, and J. Dean,
+                  (ICSE). IEEE, 2012, pp. 3–13.                                                    “Distributed representations of words and phrases and their composi-
+             [40] D. Guo, S. Ren, S. Lu, Z. Feng, D. Tang, S. Liu, L. Zhou, N. Duan,               tionality,” Advances in neural information processing systems, vol. 26,
+                  A. Svyatkovskiy, S. Fu et al., “Graphcodebert: Pre-training code repre-          2013.
+                  sentations with data flow,” arXiv preprint arXiv:2009.08366, 2020.          [62] J. Pennington, R. Socher, and C. D. Manning, “Glove: Global vectors
+             [41] C. L. Goues, M. Pradel, and A. Roychoudhury, “Automated program                  for word representation,” in Proceedings of the 2014 conference on
+                  repair,” Communications of the ACM, vol. 62, no. 12, pp. 56–65, 2019.            empirical methods in natural language processing (EMNLP), 2014, pp.
+             [42] N. Jiang, T. Lutellier, and L. Tan, “Cure: Code-aware neural machine             1532–1543.
+                  translation for automatic program repair,” in 2021 IEEE/ACM 43rd            [63] P. Bojanowski, E. Grave, A. Joulin, and T. Mikolov, “Enriching word
+                  International Conference on Software Engineering (ICSE). IEEE, 2021,             vectors with subword information,” Transactions of the association for
+                  pp. 1161–1173.                                                                   computational linguistics, vol. 5, pp. 135–146, 2017.
+             [43] H. D. T. Nguyen, D. Qi, A. Roychoudhury, and S. Chandra, “Semfix:           [64] M. Peters, M. Neumann, M. Iyyer, M. Gardner, C. Clark, K. Lee, and
+                  Program repair via semantic analysis,” in 2013 35th International                L. Zettlemoyer, “Deep contextualized word representations. arxiv 2018,”
+                  Conference on Software Engineering (ICSE). IEEE, 2013, pp. 772–                  arXiv preprint arXiv:1802.05365, vol. 12, 2018.
+                  781.                                                                        [65] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “Bert: Pre-training
+             [44] K. Lieberherr and I. Holland, “Assuring good style for object-oriented           of deep bidirectional transformers for language understanding,” arXiv
+                  programs,” IEEE Software, vol. 6, no. 5, pp. 38–48, 1989.                        preprint arXiv:1810.04805, 2018.
+
+                                                                                          1275
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+             [66] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. d. O. Pinto, J. Kaplan,
+                  H. Edwards, Y. Burda, N. Joseph, G. Brockman et al., “Evaluating large
+                  language models trained on code,” arXiv preprint arXiv:2107.03374,
+                  2021.
+             [67] Q. Chen, J. Lacomis, E. J. Schwartz, G. Neubig, B. Vasilescu, and C. L.
+                  Goues, “Varclr: Variable semantic representation pre-training via con-
+                  trastive learning,” in Proceedings of the 44th International Conference
+                  on Software Engineering, 2022, pp. 2327–2339.
+             [68] R. Bavishi, M. Pradel, and K. Sen, “Context2name: A deep learning-
+                  based approach to infer natural variable names from usage contexts,”
+                  arXiv preprint arXiv:1809.05193, 2018.
+             [69] U. Alon, M. Zilberstein, O. Levy, and E. Yahav, “code2vec: Learning
+                  distributed representations of code,” Proceedings of the ACM on Pro-
+                  gramming Languages, vol. 3, no. POPL, pp. 1–29, 2019.
+             [70] R. S. Malik, J. Patra, and M. Pradel, “Nl2type: inferring javascript
+                  function types from natural language information,” in 2019 IEEE/ACM
+                  41st International Conference on Software Engineering (ICSE). IEEE,
+                  2019, pp. 304–315.
+             [71] Z. Xu, X. Zhang, L. Chen, K. Pei, and B. Xu, “Python probabilistic
+                  type inference with natural language support,” in Proceedings of the
+                  2016 24th ACM SIGSOFT international symposium on foundations of
+                  software engineering, 2016, pp. 607–618.
+             [72] M. Pradel and T. R. Gross, “Detecting anomalies in the order of equally-
+                  typed method arguments,” in Proceedings of the 2011 International
+                  Symposium on Software Testing and Analysis, 2011, pp. 232–242.
+             [73] M. Pradel and K. Sen, “Deepbugs: A learning approach to name-based
+                  bug detection,” Proceedings of the ACM on Programming Languages,
+                  vol. 2, no. OOPSLA, pp. 1–25, 2018.
+
+
+
+
+                                                                                         1276
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 04,2026 at 11:44:34 UTC from IEEE Xplore. Restriction
+

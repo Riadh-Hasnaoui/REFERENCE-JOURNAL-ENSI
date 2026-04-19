@@ -1,0 +1,412 @@
+                                                                                                                                                                                                 2025 IEEE 36th International Symposium on Software Reliability Engineering Workshops (ISSREW)
+
+
+
+
+                                                                                                                                                                                       CECoder: Fine-Grained Code Element Retrieval for
+                                                                                                                                                                                             Repository-Level Code Generation
+   2025 IEEE 36th International Symposium on Software Reliability Engineering Workshops (ISSREW) | 979-8-3315-5325-8/25/$31.00 ©2025 IEEE | DOI: 10.1109/ISSREW67781.2025.00051
+
+
+
+
+                                                                                                                                                                                                           Yiming He                                  Jingzheng Wu                                    Xiang Ling*
+                                                                                                                                                                                           Intelligent Software Research Center    Intelligent Software Research Center                 Intelligent Software Research Center
+                                                                                                                                                                                                     Institute of Software                    Institute of Software                               Institute of Software
+                                                                                                                                                                                               Chinese Academy of Sciences             Chinese Academy of Sciences                          Chinese Academy of Sciences
+                                                                                                                                                                                          Nanjing Institute of Software Technology               Beijing, China                                      Beijing, China
+                                                                                                                                                                                         University of Chinese Academy of Sciences         jingzheng08@iscas.ac.cn                               lingxiang@iscas.ac.cn
+                                                                                                                                                                                                       Nanjing, China
+                                                                                                                                                                                               heyiming23@mails.ucas.ac.cn
+
+                                                                                                                                                                                                          Tianyue Luo                                 Mutian Yang                                      Chen Zhao
+                                                                                                                                                                                            Intelligent Software Research Center                Beijing ZhongKeWeiLan                   Intelligent Software Research Center
+                                                                                                                                                                                                      Institute of Software                       Technology Co.,Ltd.                             Institute of Software
+                                                                                                                                                                                                Chinese Academy of Sciences                          Beijing, China                         Chinese Academy of Sciences
+                                                                                                                                                                                                         Beijing, China                           mutian@iscas.ac.cn                                Beijing, China
+                                                                                                                                                                                                      tianyue@iscas.ac.cn                                                                        zhaochen@iscas.ac.cn
+
+
+
+
+                                                                                                                                                                                        Abstract—Large language models (LLMs) have demonstrated                 generation. However, their impressive performance has been
+                                                                                                                                                                                     outstanding performance in standalone function-level code gen-             observed in standalone function-level code generation, where
+                                                                                                                                                                                     eration but still struggle with repository-level code generation           generating the function-level code typically relies only on
+                                                                                                                                                                                     due to limited understanding of the usage of the code elements
+                                                                                                                                                                                     (e.g., developer-defined classes and methods). Existing repository-        built-in or third-party libraries. In contrast, they face significant
+                                                                                                                                                                                     level code generation methods adopt the retrieval-augmented                challenges in repository-level code generation that requires
+                                                                                                                                                                                     generation (RAG) paradigm, employing whole-function semantic               generating a complete and executable function body based on
+                                                                                                                                                                                     descriptions (e.g., task requirements) to retrieve code snippets           a provided task requirement, such as functional description
+                                                                                                                                                                                     assisting generation. However, this often leads to irrelevant              and function signature, while appropriately integrating code
+                                                                                                                                                                                     context and subsequent code element misuse, resulting in logic
+                                                                                                                                                                                     errors, type mismatch, and other errors. To this end, we propose           elements (e.g., classes, methods) already defined within the
+                                                                                                                                                                                     CECoder, a novel framework that performs fine-grained and                  target repository [3]. The difficulty arises from LLMs’ limited
+                                                                                                                                                                                     accurate retrieval of concrete code element usage, demonstrating           knowledge of code elements [4] and their insufficient under-
+                                                                                                                                                                                     how elements are invoked and composed. In particular, CECoder              standing of code element usages about how these elements
+                                                                                                                                                                                     first retrieve code snippets based on the task requirement,                invoke and compose to accomplish desired functionalities.
+                                                                                                                                                                                     capturing whole-function semantic similarity to generate draft
+                                                                                                                                                                                     code. The draft code is then split into code blocks containing                To address challenges in repository-level code generation,
+                                                                                                                                                                                     multiple code element invocations and preceding context, for               existing studies [5] [6] widely adopt the Retrieval-Augmented
+                                                                                                                                                                                     which additional snippets are retrieved to reflect code element            Generation (RAG) paradigm, retrieving code snippets from the
+                                                                                                                                                                                     usage. All snippets are finally re-ranked and selectively inte-            target repository to guide code generation based on existing
+                                                                                                                                                                                     grated into a prompt template. To evaluate the effectiveness               implementations. Some studies adopt single-round or iterative
+                                                                                                                                                                                     and generalization of CECoder, we conduct experiments on the
+                                                                                                                                                                                     widely used and representative DevEval benchmark, containing               retrieval strategies, retrieving semantically similar snippets
+                                                                                                                                                                                     1825 repository-level code generation tasks. CECoder consistently          based on the task requirement or the generated code in the
+                                                                                                                                                                                     outperforms the state-of-the-art RepoCoder, across all evaluated           previous iteration [7]. These basic retrieval studies serve as
+                                                                                                                                                                                     metrics, achieving scores of 4.39%, 41.97%, 27.01%, and 39.25%             the foundation for more advanced strategies: some studies
+                                                                                                                                                                                     in Exact Match, EditSimilarity, Pass@1, and Recall@1. It also              incorporate structural or semantic information, such as the type
+                                                                                                                                                                                     generalizes across repositories of varying size and duplication.
+                                                                                                                                                                                        Index Terms—Code Generation, Large Language Model,
+                                                                                                                                                                                                                                                                context or dependency graphs, to build richer contexts [8] [9].
+                                                                                                                                                                                     Retrieval-Augmented Generation.                                            Others introduce adaptive optimization strategies, leveraging
+                                                                                                                                                                                                                                                                compiler results [10] or selective retrieval mechanism [11] to
+                                                                                                                                                                                                              I. I NTRODUCTION                                  improve retrieval relevance. However, despite these research
+                                                                                                                                                                                       In recent years, large language models (LLMs) [1] [2]                    efforts, the core similarity-based retrieval paradigm remains
+                                                                                                                                                                                     have demonstrated impressive capabilities in the field of code             limited. Specifically, it typically emphasizes whole-function
+                                                                                                                                                                                                                                                                semantic similarity based on task requirements or previously
+                                                                                                                                                                                       * Xiang Ling is the corresponding author.                                generated whole code while overlooking fine-grained code
+
+
+                                                                                                                                                                                  2994-810X/25/$31.00 ©2025 IEEE                                           89
+                                                                                                                                                                                  DOI 10.1109/ISSREW67781.2025.00051
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+                 element usage, which is crucial for the LLM to understand                     To enhance the contextual understanding of LLMs,
+                 how to invoke and compose these code elements.                             Retrieval-Augmented Generation (RAG) methods have been
+                    Motivated by it, we propose CECoder, a novel retrieval-                 widely adopted. Typical studies such as RepoCoder [7] iter-
+                 augmented generation framework designed to exploit the di-                 atively alternate between retrieval and generation, retrieving
+                 verse usages of code elements within the target repository                 similar code snippets from the repository. RepoMinCoder [13]
+                 and mitigate the possible misuses of code elements. CECoder                applies the minimum description length principle to measure
+                 first retrieves code snippets based on the task requirement and            information redundancy and loss. Some studies attempt to
+                 generates a draft code, outlining the target function’s struc-             construct more precise retrieval contexts by parsing repository
+                 tural skeleton while incorporating potentially relevant code               structure. A3 -CodGen [9] builds knowledge bases comprising
+                 elements. Next, to construct query texts that focus on code ele-           local modules, global modules, and third-party libraries to
+                 ment usages, CECoder splits the draft code into multiple code              enrich prompt representation; CATCODER [8] constructs type
+                 blocks, each containing a set of code element invocations and              dependency graphs to extract accurate type contexts. Mean-
+                 their preceding context. For each block, CECoder performs                  while, certain studies introduce feedback or selective retrieval
+                 fine-grained retrieval to gather additional relevant snippets              mechanism to enable adaptive optimization. For example,
+                 demonstrating diverse usages of code elements. Finally, CE-                CoCoGen [10] employs compiler error feedback to iteratively
+                 Coder applies a reciprocal rank fusion algorithm [12] to merge             guide and refine the retrieval and generation process. Repo-
+                 retrieval results from both whole-function semantic similarity             former [11] introduces a selective retrieval mechanism to avoid
+                 and fine-grained code element usage, prioritizing snippets                 unnecessary retrieval, thereby reducing redundant context.
+                 highly ranked or frequently retrieved across sources. This two-               However, few studies focus on retrieving code elements,
+                 stage retrieval pipeline produces a context-rich prompt that               especially their typical invocation usages, as CECoder does.
+                 better guides the LLM in generating executable code.                       By doing so, CECoder effectively enhances the accuracy and
+                    We conduct an evaluation of CECoder on the DevEval                      consistency of repository-level code generation, addressing
+                 benchmark dataset [3], which features a code distribution                  common issues in existing studies such as incorrect code
+                 that mirrors real-world repositories, thereby providing a more             element usage and incomplete invocation combinations.
+                 authentic evaluation of repository-level code generation. We
+                 evaluate CECoder using two popular LLMs: GPT-3.5-Turbo                                         III. M ETHODOLOGY
+                 [1] and Code Llama [2]. Experimental results demonstrate
+                 that CECoder achieves 4.39%, 41.97%, 27.01%, and 39.25%                       In retrieval-based repository-level code generation, the ob-
+                 in ExactMatch, EditSimilarity, Pass@1, and Recall@1, re-                   jective is to generate a function body that is functionally
+                 spectively, consistently outperforming the state-of-the-art Re-            correct and leverages existing code elements from the tar-
+                 poCoder [7]. Moveover, CECoder demonstrates strong gener-                  get code repository. Formally, each repository-level code
+                 alizability, maintaining stable performance across repositories            generation task is defined by a task requirement T =
+                 with diverse sizes and varying ratios of code duplication.                 ⟨signature, docstring⟩, which consists of the function signature
+                    The main contributions of our work include:                             and the functional description in natural language. The target
+                    • We propose CECoder, a novel retrieval-augmented code
+                                                                                            code repository is denoted as Srepo = {s1 , s2 , . . . , sn },
+                       generation framework that introduces a two-phase re-                 representing a collection of available code snippets within
+                       trieval strategy, combining whole-function semantic re-              the repository. The generation process is expressed as ŷ =
+                       trieval with fine-grained code element usage retrieval, to           LLM (T , Sref ined ), where ŷ is the generated function body,
+                       better support repository-level code generation.                     and Sref ined ⊆ Srepo denotes a set of code snippets that con-
+                    • We design a code elements-aware retrieval mechanism
+                                                                                            tain the task-relevant code elements to support the generation.
+                       that splits draft code into invocation-centered blocks and              Repository-level code generation is challenging for LLMs
+                       performs fine-grained retrieval to capture diverse usage             due to their limited understanding of repository-specific code
+                       of code elements.                                                    elements and their usages. Existing retrieval methods often
+                    • We conduct comprehensive experiments on the DevEval                   rely on whole-function semantic descriptions [7] [10], which
+                       benchmark, demonstrating consistent better performance               lack sufficient signals to capture detailed code element usages.
+                       over baseline methods in both generation quality and gen-               To address this challenge, we propose CECoder, a retrieval-
+                       eralization across repositories with diverse characteristics.        augmented generation framework designed to enhance LLMs’
+                                                                                            ability to integrate relevant code elements through fine-grained
+                                       II. R ELATED W ORK                                   retrieval. The key to CECoder is how to retrieve a set of
+                    Code generation typically takes place within code reposito-             code snippets Sref ined containing rich code element usages
+                 ries, involving the understanding of various repository-specific           from Srepo . An overview of the CECoder workflow is pre-
+                 code elements, which pose greater challenges to large language             sented in Fig.1. Overall, CECoder consists of four stages:
+                 models (LLMs). Although LLMs demonstrate outstanding                       retrieval corpus construction, initial retrieval, code elements-
+                 performance in standalone function-level code generation,                  aware retrieval, and merge. We detail the first two stages in
+                 they frequently produce unexecutable code when faced with                  SectionIII-A, and describe the code elements-aware retrieval
+                 repository-level contexts due to insufficient information [3].             and merging process in Sections III-B and III-C, respectively.
+
+
+
+
+                                                                                       90
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+                 Fig. 1: Overview of the CECoder method, which leverages a two-stage retrieval process: first using the task requirement for initial whole-function semantic
+                 retrieval, followed by fine-grained retrieval of code element usages to refine the code generation process.
+
+
+
+                 A. Initial Retrieval                                                              where encoder(·) denotes the text encoding function, which
+                                                                                                   may be implemented as a sparse method (e.g., Bag-of-Words,
+                    Given a target function to be generated, its task requirement                  TF-IDF) or a dense embedding model (e.g., Sentence-BERT,
+                 serves as a query text to retrieve similar code snippets from                     BGE). The resulting vectors vq and vsi are used to calculate
+                 a retrieval corpus, whose construction from the target code                       similarity between the query text and code snippets:
+                 repository will be detailed later. The retrieved snippets are
+                 organized and incorporated into a prompt to guide the LLM                                                scorei = sim(vq , vsi )                         (2)
+                 in generating a draft code.                                                       where sim(·, ·) denotes a similarity function, such as cosine
+                    Retrieval Corpus Construction. Since code repositories of-                     similarity or Jaccard coefficient. The resulting score scorei
+                 ten contain many code files of varying and sometimes ex-                          reflects the semantic similarity between the task requirement q
+                 cessive lengths, using an entire file as the minimal retrieval                    and the code snippet si which is used to rank all code snippets
+                 unit is often suboptimal. To address this issue, we refer to                      in descending order. And then the top-K snippets with the
+                 the sliding window-based retrieval corpus construction strategy                   highest scores are selected as the retrieval output set Sinitial .
+                 introduced in RepoCoder [7]. Specifically, we traverse all code                      Draft Code Generation. To address repository-leve code
+                 files in the target repository and apply a sliding window of size                 generation, we propose a new prompt template P based on
+                 Sw lines with a stride of Ss lines to scan the code of each file.                 the structure provided in DevEval [3]. The prompt consists of
+                 Each windowed segment of code is extracted as a code snippet                      three essential components: task instruction, retrieved context,
+                 si (i = 1, 2, . . . , n). These segments are collected into a                     and task requirement. Specifically, we first insert the target
+                 corpus of code snippets, denoted as Srepo = {s1 , s2 , . . . , sn },              function’s name fname into the task instruction I(fname ). Next,
+                 which serves as the retrieval corpus for subsequent stages.                       we concatenate the top-K retrieved code snippets Sinitial , in
+                    Relevant Code Retrieval. Having constructed the retrieval                      ranked order to form the retrieval context C(Sinitial ). And
+                 corpus, we retrieve relevant code snippets based on the task                      then we concatenate the function signature and the functional
+                 requirement q, expressed as Sinitial = R(Srepo , q), where                        description to create the task requirement T :
+                 R(·) represents the retrieval mechanism applied to the corpus
+                 Srepo . Specifically, given a query text q or a code snippet si ,                                 P = I(fname ) + C(Sinitial ) + T                       (3)
+                 we convert each into a vector representation:                                     Finally, the constructed prompt P is provided as input to the
+                                                                                                   LLM, which is then tasked with generating the function body
+                              vq = encoder(q),         vsi = encoder(si )               (1)        as a draft code. During the draft code generation, the LLM
+
+
+
+
+                                                                                              91
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+                 selects a set of code elements from the retrieved snippets that            Sblockj is an ordered list of code snippets, ranked by their
+                 it deems relevant to the task and composes them to generate                similarity scores to the given context block bj . Each retrieval
+                 a code implementation that satisfies the task requirement.                 set contains the usage of code elements in the target code
+                                                                                            repository that is similar to the corresponding context block.
+                 B. Code Elements-Aware Retrieval
+                    Although the draft code incorporates a set of code elements,            C. Merge and Generate
+                 the semantic gap between natural language and code may                        After two-stage retrieval, we obtain multiple sets of code
+                 still lead to irrelevant code snippet retrieval, causing LLMs to           snippets. Due to the input length limitation of LLMs, it is
+                 misuse code elements. Therefore, directly using the draft code             infeasible to include all retrieved results directly in the prompt.
+                 for final generation is suboptimal. Some methods [7] [10] [13]             To address this, we merge and rank the retrieved snippets to
+                 further perform iterative retrieval using the draft code itself.           select the most relevant ones for constructing the final prompt.
+                 This code-to-code retrieval helps reduce irrelevant results to                While the code element-aware retrieval based on invocation-
+                 some extent based on the code elements contained in the draft              centered blocks captures fine-grained code element usage,
+                 code. However, we observe that some code snippets containing               the initial retrieval provides structural templates aligned with
+                 valuable usage of code elements may be overlooked when                     the whole-function semantic intent. Merging both enables the
+                 using the whole draft code as a single query text.                         LLM to learn from complementary perspectives. Specifically,
+                    To address this, we propose splitting the draft into code               we employ the Reciprocal Rank Fusion (RRF) [8] [12] al-
+                 blocks centered on code elements and using these blocks as                 gorithm to merge the retrieved sets of code snippets. RRF is
+                 separate query texts to retrieve code snippets similar to code             an algorithm that merges multiple result sets with different
+                 element usage. Specifically, we parse the draft code into an               retrievals into a single unified set. This algorithm prioritizes
+                 abstract syntax tree (AST) and traverse the tree to locate all             snippets that rank high in multiple retrieved sets. It calculates
+                 code element invocations. Consider that consecutive invoca-                an RRF score based on the ranking of snippets within each
+                 tions may be semantically related and appear consecutively                 retrieved set, and if the same snippet appears in different sets,
+                 elsewhere in the code repository, consecutive invocations in               their RRF scores are summed to obtain the final score:
+                 the draft code are merged into a single block termed a call                                               X          1
+                 block. All other statements between call blocks are treated as                                RRF(c) =                                     (5)
+                                                                                                                               a + rankS (c)
+                                                                                                                          S∈A
+                 a normal block, which typically contain variable declarations,
+                 control structures, or non-invocation logic. A call block repre-           where A represents all retrieval result sets, represented as
+                 sents a localized combination of code elements within the draft            A = {Sinitial , Sblock1 , Sblock2 , . . . , Sblockm }; rankS (c) indi-
+                 code and serves as a basis for retrieving code element usage               cates the rank of the code snippet c in the retrieval set S; a
+                 in the repository. Based on the above definitions, the draft               is a smoothing factor. After merging with RRF, we rank code
+                 code D can be represented as a sequence of call blocks and                 snippets in descending order of their RRF scores and then
+                 normal blocks: D = [B1 , B2 , . . . , Bn ], Bi ∈ {C, N } , where           select the top-K code snippets to form the refined retrieval set,
+                 C and N denote the set of call blocks and normal blocks,                   denoted as Sref ined . Consistent with the prompt construction
+                 respectively. Bi alternate between C and N .                               adopted during draft generation (Equation 3), we construct the
+                    However, directly using isolated code blocks as query texts             final prompt using Sref ined , which is then used to guide the
+                 may disrupt the semantic integrity of the draft code. To                   LLM in generating the final code.
+                 address this, we construct a context block bj for each call
+                                                                                                              IV. E XPERIMENT S ETTINGS
+                 block Cj by concatenating all preceding blocks, including
+                 both call and normal blocks, with the current call block in                   In this section, we introduce the benchmark datasets, evalu-
+                 their original order. This design is inspired by the common                ation metrics, baselines, and implementation details of our ex-
+                 developer practice of envisioning potential element invocations            periments. We formulate the following two research questions
+                 based on existing logical implementations before retrieving                and answer them to demonstrate the effectiveness of CECoder.
+                 relevant elements. Specifically, let Cj be located at position k              • RQ1(Overall Performance): How effective is our
+                 in the draft sequence D:                                                         method compared to other baseline methods in
+                                                                                                  repository-level code generation?
+                     bj = concat(B1 , B2 , . . . , Bk−1 , Cj ),   Bi ∈ {C, N }   (4)
+                                                                                               • RQ2(Generalizability): Can our method generalize to
+                 This formulation ensures that each context block ends with                       different code repositories?
+                 its corresponding call block Cj , while the preceding blocks                  Datasets. Many benchmark datasets were not aligned with
+                 retain the structural logic necessary for effective retrieval. This        real-world code repositories when constructed, limiting the
+                 design preserves the structural continuity of the original draft,          evaluation of LLMs’ coding abilities in practical development
+                 allowing context blocks to retain relevant code dependencies.              scenarios [14] [15]. DevEval [3] addresses this by introducing
+                    After constructing a series of context blocks, we apply the             1825 repository-level code generation tasks from 117 high-
+                 same retrieval method as in Section III-A, using each context              quality repositories across 10 popular domains. It aligns
+                 block as a query text to retrieve a set of top-K similar code              with real-world repositories in terms of code distribution,
+                 snippets from the corpus of code snippets. The retrieval set               dependency distribution, and scale, providing a more accurate
+
+
+
+
+                                                                                       92
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+                 measure of LLMs’ actual coding abilities. Therefore, we adopt                 TABLE I: PERFORMANCE COMPARISON OF METHODS
+                 DevEval to evaluate the effectiveness of CECoder.                        Method      EM ES Pass@1 Pass@5 Pass@10 Recall@1 Recall@5 Recall@10
+                                                                                          LLM: GPT-3.5-Turbo
+                    Evaluation Metrics. We adopt four complementary metrics               Direct      0.33 31.26 14.19 17.76 19.31 15.27    17.37     18.27
+                                                                                          ReACC       1.14 31.66 22.85 28.46 30.58 32.95    36.36     38.12
+                 to evaluate the generated code from exact match accuracy, lexi-          Vanilla RAG 2.26 34.87 25.53 30.23 31.84 35.73    39.92     41.16
+                 cal similarity, executable correctness and dependency coverage           RepoCoder   1.90 35.42 25.81 31.11 32.91 38.86    42.43     43.66
+                                                                                          CECoder     4.39 41.97 27.01 31.41 33.20 39.25    43.02     44.08
+                 perspectives. ExactMatch(EM) measures whether the gener-                 LLM:Code Llama
+                 ated function exactly matches the reference implementation               Direct      0.69 33.74 12.16 18.12 21.08 17.56    22.50     25.26
+                                                                                          ReACC       2.06 36.28 12.88 19.53 23.14 22.57    31.15     35.80
+                 [15], offering a binary correctness signal. EditSimilarity(ES)           Vanilla RAG 3.04 37.88 16.66 23.99 27.64 25.77    35.81     39.90
+                                                                                          RepoCoder   2.75 37.48 16.44 23.53 27.05 25.33    34.92     38.49
+                 captures lexical similarity between generated and ground truth           CECoder     3.43 38.19 17.37 24.69 28.32 26.31    36.78     39.91
+                 by calculating normalized edit distance [7]. Pass@k evaluates
+                 executable correctness, reporting the proportion of generations
+                 that pass test cases within k samples [8] [10] [3]. Recall@k as-        performance of CECoder in comparison with Direction Gen-
+                 sesses dependency coverage by comparing invoked references              eration and retrieval-augmented baselines, including single-
+                 with the ground truth [3]. We report results for k = 1, 5, and          round retrieval methods (e.g., ReACC and Vanilla RAG) and
+                 10 for both Pass@k and Recall@k.                                        iterative retrieval methods (e.g., RepoCoder). Table I shows
+                    Baselines. Although recent methods such as A3 -CodGen                that CECoder achieves 27.01% Pass@1, 39.25% Recall@1,
+                 [9] and CoCoGen [10] incorporate additional structural infor-           4.39% ExactMatch, and 41.97% EditSimilarity, outper-
+                 mation or adaptive optimization strategy, they fundamentally            forming all baselines on the DevEval benchmark. Retrieval-
+                 build upon typical retrieval-based methods. To benchmark                augmented methods generally outperform Direct Generation
+                 CECoder’s retrieval advancements appropriately, we select               due to the contextual information provided by retrieved code
+                 baselines that span the major retrieval paradigms used in prior         snippets. Iterative retrieval paradigms such as RepoCoder and
+                 methods, including ReACC [16], Vanilla RAG and RepoCoder                CECoder surpass single-round methods by better capturing
+                 [7]. ReACC combines sparse retrieval (BM25) with dense                  evolving generation contexts. However, RepoCoder’s whole-
+                 retrieval to enhance code snippet relevance. Vanilla RAG                function semantic retrieval may introduce irrelevant code snip-
+                 retrieves similar code snippets using the task requirement.             pets, particularly harming performance on smaller LLMs such
+                 RepoCoder iteratively retrieves code based on the code gen-             as CodeLlama-7B, where it underperforms even single-round
+                 erated in the previous iteration. In addition, we include Direct        methods like Vanilla RAG. In contrast, CECoder mitigates this
+                 Generation as a non-retrieval baseline, which inputs the task           issue by retrieving code element usage.
+                 requirement into the LLM without any retrieved context.
+                    Implementation Details. In this paper, we select GPT-                B. RQ2:Generalizability
+                 3.5-Turbo (gpt-3.5-turbo-1106) and Code Llama (7B) as base                 To evaluate the generalizability of different methods, we
+                 models for evaluation, due to their frequent use in code                analyze their performance across repositories with repository
+                 generation benchmarks and to address performance and data               size and code duplication level. All experiments in this section
+                 leakage. In the Retrieval Corpus Construction, we segment               are conducted using GPT-3.5-Turbo. For each of the 117
+                 the code repository using a sliding window of 500 lines with            repositories in DevEval, we compute the lines of code (LOCs)
+                 a stride of 50 lines, producing overlapping code snippets               and the code duplication rate, which is measured using jscpd
+                 to ensure coverage and context preservation. In the Initial             as the ratio of duplicated lines to total LOCs. Repositories
+                 Retrieval and Code Elements-Aware Retrieval, we use the                 are then divided into four intervals based on each metric. For
+                 Bag-of-Words model to represent code snippets and calculate             every interval, we report the Pass@1 scores of all baselines to
+                 similarity via the Jaccard coefficient. The top-10 most similar         evaluate their performance.
+                 snippets are selected. The above configuration ensures fair                1) Generalizability Across Different Repository Sizes: As
+                 comparison with RepoCoder, though alternative retrieval and             shown in Fig. 2, all methods perform better on smaller
+                 similarity functions can be applied. We set a = 60 in the RRF           repositories, where retrieved snippets can cover most or all
+                 (Equation 5) as suggested by prior work [12] demonstrating its          of the repository. In contrast, for large repositories, retrieved
+                 effectiveness in balancing ranking sensitivity and robustness.          snippets represent only a small portion of the repository. LLMs
+                 During code generation, we adhere to the practices outlined             thus struggle to capture full context, making accurate retrieval
+                 in DevEval [3], adopting two decoding strategies: (1) Greedy            crucial. CECoder achieves superior performance across all
+                 decoding, using temperature = 0 to generate a single solution;          intervals, validating the effectiveness of its fine-grained code
+                 and (2) Nucleus sampling, with temperature = 0.4 and top-p =            element usage retrieval.
+                 0.95, generating 20 candidates per task. The maximum length                2) Generalizability Across Different Duplication Rates: As
+                 of each generated code is 500 tokens.                                   shown in Fig. 3, CECoder maintains superior or competitive
+                          V. E VALUATION R ESULTS AND A NALYSIS                          performance across all intervals, benefiting from fine-grained
+                 A. RQ1: Overall Performance                                             retrieval based on code element usage rather than relying on
+                                                                                         whole-function semantic similarity. Notably, duplication rate
+                   This research question evaluates the overall effectiveness of         does not strictly correlate with Pass@1. We hypothesize this
+                 CECoder in repository-level code generation. We assess the              is influenced by repository size: for example, repositories in
+
+
+
+
+                                                                                    93
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+                                                                        5 H $ & &                                           5 H S R & R G H U                                          No. XDA0320401, the National Natural Science Foundation
+                                                                        9 D Q L O O D  5 $ *                               & ( & R G H U                                              of China under No. 62202457. This paper is also supported
+                                                                                                                                                                                    by YuanTu Large Research Infrastructure.
+                                                                                                                                                                                                                     R EFERENCES
+                                    
+                                                                                                                                                                                        [1] OpenAI, “ChatGPT,” https://platform.openai.com/docs/models/gpt-3-5,
+                   3 D V V # 
+
+
+
+
+                                                                                                                                                                                            2023, accessed: 2025-03-18.
+                                                                                                                                                                                        [2] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan
+                                                                                                                                                                                         et al., “Code llama: Open foundation models for code,” arXiv preprint
+                                                                                                                                                                                            arXiv:2308.12950, 2023.
+                                                                                                                                                                                        [3] J. Li, G. Li, Y. Zhao, Y. Li, H. Liu, H. Zhu et al., “DevEval: A Manually-
+                                    
+                                                                                                                                                                                            Annotated Code Generation Benchmark Aligned with Real-World Code
+                                                                                                                                                                                            Repositories,” in Findings of the Association for Computational Linguis-
+                                      >          @                       @                         @                         @                tics: ACL 2024. Bangkok, Thailand: Association for Computational
+                                                                                   7 K H  U D Q J H  R I  / 2 & V
+                                                                                                                                                                                            Linguistics, Aug. 2024, pp. 3603–3614.
+                                                                                                                                                                                        [4] A. Eghbali and M. Pradel, “De-hallucinator: Mitigating llm hallucina-
+                        Fig. 2: Comparison of various methods at different code repository sizes                                                                                            tions in code generation tasks via iterative grounding,” arXiv preprint
+                                                                                                                                                                                            arXiv:2401.01701, 2024.
+                                                                                                                                                                                        [5] D. Zan, B. Chen, Z. Lin, B. Guan, W. Yongji, and J.-G. Lou, “When
+                                                                           5 H $ & &                                           5 H S R & R G H U
+                                                                                                                                                                                            Language Model Meets Private Library,” in Findings of the Association
+                                                                           9 D Q L O O D  5 $ *                               & ( & R G H U                                                for Computational Linguistics: EMNLP 2022. Abu Dhabi, United Arab
+                                                                                                                                                                                            Emirates: Association for Computational Linguistics, Dec. 2022, pp.
+                                                                                                                                                                                            277–288.
+                                    
+                                                                                                                                                                                        [6] M. Liu, T. Yang, Y. Lou, X. Du, Y. Wang, and X. Peng, “CodeGen4Libs:
+                                                                                                                                                                                            A Two-Stage Approach for Library-Oriented Code Generation,” in
+                                                                                                                                                                                            2023 38th IEEE/ACM International Conference on Automated Software
+                  3 D V V # 
+
+
+
+
+                                    
+                                                                                                                                                                                            Engineering (ASE), Sep. 2023, pp. 434–445.
+                                                                                                                                                                                        [7] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan et al.,
+                                                                                                                                                                                            “RepoCoder: Repository-Level Code Completion Through Iterative Re-
+                                    
+                                                                                                                                                                                            trieval and Generation,” in Proceedings of the 2023 Conference on
+                                                                                                                                                                                            Empirical Methods in Natural Language Processing.               Singapore:
+                                                                                                                                                                                            Association for Computational Linguistics, Dec. 2023, pp. 2471–2484.
+                                                                                                                                                                                     [8] Z. Pan, X. Hu, X. Xia, and X. Yang, “Enhancing repository-level
+                                           >       @                           @                              @                            @             code generation with integrated contextual information,” arXiv preprint
+                                                               7 K H  U D Q J H  R I  U H S R V L W R U \ 
+ V  G X S O L F D W L R Q  U D W L R
+                                                                                                                                                                                            arXiv:2406.03283, 2024.
+                                                                                                                                                                                        [9] D. Liao, S. Pan, X. Sun, X. Ren, Q. Huang, Z. Xing et al., “A3 -codgen:
+                 Fig. 3: Comparison of various methods in code repositories with different                                                                                                  A repository-level code generation framework for code reuse with local-
+                 duplication rates                                                                                                                                                          aware, global-aware, and third-party-library-aware,” IEEE Transactions
+                                                                                                                                                                                            on Software Engineering, vol. 50, no. 12, pp. 3369–3384, 2024.
+                                                                                                                                                                                       [10] Z. Bi, Y. Wan, Z. Wang, H. Zhang, B. Guan, F. Lu et al., “Iterative
+                 the [0, 0.4] interval have an average LOC of 3072.53, which,                                                                                                               Refinement of Project-Level Code Context for Precise Code Generation
+                                                                                                                                                                                            with Compiler Feedback,” in Findings of the Association for Compu-
+                 as shown in Fig. 2, falls into a range where LLMs generally                                                                                                                tational Linguistics: ACL 2024. Bangkok, Thailand: Association for
+                 achieve higher Pass@1 scores.                                                                                                                                              Computational Linguistics, Aug. 2024, pp. 2336–2353.
+                                                                                                                                                                                       [11] D. Wu, W. U. Ahmad, D. Zhang, M. K. Ramanathan, and X. Ma, “Repo-
+                                                                     VI. CONCLUSION                                                                                                         former: Selective Retrieval for Repository-Level Code Completion,” in
+                                                                                                                                                                                            Proceedings of the 41st International Conference on Machine Learning.
+                    This paper presents CECoder, a fine-grained retrieval frame-                                                                                                            PMLR, Jul. 2024, pp. 53 270–53 290.
+                                                                                                                                                                                       [12] G. V. Cormack, C. L. A. Clarke, and S. Buettcher, “Reciprocal rank
+                 work that is aware of code element usage for repository-                                                                                                                   fusion outperforms condorcet and individual rank learning methods,”
+                 level code generation. CECoder employs a two-phase retrieval                                                                                                               in Proceedings of the 32nd International ACM SIGIR Conference on
+                 strategy: it first performs initial retrieval based on task require-                                                                                                       Research and Development in Information Retrieval. Boston MA USA:
+                                                                                                                                                                                            ACM, Jul. 2009, pp. 758–759.
+                 ment to obtain whole-function semantic code snippets, then                                                                                                            [13] Y. Li, E. Shi, D. Zheng, K. Duan, J. Chen, and Y. Wang, “Re-
+                 conducts fine-grained retrieval guided by invocation-centered                                                                                                              poMinCoder: Improving Repository-Level Code Generation Based on
+                 blocks to capture diverse code element usage. The integration                                                                                                              Information Loss Screening,” in Proceedings of the 15th Asia-Pacific
+                                                                                                                                                                                            Symposium on Internetware. Macau China: ACM, Jul. 2024, pp. 229–
+                 of both retrieval results via reciprocal rank fusion enhances                                                                                                              238.
+                 generation accuracy and reduces misuse of code elements.                                                                                                              [14] H. Yu, B. Shen, D. Ran, J. Zhang, Q. Zhang, Y. Ma et al., “CoderEval:
+                 Experimental results on the DevEval benchmark demonstrate                                                                                                                  A Benchmark of Pragmatic Code Generation with Generative Pre-
+                                                                                                                                                                                            trained Models,” in Proceedings of the IEEE/ACM 46th International
+                 that CECoder consistently outperforms baselines across mul-                                                                                                                Conference on Software Engineering, ser. ICSE ’24. New York, NY,
+                 tiple metrics, achieving scores of 4.39%, 41.97%, 27.01%,                                                                                                                  USA: Association for Computing Machinery, Feb. 2024, pp. 1–12.
+                 and 39.25% in ExactMatch, EditSimilarity, Pass@1, and                                                                                                                 [15] Y. Ding, Z. Wang, W. Ahmad, H. Ding, M. Tan, N. Jain et al., “Cross-
+                                                                                                                                                                                            CodeEval: A diverse and multilingual benchmark for cross-file code
+                 Recall@1, respectively. It also shows well generalization                                                                                                                  completion,” in Advances in Neural Information Processing Systems,
+                 across repositories of different sizes and duplication levels.                                                                                                             vol. 36. Curran Associates, Inc., 2023, pp. 46 701–46 723.
+                                                                                                                                                                                       [16] S. Lu, N. Duan, H. Han, D. Guo, S.-w. Hwang, and A. Svyatkovskiy,
+                                                              ACKNOWLEDGMENTS                                                                                                               “ReACC: A Retrieval-Augmented Code Completion Framework,” in
+                                                                                                                                                                                            Proceedings of the 60th Annual Meeting of the Association for Com-
+                   This paper is supported by the the Strategic Priority Re-                                                                                                                putational Linguistics (Volume 1: Long Papers).           Dublin, Ireland:
+                                                                                                                                                                                            Association for Computational Linguistics, May 2022, pp. 6227–6240.
+                 search Program of the Chinese Academy of Sciences under
+
+
+
+
+                                                                                                                                                                                  94
+
+ed licensed use limited to: MINISTERE DE L'ENSEIGNEMENT SUPERIEUR ET DE LA RECHERCHE SCIENTIFIQUE. Downloaded on April 03,2026 at 17:24:16 UTC from IEEE Xplore. Restriction
+
