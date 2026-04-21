@@ -1,0 +1,1037 @@
+%%
+%% ACM TOSEM — Adapted for: A Taxonomy of Code Repository Representation
+%% Approaches for LLM-Based Software Engineering: A Systematic Literature Review
+%%
+\documentclass[acmsmall,screen,review]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
+
+%% Rights management
+\setcopyright{acmcopyright}
+\copyrightyear{2026}
+\acmYear{2026}
+\acmDOI{XXXXXXX.XXXXXXX}
+
+\acmJournal{TOSEM}
+\acmVolume{35}
+\acmNumber{1}
+\acmArticle{1}
+\acmMonth{4}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{rotating}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{bm}
+\usepackage[most]{tcolorbox}
+
+\begin{document}
+
+\title{A Taxonomy of Code Repository Representation Approaches for
+  LLM-Based Software Engineering: A Systematic Literature Review}
+
+\author{Riadh Hasnaoui}
+\email{riadh.hasnaoui@ensi-uma.tn}
+\affiliation{%
+  \institution{National School of Computer Science (ENSI)}
+  \city{Manouba}
+  \country{Tunisia}
+}
+
+%%
+%% Abstract
+%%
+\begin{abstract}
+Large Language Models (LLMs) have demonstrated exceptional capabilities
+in software engineering (SE) tasks, yet effectively providing entire
+code repositories as context remains a critical open challenge. This
+Systematic Literature Review (SLR) proposes a comprehensive, empirically
+grounded taxonomy of repository representation approaches for LLM-based
+SE. Following a rigorous \textbf{five-pillar methodological framework}
+(Kitchenham \& Charters, Wohlin, PRISMA 2020, Cruzes \& Dyb\aa{}, and
+ACM SIGSOFT Empirical Standards), we systematically analysed a corpus
+of \textbf{159 studies} (134 primary representation studies and 25
+benchmark evaluation studies) published between January 2020 and
+March 2026.
+
+Our thematic synthesis identifies \textbf{seven distinct representation
+paradigms (PAR-1 to PAR-7)}: Dense Embedding, RAG Cross-File,
+Graph-Based, Execution \& Dynamic, Memory-Augmented, Compression \&
+Summarisation, and Agentic \& Iterative Context Exploration. Each
+paradigm is characterised across \textbf{ten structural dimensions
+(D1–D10)}, forming the taxonomy's analytical backbone. Our
+cross-paradigm analysis reveals (1) a fundamental trade-off between
+token-budget consumption and semantic precision; (2) a systematic
+\emph{freshness bias} in four paradigms that rely on stale or
+semi-stale repository snapshots, leading to performance overestimation
+on static benchmarks; and (3) an unresolved \emph{training-dependency
+gap} that limits the transferability of encoder-centric paradigms to new
+programming languages. This SLR provides a foundational taxonomy and
+research agenda to guide future research and the industrial deployment
+of repository-level LLM agents.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10011007.10011074.10011092</concept_id>
+  <concept_desc>Software and its engineering~Software development
+   techniques</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10010147.10010178.10010179</concept_id>
+  <concept_desc>Computing methodologies~Natural language
+   processing</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10011007.10011074.10011099.10011102.10011103</concept_id>
+  <concept_desc>Software and its engineering~Software testing and
+   debugging</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Software and its engineering~Software development techniques}
+\ccsdesc[500]{Computing methodologies~Natural language processing}
+\ccsdesc[300]{Software and its engineering~Software testing and debugging}
+
+\keywords{Large Language Models, Software Engineering, Systematic
+  Literature Review, Repository Representation, Code Generation, RAG,
+  Autonomous Agents, Taxonomy, Code Completion, Program Repair}
+
+\maketitle
+
+%%
+%% ─── SECTION 1: INTRODUCTION ────────────────────────────────────────────────
+%%
+\section{Introduction}
+
+The integration of Large Language Models (LLMs) into Software
+Engineering (SE) has fundamentally shifted the paradigm from
+function-level code assistance to repository-level
+automation~\cite{Hou2024, Jiang2026, Zhang2026Survey}. Systems such as
+SWE-agent~\cite{Yang2024SWEAgent}, AutoCodeRover~\cite{Zhang2024ACR},
+and OpenHands~\cite{Wang2025OpenHands} demonstrate that LLMs can, in
+principle, autonomously navigate entire codebases, localise faults, and
+generate verified patches. Yet the core engineering challenge that
+underlies all these systems remains largely unsolved: \emph{how does one
+represent a complex, multi-file repository so that an LLM can understand
+its cross-file dependencies and structural constraints without exceeding
+the model's token limit?}
+
+The question is not merely practical. The choice of representation
+strategy determines which semantic features are visible to the model,
+which are silently discarded, and which are implicitly approximated. As
+the SWE-bench~\cite{Jimenez2024} benchmark has shown, even the most
+capable proprietary models fail to resolve the majority of real-world
+GitHub issues when repository context is naïvely truncated. Recent work
+has confirmed that performance on static benchmarks can be
+systematically overestimated when the repository snapshot used for
+evaluation predates the model's training
+cut-off~\cite{Zheng2025HumanEvo}, raising serious questions about the
+validity of the current evaluation ecosystem.
+
+Despite the rapid proliferation of repository representation techniques
+-- from dense-vector retrieval~\cite{Feng2020CodeBERT, Guo2022UniX} to
+graph-based structural
+encoding~\cite{Guo2021GraphCodeBERT, Liu2025CodexGraph}, from
+compression-based
+sketching~\cite{Zan2025CodeS, Shi2025LongCodeZip} to agentic
+exploration~\cite{Yang2024SWEAgent, Zhang2024ACR} -- no unified,
+theoretically grounded taxonomy currently exists. Existing surveys
+either focus on a single technique family (e.g., RAG for
+code~\cite{Tao2026RAGSurvey}) or treat representation as a secondary
+concern within broader LLM-for-SE surveys~\cite{Hou2024, Husein2025}.
+
+\textbf{Contributions.} This paper makes the following contributions:
+\begin{description}
+  \item[C1 (Taxonomy)] A seven-paradigm taxonomy of repository
+    representation approaches, characterised across ten structural
+    dimensions (Section~\ref{sec:taxonomy}).
+  \item[C2 (Corpus)] A systematically assembled corpus of 159 studies
+    screened according to a five-pillar SLR protocol
+    (Section~\ref{sec:methodology}).
+  \item[C3 (Analysis)] A quantitative cross-paradigm analysis that
+    exposes three fundamental trade-offs — token budget vs.\ semantic
+    precision, freshness bias, and training dependency — and maps them
+    to seven SE objectives (Sections~\ref{sec:taxonomy}
+    and~\ref{sec:discussion}).
+  \item[C4 (Agenda)] A structured research agenda for the field, derived
+    from the identified gaps (Section~\ref{sec:agenda}).
+\end{description}
+
+\textbf{Research Questions.}
+\begin{description}
+  \item[RQ1] What are the distinct paradigms of repository representation
+    for LLM-based SE, and how do they differ across structural
+    dimensions?
+  \item[RQ2] How are these paradigms mapped to automated SE objectives,
+    and what are the empirically observed performance trade-offs?
+  \item[RQ3] What are the most critical open challenges and directions
+    for future research?
+\end{description}
+
+%%
+%% ─── SECTION 2: METHODOLOGY ─────────────────────────────────────────────────
+%%
+\section{Research Methodology}
+\label{sec:methodology}
+
+This SLR was conducted according to a \textbf{five-pillar
+methodological framework} that combines the rigour of established SLR
+protocols with the analytical depth required to produce a taxonomy of
+scientific validity.
+
+\subsection{Pillar 1 — SLR Protocol: Kitchenham \& Charters}
+
+We adopt the Kitchenham \& Charters~\cite{Kitchenham2007} guidelines as
+our foundational protocol. The review scope was formalised through the
+PICOC framework: \emph{Population} = code repositories processed as LLM
+context; \emph{Intervention} = representation method; \emph{Comparison}
+= alternative methods on the same SE task; \emph{Outcome} = accuracy,
+token efficiency, TRL; \emph{Context} = automated SE.
+
+\noindent\textbf{Inclusion Criteria (IC):}
+\begin{itemize}
+  \item IC1: The study proposes or empirically evaluates a method for
+    extracting or structuring repository-level context for LLMs.
+  \item IC2: The method targets at least one of the seven SE objectives
+    (code completion, bug localisation, bug fixing, code search,
+    program repair, code translation, test generation).
+  \item IC3: The study is a peer-reviewed publication or an arXiv
+    preprint with $\geq 10$ citations or $\geq 1$ replication at the
+    time of screening.
+\end{itemize}
+
+\noindent\textbf{Exclusion Criteria (EC):}
+\begin{itemize}
+  \item EC1: Studies that operate exclusively at function or file level
+    without cross-file or repository-level context.
+  \item EC2: Studies focused solely on model architecture improvements
+    without any repository representation contribution.
+  \item EC3: Duplicate publications (we retained the most complete
+    version).
+\end{itemize}
+
+\subsection{Pillar 2 — Snowballing: Wohlin (2014)}
+
+Given the extreme publication velocity in LLM-for-code research, we
+applied Wohlin's~\cite{Wohlin2014} snowballing protocol as a
+completeness safeguard. Backward snowballing from the initial corpus
+captured foundational works such as CodeBERT~\cite{Feng2020CodeBERT}
+and GraphCodeBERT~\cite{Guo2021GraphCodeBERT}. Forward snowballing via
+the Semantic Scholar API captured recent studies. Snowballing
+contributed \textbf{27 studies} (17\% of the primary corpus).
+
+\subsection{Pillar 3 — PRISMA 2020: Transparent Reporting}
+
+This SLR adheres to all 27 items of the PRISMA 2020
+checklist~\cite{Page2021PRISMA}. We searched five databases (IEEE
+Xplore, ACM DL, Scopus, Semantic Scholar, arXiv) up to March 2026.
+After deduplication ($n = 312$ removed) and screening against IC/EC,
+the final corpus consists of \textbf{159 studies}: 134 primary
+representation studies and 25 benchmark evaluation studies.
+
+\subsection{Pillar 4 — Thematic Synthesis: Cruzes \& Dyb\aa}
+
+Taxonomy derivation followed the five-step thematic synthesis
+methodology of Cruzes \& Dyb\aa{}~\cite{Cruzes2011}. Two independent
+coders extracted first-order concepts from the 159 studies, grouped
+them into second-order themes via axial coding, and abstracted them into
+paradigms through selective coding. Inter-coder agreement reached
+$\bm{\kappa = 0.78}$ (substantial agreement), resolving 14 disagreements
+through arbitration.
+
+\subsection{Pillar 5 — ACM SIGSOFT Empirical Standards}
+
+We applied the ACM SIGSOFT Empirical
+Standards~\cite{ACMEmpiricalStandards} to assign a \emph{Technology
+Readiness Level} to each paradigm: TRL-A (academic proof-of-concept),
+TRL-B (replicated research prototype), or TRL-C (industrial deployment
+evidence).
+
+%%
+%% ─── SECTION 3: TAXONOMY ────────────────────────────────────────────────────
+%%
+\section{A Multi-Dimensional Taxonomy of Repository Representation
+  Approaches}
+\label{sec:taxonomy}
+
+This section presents Contribution C1 and answers \textbf{RQ1}.
+
+\subsection{Rationale for a Seven-Paradigm Taxonomy}
+\label{subsec:rationale}
+
+The number seven is not arbitrary. It is justified by three
+design principles that were applied iteratively during thematic
+synthesis until a stable partition was reached.
+
+\begin{description}
+  \item[Principle 1 — Representational Orthogonality.] Each paradigm
+    is defined by a distinct \emph{primary context-construction
+    mechanism}. Two candidate paradigms were merged only when one could
+    be implemented as a strict sub-case of the other with no loss of
+    generality. Conversely, a paradigm was split when we identified two
+    mechanistically distinct strategies that produced empirically
+    different performance profiles on the same SE benchmark. This
+    principle ruled out both under-splitting (e.g., merging graph-based
+    and embedding-based approaches, which share the use of neural
+    encoders but differ fundamentally in their relational structure) and
+    over-splitting (e.g., separating AST-based from call-graph-based
+    representations, which are both special cases of structural graph
+    traversal).
+
+  \item[Principle 2 — Functional Completeness.] The seven paradigms
+    collectively cover all 159 studies in our corpus with no uncovered
+    residual. After the final coding round, every study was assigned to
+    exactly one \emph{primary} paradigm (while being allowed to exhibit
+    secondary paradigm characteristics). The completeness of the
+    partition was verified by the absence of any ``other'' category
+    after the second round of axial coding.
+
+  \item[Principle 3 — Practical Discriminability.] Paradigm boundaries
+    were drawn at points of discontinuous change in at least three of
+    the ten structural dimensions (D1–D10, see
+    Section~\ref{subsec:dimensions}). This ensures that the taxonomy is
+    not merely descriptive but has direct engineering implications:
+    knowing a system's paradigm predicts its token-budget profile,
+    latency class, and suitability for specific SE objectives.
+\end{description}
+
+\subsubsection{Distinguishing PAR-4 (Execution \& Dynamic) from
+  PAR-7 (Agentic Exploration)}
+\label{subsubsec:par4_vs_par7}
+
+A recurrent source of inter-coder disagreement ($n = 6$ disputed cases)
+was the boundary between PAR-4 and PAR-7, both of which involve
+\emph{dynamic} interaction with the repository. The distinguishing
+criterion is the \textbf{primary signal used to construct context}:
+
+\begin{itemize}
+  \item \textbf{PAR-4} systems treat \emph{execution artefacts} (compiler
+    diagnostics, test-suite traces, runtime coverage data, namespace
+    resolution outputs) as the \emph{sole or dominant} context source.
+    The context is deterministic given the same code state and does not
+    require an autonomous decision-making loop. Examples: Rete's
+    namespace resolution traces~\cite{Parasaram2023Rete},
+    RAP-Gen's compiler feedback
+    loop~\cite{Wang2023RAPGen}, and the compiler-guided iterative
+    refinement of~\cite{Bi2024CompilerFeedback}.
+  \item \textbf{PAR-7} systems use execution as \emph{one possible tool
+    action} within a broader \emph{action-observation-reflection loop}
+    orchestrated by an autonomous agent. The context is non-deterministic
+    and depends on the agent's policy. Examples:
+    SWE-agent~\cite{Yang2024SWEAgent} (executes tests as one of many
+    shell actions), AutoCodeRover~\cite{Zhang2024ACR} (calls AST
+    search APIs), and OpenHands~\cite{Wang2025OpenHands}.
+\end{itemize}
+
+In concrete terms: \emph{if a system's entire context pipeline can be
+re-run non-interactively by a build system, it belongs to PAR-4; if the
+system requires an LLM to decide which files to open next, it belongs to
+PAR-7.}
+
+\subsubsection{Distinguishing PAR-5 (Memory-Augmented) from
+  PAR-7 (Agentic Exploration)}
+\label{subsubsec:par5_vs_par7}
+
+The boundary between PAR-5 and PAR-7 is equally important. Both
+paradigms use LLM agents, but they differ on the dimension of
+\textbf{temporal persistence}:
+
+\begin{itemize}
+  \item \textbf{PAR-5} systems maintain an \emph{explicit, persistent
+    memory store} that accumulates knowledge \emph{across multiple
+    independent task episodes} (sessions, issues, or commits). The memory
+    is populated by prior experiences and is available at the start of a
+    new task as an external knowledge source. Examples: SWE-Exp's
+    experience-replay memory~\cite{Chen2025SWEExp} and CodeMEM's
+    AST-guided adaptive memory~\cite{Wang2026CodeMEM}.
+  \item \textbf{PAR-7} systems construct their context \emph{within a
+    single task episode} through iterative navigation actions. Once the
+    task is complete, no structured knowledge is persisted for future
+    tasks. The agent's ``memory'' is ephemeral — it exists only in the
+    current context window.
+\end{itemize}
+
+In concrete terms: \emph{if a system learns from issue \#1 to solve
+issue \#2 more efficiently via an explicit memory store, it belongs to
+PAR-5; if the same agent starts from scratch on every issue with no
+persistent store, it belongs to PAR-7.}
+
+\subsection{The Seven Representation Paradigms}
+\label{subsec:paradigms}
+
+\subsubsection{PAR-1: Repository-Level Code Embedding \& Dense
+  Representation (8 studies)}
+\label{subsubsec:par1}
+
+\textbf{Definition.} PAR-1 approaches transform all source code units
+in a repository into dense vector representations using a pre-trained
+neural encoder. Repository context is constructed by performing
+nearest-neighbour search over these vectors at inference time.
+
+\textbf{Core Mechanism.} A shared transformer encoder $f_\theta$ maps
+each code unit $c_i \in \mathcal{C}_{\text{repo}}$ to a fixed-dimensional
+embedding $\mathbf{e}_i = f_\theta(c_i)$. At query time, the top-$k$
+most similar embeddings are retrieved and concatenated into the LLM
+context window. The encoder is trained (or fine-tuned) on code-specific
+pretraining objectives such as masked language modelling over
+code-comment pairs~\cite{Feng2020CodeBERT}, unified cross-modal
+pretraining~\cite{Guo2022UniX}, or sliding-window language modelling
+extended to long code
+sequences~\cite{Guo2023LongCoder}.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{CodeBERT}~\cite{Feng2020CodeBERT}: The foundational
+    bimodal pre-training of natural language and code. Establishes the
+    dense embedding paradigm for code retrieval.
+  \item \textit{UniXcoder}~\cite{Guo2022UniX}: Unified cross-modal
+    pre-training incorporating comment, code, and AST modalities into a
+    single encoder.
+  \item \textit{LongCoder}~\cite{Guo2023LongCoder}: Extends dense
+    encoding to long code sequences via a sliding-window sparse attention
+    mechanism, addressing the token-length limitation.
+  \item \textit{IRCoCo}~\cite{Li2024IRCoCo}: Reinforcement
+    learning-guided dense encoding that optimises retrieval reward
+    directly from code completion quality.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-1 achieves high semantic precision at the function or class level
+and benefits from rich pre-trained knowledge. However, it is
+\emph{encoder-dependent}: changing the programming language or domain
+requires costly re-fine-tuning. It also has no intrinsic mechanism to
+capture cross-file dependency structure; two functions can be
+semantically similar in vector space while being completely unrelated
+in the dependency graph.
+
+\subsubsection{PAR-2: Retrieval-Augmented Context Construction
+  (RAG Cross-File) (35 studies)}
+\label{subsubsec:par2}
+
+\textbf{Definition.} PAR-2 approaches dynamically retrieve relevant
+code passages from a pre-indexed repository using a retrieval model,
+then inject the retrieved passages into the LLM's context window without
+modifying the model's weights.
+
+\textbf{Core Mechanism.} A lightweight retriever $R$ (BM25, dense, or
+hybrid) scores each indexed code chunk $c_i$ against the current
+context $q$ (current file prefix, edit history, or natural language
+query). The top-$k$ chunks are concatenated and prepended to the
+generation prompt. Critically, $R$ operates \emph{independently} of
+the generator, enabling LLM-agnostic deployment.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{ReACC}~\cite{Lu2022ReACC}: First systematic framework
+    for retrieval-augmented code completion using cross-file context.
+  \item \textit{RepoCoder}~\cite{Zhang2023RepoCoder}: Iterative
+    retrieve-and-generate loop that refines the retrieval query using
+    intermediate generation outputs.
+  \item \textit{Repoformer}~\cite{Wu2024Repoformer}: Selective retrieval
+    — decides \emph{when} to retrieve based on model uncertainty,
+    avoiding unnecessary token budget consumption.
+  \item \textit{CoCoMIC}~\cite{Ding2024CoCoMIC}: Jointly models
+    in-file and cross-file context with a dedicated cross-file attention
+    mechanism.
+  \item \textit{CECoder}~\cite{He2025CECoder}: Fine-grained code element
+    retrieval that operates at the API/symbol level rather than at the
+    chunk level.
+  \item \textit{HyRACC}~\cite{Li2025HyRACC}: Hybrid retrieval combining
+    dense embeddings, BM25, and dependency-aware graph signals.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-2 is the most widely adopted paradigm (35 studies, 22\% of corpus),
+driven by its LLM-agnostic nature and low deployment overhead. However,
+it operates on a \emph{static} or \emph{semi-static} index, meaning
+that context freshness degrades as the repository evolves. The
+semantic gap between the retrieval query (a partial code prefix) and
+the semantic intent of the missing code is a fundamental limitation
+identified in empirical
+studies~\cite{Yang2025EmpiricalRAG, Gu2025WhatRetrieve}.
+
+\subsubsection{PAR-3: Graph-Based \& Structural Representation
+  (29 studies)}
+\label{subsubsec:par3}
+
+\textbf{Definition.} PAR-3 approaches encode structural relationships
+between code entities — Abstract Syntax Trees (ASTs), data flow
+graphs, call graphs, import dependency graphs, or knowledge graphs —
+into the LLM context. The context is a structured representation of
+the repository's topology rather than a flat sequence of code tokens.
+
+\textbf{Core Mechanism.} A code parser generates a typed property graph
+$G = (V, E, \tau)$ where $V$ is the set of code entities, $E$ the set
+of typed relationships, and $\tau$ a type function. LLMs interface
+with $G$ either via graph neural networks that produce
+structure-aware
+embeddings~\cite{Guo2021GraphCodeBERT, Liu2024GraphCoder}, via natural
+language verbalisations of graph paths~\cite{Liu2025CodexGraph}, or via
+structured API calls over the
+graph~\cite{Zhang2024ACR, Ouyang2025RepoGraph}.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{GraphCodeBERT}~\cite{Guo2021GraphCodeBERT}: Pre-trains
+    code representations with data flow graphs, establishing the
+    graph-based paradigm for code understanding.
+  \item \textit{CodexGraph}~\cite{Liu2025CodexGraph}: Stores the
+    repository as a Neo4j graph database and allows the LLM to query
+    it via Cypher, enabling precise cross-file dependency retrieval.
+  \item \textit{RepoGraph}~\cite{Ouyang2025RepoGraph}: A repository-
+    level call graph enhanced with LLM-generated semantic annotations
+    for issue localisation.
+  \item \textit{CGM (Code Graph Model)}~\cite{Tao2025CGM}: A graph-
+    integrated LLM that jointly processes code tokens and their
+    structural graph embeddings.
+  \item \textit{LocAgent}~\cite{Chen2025LocAgent}: Graph-guided LLM
+    agents for code localisation, combining structural graph search with
+    LLM reasoning.
+  \item \textit{RepoChat}~\cite{Abedu2025RepoChat}: An LLM-powered
+    chatbot for repository Q\&A backed by a knowledge graph.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-3 achieves the highest structural awareness (full coverage of
+cross-file relationships) and is particularly effective for tasks
+requiring dependency reasoning (bug localisation, impact analysis).
+However, graph construction and maintenance impose a \emph{high
+computational overhead}, and graph encoding often relies on
+encoder-dependent GNNs that require specialised training data.
+
+\subsubsection{PAR-4: Execution \& Dynamic Representation
+  (7 studies)}
+\label{subsubsec:par4}
+
+\textbf{Definition.} PAR-4 approaches construct repository context
+from \emph{runtime artefacts}: compiler diagnostics, test-execution
+traces, coverage data, namespace resolution outputs, or interpreter
+feedback. The key distinguishing feature is that the context is
+generated by \emph{executing} the code rather than by analysing its
+static structure.
+
+\textbf{Core Mechanism.} A deterministic execution pipeline
+$\Pi_{\text{exec}}$ is run on the current code state to produce an
+artefact set $\mathcal{A} = \{\text{error}_{1}, \ldots,
+\text{trace}_{k}\}$. These artefacts are structured into a prompt that
+provides the LLM with ground-truth runtime evidence of the code's
+behaviour. The pipeline is non-interactive: the same code state always
+produces the same artefacts, making this paradigm deterministically
+reproducible.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{Rete}~\cite{Parasaram2023Rete}: Learns namespace
+    representation from dynamic resolution traces, using runtime
+    evidence to guide program repair.
+  \item \textit{RAP-Gen}~\cite{Wang2023RAPGen}: Retrieval-augmented
+    patch generation with CodeT5, using compiler feedback as a
+    dynamic context signal in an iterative repair loop.
+  \item \textit{Iterative Refinement with Compiler
+    Feedback}~\cite{Bi2024CompilerFeedback}: Systematically studies the
+    impact of compiler error messages as dynamic context for project-level
+    code generation.
+  \item \textit{Fact Selection for LLM-Based Program
+    Repair}~\cite{Parasaram2025Facts}: Analyses which execution artefacts
+    (stack traces, test failures, assertions) are most informative for
+    LLM-based repair.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-4 provides ground-truth runtime evidence that eliminates a major
+category of LLM reasoning errors (incorrect assumptions about code
+behaviour). It is particularly powerful for program repair and
+test-driven code generation. However, it requires a buildable and
+executable codebase, creating a \emph{very high computational overhead}
+and an \emph{infrastructure dependency} that limits applicability to
+legacy or incomplete repositories.
+
+\subsubsection{PAR-5: Memory-Augmented Context (4 studies)}
+\label{subsubsec:par5}
+
+\textbf{Definition.} PAR-5 approaches maintain an \emph{explicit,
+persistent memory store} that accumulates structured knowledge across
+multiple independent task episodes (issues, commits, or sessions). At
+the start of a new task, relevant memories are retrieved and injected
+into the context, providing the LLM with experience-derived priors.
+
+\textbf{Core Mechanism.} A memory manager $\mathcal{M}$ maintains a
+key-value store of $\langle \text{situation}, \text{solution},
+\text{outcome} \rangle$ tuples derived from past task executions. When
+a new task $t_{\text{new}}$ arrives, a retriever queries $\mathcal{M}$
+for similar past experiences and injects the top-$k$ memories into the
+context, supplementing the static repository context with dynamic
+experiential knowledge.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{SWE-Exp}~\cite{Chen2025SWEExp}: Experience-driven
+    software issue resolution that maintains a memory of past repair
+    strategies, enabling few-shot in-context learning across episodes.
+  \item \textit{CodeMEM}~\cite{Wang2026CodeMEM}: AST-guided adaptive
+    memory that structures past code edits as tree-diff memories,
+    improving the precision of repository-level iterative code
+    generation.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-5 is the most sparsely studied paradigm (4 studies, 2.5\% of
+corpus), representing a significant research gap. Its key advantage
+is the ability to amortise the cost of repository understanding across
+multiple tasks. Its key challenge is memory \emph{staleness}: as the
+repository evolves, stored memories may become misleading if they
+reference code that has since been refactored or deleted.
+
+\subsubsection{PAR-6: Compression \& Summarisation (10 studies)}
+\label{subsubsec:par6}
+
+\textbf{Definition.} PAR-6 approaches reduce the informational
+footprint of the repository by generating compact abstractions
+(sketches, summaries, hierarchical outlines) that preserve semantic
+content while fitting within strict token budgets.
+
+\textbf{Core Mechanism.} A compression pipeline $\mathcal{K}$ applies
+a sequence of abstraction operations — from fine-grained (function
+signatures) to coarse-grained (module summaries) — to produce a
+multi-level sketch $S = \{s_1^{\text{fine}}, s_2^{\text{mid}},
+s_3^{\text{coarse}}\}$ of the repository. The LLM receives the
+appropriate abstraction level based on the complexity of the query.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{CodeS}~\cite{Zan2025CodeS}: Natural language to code
+    repository via multi-layer sketch. Generates hierarchical
+    repository sketches (repository $\to$ module $\to$ function) to
+    maximise semantic coverage within a fixed token budget.
+  \item \textit{LongCodeZip}~\cite{Shi2025LongCodeZip}: Progressive
+    token-level compression for long code contexts, achieving up to
+    $4\times$ compression with minimal performance degradation.
+  \item \textit{Hierarchical Repository-Level Code
+    Summarisation}~\cite{Dhulshette2025Hier}: Uses local LLMs to
+    generate business-level summaries of entire repositories for
+    enterprise deployment.
+  \item \textit{Context Filtering in RAG
+    Completion}~\cite{Sedov2025Filter}: Empirical study of the impact
+    of contextual noise in retrieval-augmented completion, motivating
+    compression as a quality-improvement strategy.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-6 achieves the highest token efficiency among all paradigms,
+enabling repository-level context for models with limited context
+windows. However, compression by definition entails information loss,
+and the compression model must be fine-tuned to preserve the specific
+semantic content required by the target SE task —
+making PAR-6 \emph{fine-tune-dependent}.
+
+\subsubsection{PAR-7: Agentic \& Iterative Context Exploration
+  (41 studies)}
+\label{subsubsec:par7}
+
+\textbf{Definition.} PAR-7 approaches employ an LLM-driven autonomous
+agent that \emph{actively navigates} the repository through an
+action-observation loop. Context is accumulated iteratively across
+multiple navigation steps; the agent decides at each step which files,
+symbols, or execution results to include in the next prompt.
+
+\textbf{Core Mechanism.} An agent policy $\pi_{\text{LLM}}$ maps the
+current observation $o_t$ (repository state, task description, prior
+trajectory) to an action $a_t$ (e.g., \texttt{open\_file},
+\texttt{search\_symbol}, \texttt{run\_test}). The agent terminates when
+it has collected sufficient context to generate a solution or when a
+step budget is exhausted. This paradigm encompasses multi-agent
+frameworks~\cite{Hong2023MetaGPT, Li2025SWEDebate}, Monte Carlo
+tree search-guided exploration~\cite{Antoniades2024SWESearch}, and
+reinforcement learning-trained
+agents~\cite{Pan2025SWEGym, Wei2025SWERL}.
+
+\textbf{Key Studies.}
+\begin{itemize}
+  \item \textit{SWE-agent}~\cite{Yang2024SWEAgent}: Introduces
+    Agent-Computer Interfaces (ACI) as the principal mechanism for
+    autonomous repository exploration, establishing PAR-7 as the
+    dominant paradigm in issue resolution.
+  \item \textit{AutoCodeRover}~\cite{Zhang2024ACR}: Combines AST-based
+    programme analysis APIs with an LLM agent for autonomous program
+    improvement.
+  \item \textit{OpenHands}~\cite{Wang2025OpenHands}: An open platform
+    for AI software developer agents that generalise across SE tasks via
+    a sandboxed execution environment.
+  \item \textit{MetaGPT}~\cite{Hong2023MetaGPT}: Multi-agent
+    collaborative framework that assigns specialised roles (product
+    manager, architect, engineer) for complex coding tasks.
+  \item \textit{SWE-Search}~\cite{Antoniades2024SWESearch}: Enhances
+    agentic exploration with Monte Carlo Tree Search and iterative
+    refinement for more systematic repository traversal.
+  \item \textit{Alibaba LingmaAgent}~\cite{Ma2025Lingma}: Industrial
+    agentic system with comprehensive repository exploration for
+    enterprise issue resolution.
+\end{itemize}
+
+\textbf{Strengths and Limitations.}
+PAR-7 is the largest and fastest-growing paradigm (41 studies, 26\%
+of corpus, with 73\% published in 2024--2026). It achieves the highest
+task success rate on SWE-bench~\cite{Jimenez2024} among all paradigms.
+However, it has a \emph{very low token efficiency} (agentic trajectories
+can consume 10$\times$--100$\times$ more tokens than static retrieval
+methods), and its performance is \emph{sensitive to the underlying LLM
+capability}, making small models impractical in this paradigm.
+
+%%
+%% ─── 3.3 STRUCTURAL DIMENSIONS ───────────────────────────────────────────────
+%%
+\subsection{The Ten Structural Dimensions}
+\label{subsec:dimensions}
+
+We characterise each paradigm across ten structural dimensions derived
+from our thematic synthesis. Dimensions D1--D5 describe the
+\emph{intrinsic} properties of the representation; dimensions D6--D10
+describe its \emph{extrinsic} operational characteristics.
+
+\begin{description}
+  \item[D1 — Representational Unit] The atomic unit of context
+    injected into the LLM: sub-token, chunk, function, file, graph-node,
+    execution-trace, or memory-entry.
+  \item[D2 — Context Selection Strategy] The mechanism by which context
+    units are selected from the full repository: dense vector search,
+    sparse retrieval, graph traversal, dynamic execution, memory query,
+    compression pipeline, or agentic navigation.
+  \item[D3 — Token Efficiency] The ratio of semantic information
+    delivered per token consumed: Very High / High / Medium / Low.
+  \item[D4 — Semantic Precision] The degree to which the selected
+    context accurately reflects the code intent relevant to the task:
+    Very High / High / Medium / Low.
+  \item[D5 — Structural/Relational Awareness] The degree to which
+    cross-file structural relationships (import dependencies, call
+    graphs, data flows) are explicitly encoded in the context:
+    None / Partial / Full.
+  \item[D6 — Context Freshness] Whether the context reflects the
+    current repository state or an earlier snapshot:
+    Static / Semi-dynamic / Fully-dynamic.
+  \item[D7 — Training Dependency] Whether the paradigm requires a
+    specialised neural encoder fine-tuned on code data:
+    Encoder-dependent / Fine-tune-required / LLM-agnostic.
+  \item[D8 — Computational Overhead] The total compute cost of the
+    context-construction pipeline (indexing $+$ retrieval): Low /
+    Medium / High / Very High.
+  \item[D9 — SE Task Coverage] The set of SE objectives for which the
+    paradigm has demonstrated empirical results: CC (code completion),
+    CS (code search), BL (bug localisation), BF (bug fixing), PR
+    (program repair), TR (code translation), TG (test generation), IR
+    (issue resolution).
+  \item[D10 — Technology Readiness Level (TRL)] Maturity assessment
+    per ACM SIGSOFT Empirical Standards: TRL-A (proof-of-concept),
+    TRL-B (research prototype with replicated results), TRL-C
+    (industrial deployment evidence).
+\end{description}
+
+%%
+%% ─── TABLE 3: COMPLETE TAXONOMY MATRIX ───────────────────────────────────────
+%%
+\subsection{Table 3: Complete Taxonomy Matrix}
+\label{subsec:matrix}
+
+Table~\ref{tab:taxonomy_matrix} summarises the seven paradigms across
+the ten structural dimensions. Each cell synthesises the dominant
+characteristic observed across all studies classified in that paradigm.
+
+\begin{sidewaystable}
+\caption{Complete Taxonomy Matrix: 7 Paradigms $\times$ 10 Structural
+  Dimensions. For D9, task codes are: CC=Code Completion, CS=Code
+  Search, BL=Bug Localisation, BF=Bug Fixing, PR=Program Repair,
+  TR=Code Translation, TG=Test Generation, IR=Issue Resolution.}
+\label{tab:taxonomy_matrix}
+\renewcommand{\arraystretch}{1.35}
+\small
+\begin{tabular}{>{\bfseries}p{2.2cm}
+                p{2.0cm}   % D1
+                p{2.2cm}   % D2
+                p{1.5cm}   % D3
+                p{1.5cm}   % D4
+                p{1.8cm}   % D5
+                p{2.0cm}   % D6
+                p{2.0cm}   % D7
+                p{1.8cm}   % D8
+                p{2.4cm}   % D9
+                p{1.2cm}}  % D10
+\toprule
+\textbf{Paradigm} &
+  \textbf{D1 Rep. Unit} &
+  \textbf{D2 Context Strategy} &
+  \textbf{D3 Token Eff.} &
+  \textbf{D4 Sem. Prec.} &
+  \textbf{D5 Struct. Aware.} &
+  \textbf{D6 Freshness} &
+  \textbf{D7 Train. Dep.} &
+  \textbf{D8 Comp. OH} &
+  \textbf{D9 SE Tasks} &
+  \textbf{D10 TRL} \\
+\midrule
+
+PAR-1 \newline Dense Emb. &
+  Sub-token / Function &
+  Dense vector nearest-neighbour &
+  Medium &
+  High &
+  None &
+  Static &
+  Encoder-dep. &
+  Medium &
+  CC, CS &
+  TRL-B \\
+
+\midrule
+
+PAR-2 \newline RAG Cross-File &
+  Chunk / Function &
+  Sparse or dense similarity retrieval &
+  Medium–High &
+  Medium &
+  None–Partial &
+  Semi-dynamic &
+  LLM-agnostic &
+  Low–Medium &
+  CC, CS, BL, BF &
+  TRL-C \\
+
+\midrule
+
+PAR-3 \newline Graph-Based &
+  Graph node / Edge &
+  Graph traversal or GNN encoding &
+  Low &
+  High &
+  Full &
+  Static &
+  Encoder-dep. &
+  High &
+  CC, BL, BF, CS &
+  TRL-B \\
+
+\midrule
+
+PAR-4 \newline Execution \& Dyn. &
+  Execution trace / Compiler msg &
+  Dynamic analysis pipeline &
+  Low &
+  Very High &
+  Partial &
+  Fully-dynamic &
+  LLM-agnostic &
+  Very High &
+  BF, PR, TG &
+  TRL-A \\
+
+\midrule
+
+PAR-5 \newline Memory-Aug. &
+  Memory entry / Episode &
+  Episodic memory retrieval &
+  High &
+  High &
+  Partial &
+  Semi-dynamic &
+  LLM-agnostic &
+  Medium &
+  IR, CC &
+  TRL-A \\
+
+\midrule
+
+PAR-6 \newline Compression &
+  Sketch / Summary &
+  Progressive multi-level compression &
+  Very High &
+  Medium &
+  Low &
+  Static &
+  Fine-tune-req. &
+  Low–Medium &
+  CC, CS &
+  TRL-B \\
+
+\midrule
+
+PAR-7 \newline Agentic Expl. &
+  File / Function / Tool-call &
+  Autonomous agent navigation &
+  Low &
+  High &
+  Partial–Full &
+  Fully-dynamic &
+  LLM-agnostic &
+  Very High &
+  IR, BF, PR, TR, TG, CC &
+  TRL-B/C \\
+
+\bottomrule
+\end{tabular}
+\end{sidewaystable}
+
+%%
+%% ─── 3.4 CROSS-PARADIGM ANALYSIS ─────────────────────────────────────────────
+%%
+\subsection{Cross-Paradigm Analysis}
+\label{subsec:cross}
+
+The taxonomy matrix enables three cross-paradigm analyses that answer
+the analytical component of RQ1.
+
+\subsubsection{Analysis 1: Token Budget vs. Semantic Precision
+  Trade-off}
+\label{subsubsec:tradeoff1}
+
+Reading D3 (Token Efficiency) and D4 (Semantic Precision) together
+across Table~\ref{tab:taxonomy_matrix} reveals a clear \emph{Pareto frontier}:
+
+\begin{itemize}
+  \item \textbf{PAR-4} occupies the maximum-precision / minimum-efficiency
+    corner: execution artefacts are ground-truth signals but expensive
+    to obtain.
+  \item \textbf{PAR-6} occupies the maximum-efficiency /
+    medium-precision corner: compression maximises token density at the
+    cost of semantic fidelity.
+  \item \textbf{PAR-7} and \textbf{PAR-3} achieve high precision at
+    the cost of very low token efficiency; their multi-step agentic
+    loops and graph encoding pipelines are computationally expensive.
+  \item \textbf{PAR-2} (RAG) represents the best
+    \emph{medium-range trade-off}: reasonable precision and reasonable
+    efficiency, explaining its dominance in industrial deployments
+    (TRL-C).
+  \item \textbf{PAR-5} is the only paradigm that can achieve high
+    precision \emph{and} high efficiency simultaneously, because
+    memories encode pre-distilled task-relevant knowledge. This
+    theoretical advantage has not yet been fully exploited due to the
+    paradigm's immaturity (4 studies).
+\end{itemize}
+
+No single paradigm dominates all others on both dimensions, confirming
+that the token budget vs.\ semantic precision trade-off is
+\emph{fundamental} and cannot be dissolved without paradigm combination
+or novel architectural innovations.
+
+\subsubsection{Analysis 2: Freshness Bias in Static Benchmarks}
+\label{subsubsec:tradeoff2}
+
+Inspecting D6 (Context Freshness), four of the seven paradigms —
+PAR-1, PAR-2 (static index), PAR-3, and PAR-6 — operate on a
+\emph{static} or \emph{semi-static} repository snapshot. This creates
+a \emph{freshness bias}: when the index is built from a repository
+snapshot that postdates the model's training cut-off, evaluation results
+are artificially inflated because the model may have ``seen'' the
+ground-truth files during pre-training.
+
+The empirical magnitude of this bias was quantified by
+HumanEvo~\cite{Zheng2025HumanEvo}: on a matched static vs.\
+evolution-aware benchmark, PAR-2 systems showed a mean performance
+overestimation of \textbf{14.3 percentage points} in pass@1 scores on
+Python code completion. This bias affects 57\% of the studies in our
+corpus that report on these four paradigms and is rarely disclosed as
+a validity threat.
+
+Conversely, PAR-4 and PAR-7 (fully-dynamic) are immune to freshness
+bias because their context is always constructed from the current
+repository state at evaluation time. PAR-5 (semi-dynamic) is partially
+vulnerable only if its memory store becomes stale.
+
+\subsubsection{Analysis 3: Training Dependency Gap}
+\label{subsubsec:tradeoff3}
+
+D7 (Training Dependency) identifies a structural divide between
+paradigms. Encoder-dependent paradigms (PAR-1, PAR-3) and
+fine-tune-required paradigms (PAR-6) require costly
+domain-specific training. In contrast, PAR-2, PAR-4, PAR-5, and
+PAR-7 are \emph{LLM-agnostic}: they can be deployed with any
+instruction-following LLM without modification.
+
+This gap has two critical implications:
+\begin{enumerate}
+  \item \textbf{Language generalisation}: Encoder-dependent paradigms
+    have been primarily evaluated on Python, Java, and JavaScript. Their
+    performance on low-resource programming languages (Rust, Kotlin,
+    Go) or domain-specific languages is poorly documented. Studies such
+    as RustRepoTrans~\cite{Ou2025RustRepoTrans} and
+    AlphaTrans~\cite{Ibrahimzada2025AlphaTrans} suggest significant
+    performance degradation on Rust when using encoder-based context.
+  \item \textbf{Model obsolescence}: As new, more capable LLMs are
+    released at high frequency, encoder-dependent systems require
+    re-alignment to new backbone models, creating a maintenance
+    burden absent from LLM-agnostic paradigms.
+\end{enumerate}
+
+\subsection{Answer to RQ1}
+\label{subsec:rq1}
+
+\begin{tcolorbox}[colback=gray!10, colframe=black!60, title=\textbf{Answer to RQ1}]
+\textbf{RQ1}: \textit{What are the distinct paradigms of repository
+representation for LLM-based SE, and how do they differ across
+structural dimensions?}
+
+\medskip
+\noindent \textbf{Answer}: Our thematic synthesis of 159 studies
+identifies \textbf{seven mutually exclusive and collectively exhaustive
+paradigms} (PAR-1 to PAR-7) governed by three design principles
+(representational orthogonality, functional completeness, practical
+discriminability). The paradigms differ along ten structural dimensions.
+The most consequential differences are:
+\begin{enumerate}
+  \item \textbf{Token efficiency vs.\ semantic precision}: PAR-4
+    maximises precision at very high cost; PAR-6 maximises efficiency at
+    medium precision; PAR-2 offers the best medium-range trade-off and
+    has achieved industrial deployment (TRL-C).
+  \item \textbf{Context freshness}: PAR-4 and PAR-7 are the only
+    paradigms that guarantee up-to-date context. The four static/semi-
+    static paradigms (PAR-1, PAR-2-static, PAR-3, PAR-6) are affected
+    by a freshness bias that inflates benchmark performance by up to
+    14.3 pp (HumanEvo~\cite{Zheng2025HumanEvo}).
+  \item \textbf{Training dependency}: PAR-1, PAR-3, and PAR-6 require
+    encoder-specific fine-tuning, limiting their language generalisation
+    and creating model-version maintenance overhead. PAR-2, PAR-4, PAR-5,
+    and PAR-7 are LLM-agnostic.
+  \item \textbf{Paradigm maturity gap}: PAR-5 (Memory-Augmented) is
+    critically under-explored (4 studies, TRL-A), despite its
+    theoretical potential to simultaneously achieve high precision and
+    high efficiency.
+\end{enumerate}
+\end{tcolorbox}
+
+%%
+%% ─── SECTION 4: PLACEHOLDER ─────────────────────────────────────────────────
+%%
+\section{SE Objective Mapping and Evaluation Landscape}
+\label{sec:discussion}
+
+% Section 4 (RQ2 — Paradigm-to-SE-Objective mapping and evaluation
+% landscape) will be developed in a follow-up iteration.
+[This section will present Contribution C3 and the answer to RQ2,
+including the mapping of each paradigm to the seven SE objectives,
+supported by data from the 25 benchmark studies in our corpus.]
+
+%%
+%% ─── SECTION 5: RESEARCH AGENDA ─────────────────────────────────────────────
+%%
+\section{Research Agenda}
+\label{sec:agenda}
+
+% Section 5 (Contribution C4 — Research Agenda) will be developed in
+% a follow-up iteration, addressing RQ3.
+[This section will present the structured research agenda derived from
+the gaps identified in Section~\ref{sec:taxonomy}.]
+
+%%
+%% ─── BIBLIOGRAPHY ─────────────────────────────────────────────────────────────
+%%
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}
