@@ -1,0 +1,487 @@
+% =============================================================================
+% SECTION 3: TAXONOMY OF REPOSITORY REPRESENTATION PARADIGMS
+% =============================================================================
+\section{A Taxonomy of Repository Representation Paradigms}
+\label{sec:taxonomy}
+
+From thematic synthesis of 160 primary studies, we identified seven distinct
+\emph{Repository Representation Paradigms} (PARs). Each paradigm defines a coherent philosophy
+for encoding repository content that is then made available to an LLM for inference. The
+seven paradigms are not mutually exclusive: many recent systems combine two or more paradigms
+(a phenomenon we call \emph{hybridization}, discussed in Section~\ref{subsec:hybrid}). Our
+classification assigns each study a \emph{primary} PAR based on the paradigm that plays the
+most structurally central role in the system, and records any secondary PARs.
+
+Table~\ref{tab:taxonomy-overview} provides a high-level overview of the taxonomy.
+
+\begin{table*}[ht]
+\caption{Overview of the seven Repository Representation Paradigms (PARs).}
+\label{tab:taxonomy-overview}
+\small
+\begin{tabular}{llp{4.5cm}p{3cm}r}
+\toprule
+\textbf{ID} & \textbf{Paradigm} & \textbf{Core mechanism} & \textbf{Key examples} & \textbf{\# studies} \\
+\midrule
+\parcmd{1} & Dense Embeddings      & Encode files/snippets as dense vectors; search by cosine similarity & CodeBERT, GraphCodeBERT & 22 \\
+\parcmd{2} & RAG                   & Retrieve top-$k$ chunks at inference; inject into prompt & RepoCoder, ReACC, RepoHyper & 48 \\
+\parcmd{3} & Graph-based           & Model repo as call/dep/control-flow graph; GNN or graph-RAG query & GraphCoder, CodexGraph, RepoGraph & 31 \\
+\parcmd{4} & Dynamic/Execution     & Execute code, use runtime traces, compiler feedback & IRCoCo, RepairAgent, SWE-RL & 14 \\
+\parcmd{5} & Summarization         & Hierarchical NL summaries replace raw code in context & LingmaAgent, Hierarchical Summ. & 18 \\
+\parcmd{6} & Memory-augmented      & External memory stores past observations, retrieved on demand & SWE-GPT, OpenHands, CodeMEM & 12 \\
+\parcmd{7} & Agentic Multi-step    & Autonomous agents navigate repo via tool use and iteration & SWE-agent, AutoCodeRover, LingmaAgent & 15 \\
+\midrule
+\multicolumn{4}{r}{\textit{Total}} & 160 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{\parcmd{1}: Dense Token Embeddings}
+\label{subsec:par1}
+
+\paragraph{Definition and Rationale.}
+The dense embedding paradigm encodes repository content---at various granularities including
+token, statement, function, class, and file levels---into fixed-dimensional real-valued vectors
+using a pre-trained encoder. Similarity search in the embedding space then identifies the
+repository fragments most semantically related to a query (typically the incomplete code context
+or a natural language description). This paradigm was the dominant approach in the period
+2020--2022, coinciding with the rise of BERT-style pre-trained models for code.
+
+\paragraph{Technical Mechanisms.}
+The foundational models for this paradigm are CodeBERT~\cite{feng2020codebert},
+GraphCodeBERT~\cite{guo2021graphcodebert}, and UniXcoder~\cite{guo2022unixcoder}.
+CodeBERT is a bimodal Transformer pre-trained on six programming languages using two objectives:
+masked language modeling (MLM) on code tokens and replaced token detection on code--comment
+pairs. GraphCodeBERT extends this by incorporating data flow graphs into the pre-training
+objective, enabling the model to capture semantic relationships between variables across
+function boundaries. UniXcoder unifies encoder and decoder functionalities, enabling both
+retrieval (via encoder representations) and generation (via auto-regressive decoding).
+
+The operational pipeline in \parcmd{1} systems consists of three stages: (1) offline
+\emph{indexing}, in which all functions or files in the repository are encoded and stored in a
+vector database such as FAISS or Milvus; (2) online \emph{retrieval}, in which the query is
+encoded and the $k$ nearest vectors are retrieved; and (3) \emph{context assembly}, in which
+the retrieved source fragments are concatenated with the query and passed to the generation
+model. The generation model may be the same encoder-decoder used for retrieval
+(as in UniXcoder-based systems) or a separate auto-regressive LLM.
+
+Several works in this paradigm focus on improving the quality of code embeddings through
+contrastive learning. Fan et al.~\cite{fan2025effective} propose hard negative mining
+strategies that significantly improve the discriminability of function-level embeddings for
+code search tasks. Li et al.~\cite{li2025mgs3} propose a multi-granularity self-supervised
+framework that generates embeddings at function, class, and file levels simultaneously, enabling
+multi-scale retrieval. Gu et al.~\cite{gu2025secret} address the scalability bottleneck of
+dense retrieval by introducing segmented deep hashing, which enables sub-linear retrieval over
+repositories with millions of functions.
+
+\paragraph{Strengths and Limitations.}
+The primary strength of \parcmd{1} is its query-time efficiency: once the index is built,
+retrieval is a matter of one forward pass through the query encoder followed by an
+approximate nearest-neighbor search, typically completing in under 100 milliseconds even for
+large repositories. This makes dense embedding highly suitable for interactive IDE integration
+where latency is a hard constraint.
+
+The primary limitation of \parcmd{1} is its dependence on \emph{semantic alignment} between
+the pre-training distribution and the target repository. Specialized domains (e.g., embedded
+systems firmware, domain-specific languages, internal frameworks with idiosyncratic naming
+conventions) can fall outside the distribution of publicly available pre-training corpora,
+leading to poor retrieval quality. Moreover, dense embeddings are inherently lossy: they
+compress a code fragment of potentially thousands of tokens into a 768- or 1536-dimensional
+vector, inevitably discarding structural information that may be critical for tasks such as
+type checking or cross-module dependency resolution.
+
+\paragraph{Representative Works.}
+CodeBERT~\cite{feng2020codebert} and GraphCodeBERT~\cite{guo2021graphcodebert} establish the
+foundational models. CoSrch~\cite{xu2025cosrch} enriches embeddings with syntactic AST paths
+and semantic data-flow annotations. MGS3~\cite{li2025mgs3} introduces multi-granularity
+self-supervision. SECRET~\cite{gu2025secret} addresses scalability via hashing. The WeChat
+deployment study~\cite{yang2025deepdive} provides a real-world evaluation of dense retrieval
+at industrial scale, reporting experiments on a codebase of 40 million lines of code.
+
+\subsection{\parcmd{2}: Retrieval-Augmented Generation (RAG)}
+\label{subsec:par2}
+
+\paragraph{Definition and Rationale.}
+The RAG paradigm combines a retrieval component---which may use dense embeddings, sparse
+BM25-style indexing, or structured program analysis---with a generative LLM that conditions
+its output on both the task input and the retrieved context. Unlike pure \parcmd{1}, which
+focuses on encoding quality, RAG is concerned with the \emph{integration} of retrieved context
+into the generation process. RAG is currently the most prevalent paradigm in the corpus (48 of
+160 studies), reflecting its practical maturity and the availability of off-the-shelf frameworks.
+
+\paragraph{Technical Mechanisms.}
+The canonical RAG pipeline for repository-level software engineering, introduced by
+ReACC~\cite{lu2022reacc} and refined by RepoCoder~\cite{zhang2023repocoder}, operates as
+follows. Given an incomplete code snippet $s$ at cursor position $p$, a retriever $R$ selects
+the $k$ most relevant code chunks $\{c_1, \ldots, c_k\}$ from the repository index. A prompt
+$\pi$ is constructed by concatenating the retrieved chunks with $s$ (and, in more recent
+systems, a natural language instruction). The prompt $\pi$ is fed to the generative LLM $G$,
+which produces a completion $\hat{s}$. More recent systems iterate this process (RepoCoder uses
+up to 3 iterations), using the partial completion from round $t$ as the query in round $t+1$.
+
+A key design dimension within PAR-2 is the granularity of retrieved units. Fine-grained
+retrieval (individual statements or blocks) maximizes precision but risks retrieving decontextualized
+fragments. Coarse-grained retrieval (entire files or classes) preserves context but wastes
+context window capacity. Several works address this trade-off explicitly. Rahman and
+Rahman~\cite{rahman2025relative} propose relative positioning-based chunking that dynamically
+adjusts chunk boundaries based on code structure. Shen et al.~\cite{shen2025repository}
+introduce adaptive segmentation that uses AST node boundaries to produce semantically coherent
+chunks. Sedov et al.~\cite{sedov2025importance} demonstrate that aggressive context
+filtering---retaining only the top 30\% of retrieved tokens by relevance score---can match
+or exceed the performance of using all retrieved context while reducing inference cost by 40\%.
+
+Another key dimension is the retrieval mechanism. BM25-based sparse retrieval dominates in
+production systems due to its simplicity and determinism, but dense retrieval consistently
+outperforms it on semantic similarity benchmarks. Several works propose hybrid retrieval that
+combines both: Tan et al.~\cite{tan2025prompt} introduce multi-retrieval RAG that aggregates
+results from BM25, dense, and dataflow-based retrievers using a learned fusion layer.
+HyRACC~\cite{li2025hyracc} uses a lightweight router that selects between sparse and dense
+retrieval based on the structural properties of the query context.
+
+The dataflow-guided retrieval approach of Cheng et al.~\cite{cheng2024dataflow} takes a
+different angle: rather than using similarity-based retrieval, it follows data flow edges in
+the program to identify the code segments that define or use the variables in scope at the
+cursor. This structured retrieval approach achieves state-of-the-art results on
+CrossCodeEval~\cite{ding2023crosscodeeval} and RepoBench~\cite{liu2024repobench} with
+significantly lower false-positive rates than embedding-based retrieval.
+
+\paragraph{Fine-Tuning vs.\ Inference-Only RAG.}
+A notable split within \parcmd{2} is between systems that use RAG at inference time with a
+frozen LLM, and systems that fine-tune the LLM to better exploit retrieved context.
+FT2Ra~\cite{guo2024ft2ra} demonstrates that even a small number of fine-tuning examples that
+explicitly teach the model to use retrieved context can yield substantial performance gains over
+inference-only RAG. Wang et al.~\cite{wang2025ragvsft} conduct a head-to-head comparison of
+RAG versus fine-tuning on industrial code completion tasks, finding that RAG is more
+cost-effective for adaptation to new repositories while fine-tuning provides a higher ceiling
+when training data is abundant.
+
+\paragraph{Repository-Level Prompt Construction.}
+Shrivastava et al.~\cite{shrivastava2023repolevel} were among the first to formalize the
+prompt construction problem for repository-level code completion, proposing ``repo prompts''
+that concatenate relevant file headers, import statements, and similar functions. Subsequent
+work by He et al.~\cite{he2025cecoder} refines this with fine-grained code element retrieval
+that prioritizes type signatures, docstrings, and function contracts over raw implementation.
+CATCODER~\cite{pan2025catcoder} extends the context to include type definitions from
+dependency libraries, addressing the challenge of third-party API completion.
+
+\paragraph{Strengths and Limitations.}
+\parcmd{2}'s primary strength is its modularity: retrieval and generation components can be
+independently upgraded. When a more capable LLM becomes available, the retrieval component
+does not need to be retrained. Similarly, when the repository changes, only the index needs
+to be updated. This makes RAG highly amenable to production deployment in continuously evolving
+codebases.
+
+The primary limitation is the \emph{retrieval bottleneck}: the system's performance is bounded
+by the recall of the retriever, and there is no mechanism within the RAG pipeline itself to
+recover information that the retriever fails to retrieve. Several studies report that the
+oracle upper bound---performance when the ground-truth relevant fragments are directly
+injected---substantially exceeds the performance of the best automated retrievers, indicating
+that retrieval quality remains a significant unsolved problem.
+
+\subsection{\parcmd{3}: Graph-Based Structural Representations}
+\label{subsec:par3}
+
+\paragraph{Definition and Rationale.}
+Graph-based paradigms represent the repository as one or more explicit graphs whose nodes
+correspond to code entities (files, classes, functions, variables, API endpoints) and whose
+edges correspond to structural relationships (call, import, data flow, control flow, type
+hierarchy, co-change). The graph structure is then used to guide retrieval, to augment the
+LLM's context with structural signals, or to serve as a persistent external memory that
+agents can query.
+
+\paragraph{Technical Mechanisms.}
+The range of graph types employed in the literature is broad. \emph{Call graphs} capture which
+functions invoke which other functions, enabling identification of the ripple effects of a
+change. \emph{Import/dependency graphs} capture which modules depend on which other modules,
+supporting impact analysis and translation tasks. \emph{Abstract syntax trees (ASTs)} encode
+the syntactic structure of each source file. \emph{Program dependence graphs (PDGs)} encode
+both control and data dependencies within and across functions, supporting precise bug
+localization and repair. \emph{Knowledge graphs} encode higher-level semantic relationships
+between code entities and domain concepts.
+
+GraphCoder~\cite{liu2024graphcoder} introduced a coarse-to-fine retrieval pipeline in which
+a code context graph (combining control flow and data flow) is first traversed to identify
+candidate subgraphs, which are then ranked by semantic similarity. This two-stage approach
+achieves substantial improvements over pure vector-similarity retrieval on repository-level
+code completion. RepoHyper~\cite{phan2025repohyper} constructs a heterogeneous graph
+combining call relationships, import relationships, and semantic similarity edges, and
+implements a search-expand-refine algorithm that starts from the query node and iteratively
+expands the neighborhood until a sufficient context budget is reached.
+
+CodexGraph~\cite{liu2025codexgraph} takes a database-centric approach, storing the code
+graph in a graph database (Neo4j) and enabling LLM agents to issue Cypher queries to retrieve
+subgraphs on demand. This approach has the advantage that the graph is persistent and can be
+incrementally updated as the repository evolves. AskGraph~\cite{yang2025askgraph} extends this
+with LLM-generated Cypher queries that translate natural language questions about code
+structure into structured graph queries. RepoGraph~\cite{ouyang2025repograph} applies a
+similar philosophy to software engineering agents, providing a graph-based ``brain'' that
+agents query to navigate repository structure.
+
+For bug localization and issue resolution, graph-based approaches have proven particularly
+effective. LocAgent~\cite{chen2025locagent} constructs a file-level dependency graph and uses
+it to guide the traversal order of a LLM agent investigating a bug report. AgentFL~\cite{qin2025agentfl}
+combines call graph traversal with LLM-based relevance scoring to localize bugs to function
+level in large repositories. Jiang et al.~\cite{jiang2025issue} implement iterative code graph
+searching where the LLM proposes candidate code locations, the graph is traversed from those
+candidates, and the LLM re-evaluates based on the neighborhood context.
+
+\paragraph{Knowledge Graph Integration.}
+Several works bridge code graphs with external knowledge sources. Abedu et
+al.~\cite{abedu2026synergizing} connect a code property graph with a domain knowledge graph
+containing library documentation and Stack Overflow posts, enabling question-answering that
+draws on both structural code relationships and external domain knowledge. Athale and
+Vaddina~\cite{athale2025knowledgegraph} construct a knowledge graph of API relationships and
+use it to enhance code generation prompts with type-consistent API suggestions.
+
+\paragraph{Strengths and Limitations.}
+Graph-based representations offer the richest structural fidelity of any paradigm: they can
+capture relationships that are invisible to text-based retrieval, such as transitive call
+dependencies, co-change coupling, and type inheritance hierarchies. For tasks requiring precise
+understanding of inter-module relationships---impact analysis, refactoring, cross-module test
+generation---graph-based representations generally outperform pure \parcmd{2} approaches.
+
+The primary limitations are indexing cost and dynamic update complexity. Building a complete
+call graph for a large repository requires running a whole-program analysis, which can take
+minutes or hours for projects with hundreds of thousands of lines of code. More problematically,
+the graph must be incrementally updated as developers modify the repository; maintaining graph
+consistency under concurrent edits is a significant engineering challenge. Another limitation
+is that graph traversal algorithms require design choices (traversal depth, edge type weights,
+neighborhood size) that are currently tuned heuristically rather than learned end-to-end.
+
+\subsection{\parcmd{4}: Dynamic and Execution-Based Context}
+\label{subsec:par4}
+
+\paragraph{Definition and Rationale.}
+Dynamic paradigms augment static repository representations with information derived from
+executing the code: test results, runtime traces, compiler error messages, type checker
+output, and linter warnings. The key insight is that the behavior of code at runtime reveals
+information that is invisible in the source code alone---in particular, which code paths are
+actually exercised, which variables take which values, and which assertions fail. This
+execution feedback can dramatically improve the LLM's ability to diagnose bugs, verify patches,
+and synthesize correct code.
+
+\paragraph{Technical Mechanisms.}
+IRCoCo~\cite{li2024ircoco} trains a code completion model using reinforcement learning where
+rewards are derived from immediate feedback signals including compiler acceptance, test passing,
+and code similarity to the ground truth. This immediate reward signal provides a training
+objective that is much more aligned with the ultimate goal of generating correct code than
+cross-entropy loss on next-token prediction.
+
+Bi et al.~\cite{bi2024iterative} take a refinement-based approach: a draft completion is
+generated, compiled, and the compiler's error messages are fed back to the LLM as additional
+context for a second generation attempt. This iterative compilation feedback loop is shown
+to dramatically reduce syntax and type errors in repository-level code generation, particularly
+for statically typed languages such as Java and TypeScript.
+
+RepairAgent~\cite{bouzenia2025repairagent} extends the execution feedback loop to program
+repair: the agent iteratively applies patches, executes the test suite, analyzes failing test
+outputs, and uses the execution trace to hypothesize the root cause. The execution trace serves
+as a precise, ground-truth signal of what the code does rather than what it appears to do.
+SWE-RL~\cite{wei2025swerl} trains a policy model using reinforcement learning where the reward
+is determined by whether the proposed patch causes the test suite to pass; this reward signal
+provides a direct optimization target for the end-to-end issue resolution task.
+
+For test generation, dynamic feedback is particularly valuable. CoverUp~\cite{altmayer2025coverup}
+uses coverage-guided test generation in which the LLM repeatedly generates tests, measures
+coverage, identifies uncovered branches, and targets them with new tests. LSPRAG~\cite{go2025lsprag}
+uses the Language Server Protocol (LSP) to obtain IDE-quality static analysis results (type
+information, symbol resolution, call hierarchies) that are traditionally available only to
+integrated development environment plugins. SAINT~\cite{pan2025saint} combines static program
+analysis with dynamic execution to generate integration tests that exercise inter-service
+boundaries.
+
+\paragraph{Strengths and Limitations.}
+The primary strength of \parcmd{4} is that it closes the feedback loop between generation and
+verification: the model can learn from its mistakes immediately, producing corrections that are
+provably consistent with the test suite. This makes dynamic paradigms particularly powerful
+for correctness-critical tasks such as bug repair and test generation.
+
+The primary limitation is computational cost and latency: executing a test suite after each
+generation step can take seconds to minutes, making \parcmd{4} unsuitable for interactive IDE
+applications where responses must arrive in under a second. Additionally, the feedback signal
+is only as good as the test suite: a repository with poor test coverage provides weak feedback,
+and a model that learns to game the test suite (by making tests pass without actually fixing
+the bug) can produce misleading results.
+
+\subsection{\parcmd{5}: Summarization and Compression}
+\label{subsec:par5}
+
+\paragraph{Definition and Rationale.}
+Summarization paradigms address the context window constraint by replacing raw source code
+with compact natural language or structured summaries of repository components. Rather than
+injecting hundreds of lines of source code into the LLM's context, a summarization system
+injects a brief, information-dense description of what each component does, its interface, and
+its key dependencies. The hypothesis is that a well-designed summary can preserve the semantic
+content needed for the task at a fraction of the token cost.
+
+\paragraph{Technical Mechanisms.}
+Dhulshette et al.~\cite{dhulshette2025hierarchical} propose a three-level hierarchical
+summarization scheme for business applications: function-level summaries describe individual
+methods, class-level summaries aggregate function summaries into cohesive module descriptions,
+and repository-level summaries provide a navigational overview of the entire codebase.
+These summaries are generated using locally deployed LLMs to address data privacy requirements
+in enterprise settings. Makharev and Ivanov~\cite{makharev2025code} extend code summarization
+beyond the function level by developing techniques for class-level and module-level abstraction,
+demonstrating that summarization at higher levels of granularity captures architectural
+patterns invisible at the function level.
+
+Oskooei et al.~\cite{oskooei2025natural} apply summarization specifically to the problem of
+multi-repository bug localization in microservice architectures. Rather than analyzing all
+services in full detail, their system generates natural language summaries of each
+microservice's responsibilities and exposes these to a coordinating LLM that reasons about
+which service is most likely responsible for an observed failure.
+
+LongCodeZip~\cite{shi2025longcodezip} takes a compression rather than summarization approach:
+rather than generating a semantic summary, it learns a compression function that maps a long
+code context to a shorter sequence of tokens that preserves the information most relevant to
+the current task. This compression is learned end-to-end and achieves better reconstruction
+fidelity than fixed summarization rules.
+
+Ahmed et al.~\cite{ahmed2024automatic} address the prompt augmentation direction: given a
+function for which a summary is desired, they automatically augment the LLM's prompt with
+semantically similar code examples retrieved from the repository, which substantially improves
+the quality of generated summaries.
+
+\paragraph{Strengths and Limitations.}
+Summarization paradigms are uniquely suited to scenarios in which the repository is too large
+to index efficiently with dense embeddings and too complex to be navigated by an automated
+agent. When a repository contains hundreds of libraries and services, even the most
+sophisticated retrieval system will struggle to surface relevant context without a coarse-grained
+navigational structure. Summaries provide exactly this coarse-grained structure.
+
+The primary limitation is information loss: a summary cannot perfectly capture the implementation
+details that may be needed for tasks such as precise type checking or low-level optimization.
+Moreover, summarization quality depends critically on the quality of the LLM used to generate
+the summaries: a summary generator that misunderstands a function's side effects will introduce
+systematic misinformation into the repository representation.
+
+\subsection{\parcmd{6}: Memory-Augmented Agent Architectures}
+\label{subsec:par6}
+
+\paragraph{Definition and Rationale.}
+Memory-augmented architectures equip LLM-based agents with an external memory system that
+persists observations, intermediate results, and task history across multiple inference steps.
+This paradigm addresses a fundamental limitation of stateless LLM inference: when an agent
+must navigate a repository over dozens of steps, the information accumulated in early steps
+cannot fit in the context window by the time later steps are reached. External memory provides
+a scalable solution by storing past observations in a structured format and retrieving the most
+relevant ones on demand.
+
+\paragraph{Technical Mechanisms.}
+OpenHands~\cite{wang2025openhands} provides a general-purpose platform for AI software
+development agents that includes a persistent event stream representing the agent's history of
+observations, actions, and LLM outputs. The event stream serves as an episodic memory: at each
+step, the agent retrieves the most recent and most relevant events to include in its context.
+CodeMEM~\cite{wang2026codemem} specializes this idea for repository-level code generation,
+using AST-guided memory organization that groups stored code fragments by their structural
+role (type definitions, utility functions, main logic) to enable role-aware retrieval.
+
+SWE-GPT~\cite{ma2025swegpt} is a process-centric approach in which the agent maintains a
+structured task log recording the hypothesis, evidence, and conclusions from each investigation
+step. This log serves as both an explicit reasoning trace and a compressed representation of
+the repository knowledge accumulated during the session. SWE-Exp~\cite{chen2025sweexp}
+maintains a cross-task experience repository that accumulates successfully resolved issue
+patterns and applies them to guide the resolution of new issues via analogy.
+
+MetaGPT~\cite{hong2023metagpt} extends the memory paradigm to multi-agent settings, where
+different specialized agents (Product Manager, Architect, Engineer, QA) maintain role-specific
+memory and communicate through a shared blackboard. The shared blackboard functions as a
+collective memory of the software development process, accumulating design decisions,
+implementation artifacts, and test results.
+
+\paragraph{Strengths and Limitations.}
+Memory-augmented architectures are the only paradigm that scales gracefully to multi-session
+or multi-day software engineering tasks in which the agent must maintain coherent understanding
+of a complex, evolving repository across hundreds of inference steps. They also support
+\emph{transfer} of knowledge between tasks: an agent that has successfully resolved a similar
+issue in the past can apply that experience to a new issue without reanalyzing the repository
+from scratch.
+
+The primary limitation is that memory management is itself a hard problem. Naive episodic
+memory systems quickly become cluttered with irrelevant or outdated information, and retrieving
+the right memory at the right time requires essentially the same information retrieval capability
+as retrieving relevant code snippets---the problem has been deferred rather than solved.
+Additionally, the persistence of incorrect information in memory can compound errors over
+multiple steps.
+
+\subsection{\parcmd{7}: Multi-Step Agentic Frameworks}
+\label{subsec:par7}
+
+\paragraph{Definition and Rationale.}
+Agentic frameworks treat repository representation not as a static encoding problem but as
+a dynamic, interactive process in which an LLM-based agent actively navigates the repository
+using tools such as file readers, code search engines, symbol resolvers, and test runners.
+Rather than pre-computing a fixed representation before inference begins, the agent constructs
+its representation on-the-fly by selecting which parts of the repository to examine, in what
+order, and at what level of detail. This paradigm is the most general and the most
+computationally expensive, but also the most capable on complex, open-ended tasks.
+
+\paragraph{Technical Mechanisms.}
+SWE-agent~\cite{yang2024sweagent} introduced the Agent-Computer Interface (ACI) concept:
+a thin layer of tools that exposes repository navigation (file system traversal, grep, open,
+scroll) and code manipulation (edit, run, test) to an LLM agent. The ACI is designed to
+minimize the cognitive load on the LLM by providing high-level operations rather than raw
+file system calls. AutoCodeRover~\cite{zhang2024autocoderover} specializes the agent for
+program improvement by combining ACI-style tool use with a spectral analysis module that
+maintains a formal model of the program's AST and uses it to guide search.
+
+OpenHands~\cite{wang2025openhands} provides a comprehensive open-source platform that
+supports multiple agent architectures (CodeAct, SWEAgent, MonarchaAgent) and environments
+(Docker containers, browser, file system). Its modular design has made it the de facto
+evaluation platform for LLM-based software engineering agents, with dozens of papers reporting
+results using its infrastructure.
+
+For issue resolution, the SWE-bench benchmark~\cite{jimenez2024swebench} has driven rapid
+progress in agentic frameworks. LingmaAgent~\cite{ma2025lingma} introduces a hierarchical
+exploration strategy that first builds a high-level map of the repository structure, then
+drills down into suspicious modules, and finally performs targeted code analysis. Prometheus~\cite{pan2026prometheus}
+addresses long-horizon navigation by maintaining a probabilistic model of which repository
+regions have been explored and which remain uninvestigated, enabling systematic coverage of
+large codebases.
+
+SWE-Search~\cite{antoniades2024swesearch} applies Monte Carlo Tree Search (MCTS) to the
+repository navigation problem, treating each tool call as a tree node and using rollout
+simulations to estimate the value of different exploration paths. This significantly improves
+exploration efficiency compared to greedy strategies.
+
+Training software engineering agents has emerged as a distinct research direction.
+SWE-Gym~\cite{pan2025training} provides a gymnasium-style training environment for software
+engineering agents, with executable Python repositories and test suites as the reward signal.
+SWE-RL~\cite{wei2025swerl} trains a policy model using open software evolution traces as
+training data, enabling the model to learn efficient repository navigation from human expert
+trajectories.
+
+\paragraph{Strengths and Limitations.}
+Agentic frameworks are uniquely capable of handling tasks that require flexible, adaptive
+exploration of a repository: complex bug localization with partial information, feature
+implementation that requires understanding multiple interacting subsystems, and cross-repository
+tasks such as microservice integration. Their adaptive nature means they can in principle apply
+appropriate representation strategies at each step.
+
+The primary limitations are latency and cost. A complex agentic framework may make dozens of
+LLM calls before producing a final answer, each adding to the total response time and
+inference cost. The agent's behavior can also be brittle: small perturbations in the prompt
+or the repository structure can cause the agent to take wildly different exploration paths,
+leading to inconsistent results. Hallucination remains a concern: agents can commit to
+incorrect hypotheses early in the exploration and subsequently misinterpret evidence that
+contradicts them.
+
+\subsection{Hybrid Paradigms}
+\label{subsec:hybrid}
+
+A significant and growing fraction of the literature (approximately 38\% of studies) combines
+two or more PARs. The most common combinations are:
+
+\begin{itemize}
+  \item \parcmd{2} + \parcmd{3}: RAG retrieval guided by graph structure (e.g., GraphCoder,
+    RepoHyper, CodexGraph, GRACG~\cite{fedorov2025gracg});
+  \item \parcmd{7} + \parcmd{2}: Agentic framework using RAG for sub-task retrieval
+    (e.g., LingmaAgent, Prometheus);
+  \item \parcmd{7} + \parcmd{4}: Agentic framework with execution feedback
+    (e.g., RepairAgent, SWE-RL, SWE-Gym);
+  \item \parcmd{5} + \parcmd{2}: Summarization-augmented RAG where coarse summaries guide
+    fine-grained retrieval (e.g., LingmaAgent's hierarchical exploration).
+\end{itemize}
+
+Hybridization generally improves performance at the cost of increased system complexity and
+engineering overhead. We observe a trend toward increasing hybridization: in 2020--2022, fewer
+than 15\% of studies employed hybrid approaches; by 2025, this had risen to over 50\%.
